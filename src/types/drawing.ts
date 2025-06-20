@@ -1,30 +1,36 @@
 // Drawing tool types
-export enum DrawingTool {
-  SELECT = 'select',
-  PEN = 'pen',
-  RECTANGLE = 'rectangle',
-  CIRCLE = 'circle',
-  ARROW = 'arrow',
-  TEXT = 'text',
-  ERASER = 'eraser'
-}
+export const DrawingTool = {
+  SELECT: 'select',
+  PEN: 'pen',
+  RECTANGLE: 'rectangle',
+  CIRCLE: 'circle',
+  ARROW: 'arrow',
+  TEXT: 'text',
+  ERASER: 'eraser'
+} as const;
+
+export type DrawingTool = typeof DrawingTool[keyof typeof DrawingTool];
 
 // Drawing modes
-export enum DrawingMode {
-  NONE = 'none',
-  DRAWING = 'drawing',
-  EDITING = 'editing',
-  MOVING = 'moving',
-  RESIZING = 'resizing'
-}
+export const DrawingMode = {
+  NONE: 'none',
+  DRAWING: 'drawing',
+  EDITING: 'editing',
+  MOVING: 'moving',
+  RESIZING: 'resizing'
+} as const;
+
+export type DrawingMode = typeof DrawingMode[keyof typeof DrawingMode];
 
 // Layer operations
-export enum LayerOperation {
-  BRING_TO_FRONT = 'bringToFront',
-  BRING_FORWARD = 'bringForward',
-  SEND_BACKWARD = 'sendBackward',
-  SEND_TO_BACK = 'sendToBack'
-}
+export const LayerOperation = {
+  BRING_TO_FRONT: 'bringToFront',
+  BRING_FORWARD: 'bringForward',
+  SEND_BACKWARD: 'sendBackward',
+  SEND_TO_BACK: 'sendToBack'
+} as const;
+
+export type LayerOperation = typeof LayerOperation[keyof typeof LayerOperation];
 
 // Point type
 export interface Point {

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Stage, Layer, Image as KonvaImage } from 'react-konva'
 import Konva from 'konva'
 import { ImageUploader } from '@/components/ImageUploader'
+import { DrawingToolbar } from '@/components/Toolbar'
 import { useImage } from '@/hooks/useImage'
 import { useHistory } from '@/hooks/useHistory'
 import { calculateImageFit } from '@/utils/imageHelpers'
@@ -181,7 +182,7 @@ function App() {
                 borderTop: '1px solid #eee' 
               }} />
               
-              <p style={{ color: '#666', fontSize: '0.875rem' }}>Drawing tools coming soon...</p>
+              <DrawingToolbar />
             </>
           ) : (
             <p style={{ color: '#666' }}>Upload an image to get started</p>

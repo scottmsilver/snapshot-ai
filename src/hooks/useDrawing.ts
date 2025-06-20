@@ -4,13 +4,13 @@ import { useHistory } from '@/hooks/useHistory';
 import {
   DrawingTool,
   DrawingMode,
-  Point,
-  Shape,
-  PenShape,
-  RectShape,
-  CircleShape,
-  ArrowShape,
   LayerOperation,
+  type Point,
+  type Shape,
+  type PenShape,
+  type RectShape,
+  type CircleShape,
+  type ArrowShape,
 } from '@/types/drawing';
 
 export const useDrawing = () => {

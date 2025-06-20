@@ -1,11 +1,11 @@
-import React, { createContext, useContext, useReducer, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, type ReactNode } from 'react';
 import {
   DrawingTool,
   DrawingMode,
-  DrawingStyle,
-  DrawingState,
-  Shape,
-  Point,
+  type DrawingStyle,
+  type DrawingState,
+  type Shape,
+  type Point,
   LayerOperation,
   getNextZIndex,
   reorderShapes,
