@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { Layer, Line, Rect, Circle, Arrow, Text, Group, Transformer } from 'react-konva';
+import React, { useEffect, useRef, useState } from 'react';
+import { Layer, Line, Rect, Circle, Arrow, Text, Transformer } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
 import { useSelectionMachine } from '@/hooks/useSelectionMachine';
@@ -48,11 +48,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     isTransforming,
     startTransform,
     endTransform,
+    startControlPointDrag,
+    endControlPointDrag,
+    isDraggingControlPoint,
   } = useSelectionMachine();
   
   const transformerRef = useRef<Konva.Transformer>(null);
   const selectedShapeRefs = useRef<Map<string, Konva.Node>>(new Map());
   const isTransformingRef = useRef(false);
+  const isDraggingControlPointRef = useRef(false);
+  const [draggedArrowId, setDraggedArrowId] = useState<string | null>(null);
+  const [, forceUpdate] = useState({});
+  
+  // Track which control point is being dragged (0 = start, 1 = end)
+  const [_draggingControlPointIndex, setDraggingControlPointIndex] = useState<number | null>(null);
 
   // Sync selection state with drawing context
   useEffect(() => {
@@ -73,6 +82,23 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       transformerRef.current.getLayer()?.batchDraw();
     }
   }, [selectedShapeIds]);
+  
+  // Force updates while dragging arrow
+  useEffect(() => {
+    if (!draggedArrowId) return;
+    
+    let animationId: number;
+    const updateFrame = () => {
+      forceUpdate({});
+      animationId = requestAnimationFrame(updateFrame);
+    };
+    
+    animationId = requestAnimationFrame(updateFrame);
+    
+    return () => {
+      cancelAnimationFrame(animationId);
+    };
+  }, [draggedArrowId]);
 
   // Set up mouse event handlers
   useEffect(() => {
@@ -95,12 +121,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       
       
       if (activeTool === DrawingTool.SELECT) {
-        if (clickedOnEmpty && !isTransformerClick) {
+        if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint) {
           // Check if we should start drag selection
           if (e.evt.button === 0) { // Left mouse button
             startDragSelection(pos);
           }
-        } else if (!isTransformerClick && e.target.id()) {
+        } else if (!isTransformerClick && e.target.id() && !isDraggingControlPoint) {
           // Shape clicks and dragging are handled by the shape's event handlers
         }
         return;
@@ -115,7 +141,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       }
 
       if (clickedOnEmpty) {
-        startDrawing(pos, e.evt);
+        startDrawing(pos, e.evt as any);
       }
     };
 
@@ -126,24 +152,24 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       if (activeTool === DrawingTool.SELECT) {
         // Handle hover
         const target = e.target;
-        if (target && target.id() && target.getClassName() !== 'Transformer') {
+        if (target && target.id() && target.getClassName() !== 'Transformer' && !isDraggingControlPoint) {
           handleShapeHover(target.id());
-        } else {
+        } else if (!isDraggingControlPoint) {
           handleShapeHover(null);
         }
         
         // Handle drag operations
-        if (isDragSelecting) {
+        if (isDragSelecting && !isDraggingControlPoint) {
           updateDragSelection(pos, shapes);
         }
         // Shape dragging is now handled by Konva's native dragging
       } else if (isDrawing) {
-        continueDrawing(pos, e.evt);
+        continueDrawing(pos, e.evt as any);
       }
     };
 
     const handleMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
-      // Check if we clicked on transformer anchors
+      // Check if we clicked on transformer anchors or control points
       const target = e.target;
       const targetName = target.name?.() || '';
       const targetClass = target.getClassName?.() || '';
@@ -151,8 +177,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                                 targetName.includes('_anchor') ||
                                 targetName.includes('rotater');
       
-      if (isTransformerClick) {
-        // Don't process mouseup from transformer handles
+      // Check if this is a control point (they're Circle shapes that are draggable)
+      const isControlPoint = targetClass === 'Circle' && target.draggable() && 
+                            target.getAttr('fill') && (target.getAttr('fill') === '#4a90e2' || target.getAttr('fill') === '#e24a4a');
+      
+      if (isTransformerClick || isControlPoint) {
+        // Don't process mouseup from transformer handles or control points
         return;
       }
       
@@ -164,14 +194,19 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         } else if (isTransformingRef.current) {
           // Don't deselect when finishing a transform
           return;
+        } else if (isDraggingControlPoint || isDraggingControlPointRef.current) {
+          // Don't deselect when finishing control point drag
+          return;
         } else if (e.target === stage || e.target.getLayer()) {
           // Click on empty space (not drag)
           handleEmptyClick();
         }
       } else if (isDrawing) {
         const pos = stage.getPointerPosition();
-        finishDrawing(pos || undefined, e.evt);
+        finishDrawing(pos || undefined, e.evt as any);
       }
+      
+      // Control point dragging is handled by state machine
     };
 
     // Add event listeners
@@ -232,6 +267,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     selectionContext,
     updateShape,
     deleteSelected,
+    isDraggingControlPoint,
+    startControlPointDrag,
+    endControlPointDrag,
+    onTextClick,
   ]);
 
   // Render temporary drawing preview
@@ -335,8 +374,22 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       
       // Update shape position based on its type
       if (shape.type === DrawingTool.PEN || shape.type === DrawingTool.ARROW) {
-        // For pen and arrow shapes, apply transform directly without updating data
-        // This allows Konva to handle the dragging naturally
+        // For pen and arrow shapes, we need to update the points array
+        const dx = newPosition.x;
+        const dy = newPosition.y;
+        
+        if ('points' in shape && Array.isArray(shape.points)) {
+          const newPoints = [...shape.points];
+          // Update all points by the drag offset
+          for (let i = 0; i < newPoints.length; i += 2) {
+            newPoints[i] += dx;
+            newPoints[i + 1] += dy;
+          }
+          updateShape(shape.id, { points: newPoints });
+          
+          // Reset the node position since we updated the points
+          node.position({ x: 0, y: 0 });
+        }
       } else {
         // For other shapes, update x/y position
         updateShape(shape.id, { 
@@ -351,7 +404,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       opacity: shape.style.opacity,
       visible: shape.visible,
       listening: true,
-      draggable: activeTool === DrawingTool.SELECT,
+      draggable: activeTool === DrawingTool.SELECT && !isDraggingControlPoint,
       onClick: (e: Konva.KonvaEventObject<MouseEvent>) => {
         if (activeTool === DrawingTool.SELECT) {
           const isSelected = selectedShapeIds.includes(shape.id);
@@ -373,11 +426,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           }
         }
       },
-      onTap: (e: Konva.KonvaEventObject<MouseEvent>) => {
+      onTap: (_e: Konva.KonvaEventObject<MouseEvent>) => {
         // Don't cancel bubble - let it reach stage mousedown handler
       },
       onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => {
         const isSelected = selectedShapeIds.includes(shape.id);
+        
+        // Track arrow dragging
+        if (shape.type === DrawingTool.ARROW) {
+          setDraggedArrowId(shape.id);
+        }
         
         // If shape is not selected, select it first
         if (!isSelected) {
@@ -399,6 +457,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       },
       onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => {
         const node = e.target;
+        
+        // Force update for arrow dragging
+        if (shape.type === DrawingTool.ARROW) {
+          // The animation frame in useEffect will handle updates
+        }
         
         // Mark that drag occurred (to prevent click after drag)
         const dragDistance = Math.abs(node.x() - (node.attrs._dragStartX || node.x())) + 
@@ -431,6 +494,45 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       },
       onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
         handleDragEnd(e);
+        
+        // Clear arrow dragging state
+        if (shape.type === DrawingTool.ARROW) {
+          setDraggedArrowId(null);
+        }
+        
+        // Handle multi-shape drag end
+        if (selectedShapeIds.length > 1) {
+          const dx = e.target.x() - (e.target.attrs._dragStartX || e.target.x());
+          const dy = e.target.y() - (e.target.attrs._dragStartY || e.target.y());
+          
+          // Update positions for all other selected shapes
+          selectedShapeIds.forEach(id => {
+            if (id !== shape.id) {
+              const otherShape = shapes.find(s => s.id === id);
+              const otherNode = selectedShapeRefs.current.get(id);
+              
+              if (otherShape && otherNode) {
+                if (otherShape.type === DrawingTool.PEN || otherShape.type === DrawingTool.ARROW) {
+                  // For pen and arrow shapes, update points
+                  if ('points' in otherShape && Array.isArray(otherShape.points)) {
+                    const newPoints = [...otherShape.points];
+                    for (let i = 0; i < newPoints.length; i += 2) {
+                      newPoints[i] += dx;
+                      newPoints[i + 1] += dy;
+                    }
+                    updateShape(id, { points: newPoints });
+                    otherNode.position({ x: 0, y: 0 });
+                  }
+                } else {
+                  // For other shapes, update position
+                  const newPos = otherNode.position();
+                  updateShape(id, { x: newPos.x, y: newPos.y });
+                }
+              }
+            }
+          });
+        }
+        
         if (isDraggingShape) {
           endDragShape();
         }
@@ -470,6 +572,35 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             hitStrokeWidth={Math.max(penShape.style.strokeWidth, 10)}
             ref={(node) => {
               if (node) {
+                // Add custom getSelfRect for line to help Transformer
+                node.getSelfRect = function() {
+                  const points = this.points();
+                  if (!points || points.length < 2) {
+                    return { x: 0, y: 0, width: 0, height: 0 };
+                  }
+                  
+                  let minX = Infinity, minY = Infinity;
+                  let maxX = -Infinity, maxY = -Infinity;
+                  
+                  for (let i = 0; i < points.length; i += 2) {
+                    minX = Math.min(minX, points[i]);
+                    maxX = Math.max(maxX, points[i]);
+                    minY = Math.min(minY, points[i + 1]);
+                    maxY = Math.max(maxY, points[i + 1]);
+                  }
+                  
+                  // Add padding based on stroke width
+                  const strokeWidth = this.strokeWidth() || 1;
+                  const padding = strokeWidth * 2;
+                  
+                  return {
+                    x: minX - padding,
+                    y: minY - padding,
+                    width: maxX - minX + padding * 2,
+                    height: maxY - minY + padding * 2
+                  };
+                };
+                
                 selectedShapeRefs.current.set(shape.id, node);
               } else {
                 selectedShapeRefs.current.delete(shape.id);
@@ -529,11 +660,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
 
       case DrawingTool.ARROW:
         const arrowShape = shape as ArrowShape;
+        // Get current points - either from dragging or from shape data
+        const currentPoints = arrowShape.points;
+        
         return (
           <Arrow
             key={shape.id}
             {...commonProps}
-            points={arrowShape.points}
+            points={currentPoints}
             stroke={arrowShape.style.stroke}
             strokeWidth={arrowShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
             pointerLength={arrowShape.pointerLength}
@@ -541,6 +675,36 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             hitStrokeWidth={Math.max(arrowShape.style.strokeWidth, 10)}
             ref={(node) => {
               if (node) {
+                // Add custom getSelfRect for arrow to help Transformer
+                node.getSelfRect = function() {
+                  const points = this.points();
+                  if (!points || points.length < 4) {
+                    return { x: 0, y: 0, width: 0, height: 0 };
+                  }
+                  
+                  let minX = Infinity, minY = Infinity;
+                  let maxX = -Infinity, maxY = -Infinity;
+                  
+                  for (let i = 0; i < points.length; i += 2) {
+                    minX = Math.min(minX, points[i]);
+                    maxX = Math.max(maxX, points[i]);
+                    minY = Math.min(minY, points[i + 1]);
+                    maxY = Math.max(maxY, points[i + 1]);
+                  }
+                  
+                  // Add padding for the arrow head
+                  const pointerLength = this.pointerLength() || 10;
+                  const pointerWidth = this.pointerWidth() || 10;
+                  const padding = Math.max(pointerLength, pointerWidth);
+                  
+                  return {
+                    x: minX - padding,
+                    y: minY - padding,
+                    width: maxX - minX + padding * 2,
+                    height: maxY - minY + padding * 2
+                  };
+                };
+                
                 selectedShapeRefs.current.set(shape.id, node);
               } else {
                 selectedShapeRefs.current.delete(shape.id);
@@ -590,6 +754,165 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     }
   };
 
+  // Render arrow control points
+  const renderArrowControlPoints = () => {
+    
+    if (activeTool !== DrawingTool.SELECT || selectedShapeIds.length !== 1) {
+      return null;
+    }
+
+    const selectedShape = shapes.find(s => s.id === selectedShapeIds[0]);
+    if (!selectedShape || selectedShape.type !== DrawingTool.ARROW) {
+      return null;
+    }
+    
+    // Don't show control points if we're transforming
+    if (isTransforming) {
+      return null;
+    }
+    
+    // Force update when arrow is being dragged
+    // This ensures control points follow the arrow
+
+    const arrowShape = selectedShape as ArrowShape;
+    const arrowNode = selectedShapeRefs.current.get(arrowShape.id);
+    if (!arrowNode) return null;
+    
+    // Get the arrow's current position (changes during drag)
+    const nodePos = arrowNode.position();
+    const [x1, y1, x2, y2] = arrowShape.points;
+    
+    
+    // Add the node's current position to get actual control point positions
+    const actualX1 = x1 + nodePos.x;
+    const actualY1 = y1 + nodePos.y;
+    const actualX2 = x2 + nodePos.x;
+    const actualY2 = y2 + nodePos.y;
+
+    const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>) => {
+      const pos = e.target.position();
+      const newPoints: [number, number, number, number] = [...arrowShape.points];
+      
+      // Subtract the arrow node's position to get relative coordinates
+      const relativeX = pos.x - nodePos.x;
+      const relativeY = pos.y - nodePos.y;
+      
+      if (index === 0) {
+        // Update start point
+        newPoints[0] = relativeX;
+        newPoints[1] = relativeY;
+      } else {
+        // Update end point
+        newPoints[2] = relativeX;
+        newPoints[3] = relativeY;
+      }
+      
+      // Update the arrow shape immediately for real-time feedback
+      updateShape(arrowShape.id, { points: newPoints });
+    };
+    
+    const handleControlPointDragEnd = (_index: number, _e: Konva.KonvaEventObject<DragEvent>) => {
+      setTimeout(() => {
+        isDraggingControlPointRef.current = false;
+        endControlPointDrag();
+      }, 50);
+    };
+
+    return (
+      <>
+        {/* Visual guide line */}
+        <Line
+          points={[actualX1, actualY1, actualX2, actualY2]}
+          stroke="#4a90e2"
+          strokeWidth={1}
+          dash={[5, 5]}
+          opacity={0.5}
+          listening={false}
+        />
+        
+        {/* Tail control point (blue - arrow start) */}
+        <Circle
+          x={actualX1}
+          y={actualY1}
+          radius={8}
+          fill="#4a90e2"
+          stroke="white"
+          strokeWidth={2}
+          shadowColor="rgba(0,0,0,0.3)"
+          shadowBlur={5}
+          shadowOffset={{ x: 1, y: 1 }}
+          draggable={true}
+          onClick={(e) => {
+            e.cancelBubble = true;
+          }}
+          onDragStart={(e) => {
+            e.cancelBubble = true;
+            isDraggingControlPointRef.current = true;
+            setDraggingControlPointIndex(0);
+            startControlPointDrag();
+          }}
+          onDragEnd={(e) => {
+            e.cancelBubble = true;
+            handleControlPointDragEnd(0, e);
+          }}
+          onDragMove={(e) => handleControlPointDragMove(0, e)}
+          onMouseEnter={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'move';
+            }
+          }}
+          onMouseLeave={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'default';
+            }
+          }}
+        />
+        
+        {/* Head control point (red - arrow head where pointer is) */}
+        <Circle
+          x={actualX2}
+          y={actualY2}
+          radius={8}
+          fill="#e24a4a"
+          stroke="white"
+          strokeWidth={2}
+          shadowColor="rgba(0,0,0,0.3)"
+          shadowBlur={5}
+          shadowOffset={{ x: 1, y: 1 }}
+          draggable={true}
+          onClick={(e) => {
+            e.cancelBubble = true;
+          }}
+          onDragStart={(e) => {
+            e.cancelBubble = true;
+            isDraggingControlPointRef.current = true;
+            setDraggingControlPointIndex(1);
+            startControlPointDrag();
+          }}
+          onDragEnd={(e) => {
+            e.cancelBubble = true;
+            handleControlPointDragEnd(1, e);
+          }}
+          onDragMove={(e) => handleControlPointDragMove(1, e)}
+          onMouseEnter={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'move';
+            }
+          }}
+          onMouseLeave={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'default';
+            }
+          }}
+        />
+      </>
+    );
+  };
+
   return (
     <Layer>
       {/* Render all shapes in z-order */}
@@ -628,13 +951,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           anchorSize={8}
           rotateEnabled={true}
           enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
-          ignoreStroke={true}
+          ignoreStroke={false}
           keepRatio={false}
+          boundBoxFunc={(oldBox, newBox) => {
+            // Prevent negative width/height which can cause issues with arrows
+            if (newBox.width < 5 || newBox.height < 5) {
+              return oldBox;
+            }
+            return newBox;
+          }}
           onTransformStart={() => {
             isTransformingRef.current = true;
             startTransform();
           }}
-          onTransform={(e) => {
+          onTransform={(_e) => {
             // Live update during transform - optional for visual feedback
             const nodes = transformerRef.current?.nodes();
             if (nodes) {
@@ -643,7 +973,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               });
             }
           }}
-          onTransformEnd={(e) => {
+          onTransformEnd={(_e) => {
             // End transform state
             setTimeout(() => {
               isTransformingRef.current = false;
@@ -731,6 +1061,48 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                 node.x(x);
                 node.y(y);
                 node.rotation(rotation);
+                
+              } else if (shape.type === DrawingTool.ARROW || shape.type === DrawingTool.PEN) {
+                // For arrow and pen shapes, apply scale to points
+                if ('points' in shape && Array.isArray(shape.points)) {
+                  const transformedPoints = [...shape.points];
+                  
+                  // Apply scale and rotation to points
+                  for (let i = 0; i < transformedPoints.length; i += 2) {
+                    const px = transformedPoints[i] * scaleX;
+                    const py = transformedPoints[i + 1] * scaleY;
+                    
+                    // Apply rotation if needed
+                    if (rotation !== 0) {
+                      const rad = (rotation * Math.PI) / 180;
+                      const cos = Math.cos(rad);
+                      const sin = Math.sin(rad);
+                      transformedPoints[i] = px * cos - py * sin;
+                      transformedPoints[i + 1] = px * sin + py * cos;
+                    } else {
+                      transformedPoints[i] = px;
+                      transformedPoints[i + 1] = py;
+                    }
+                  }
+                  
+                  // Add the node position to all points
+                  for (let i = 0; i < transformedPoints.length; i += 2) {
+                    transformedPoints[i] += x;
+                    transformedPoints[i + 1] += y;
+                  }
+                  
+                  updateShape(shapeId, {
+                    points: transformedPoints,
+                    rotation: 0 // Reset rotation since it's baked into points
+                  });
+                  
+                  // Reset transform and position
+                  node.scaleX(1);
+                  node.scaleY(1);
+                  node.x(0);
+                  node.y(0);
+                  node.rotation(0);
+                }
               }
             } catch (error) {
               console.error('Error updating shape after transform:', error);
@@ -742,6 +1114,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           }}
           />
         )}
-      </Layer>
-    );
+        
+      {/* Render arrow control points */}
+      {renderArrowControlPoints()}
+    </Layer>
+  );
 };

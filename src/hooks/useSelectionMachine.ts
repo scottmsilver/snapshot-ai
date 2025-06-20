@@ -41,7 +41,9 @@ type Action =
   | { type: typeof SelectionAction.END_DRAG_SHAPE }
   | { type: typeof SelectionAction.CANCEL_DRAG }
   | { type: typeof SelectionAction.START_TRANSFORM }
-  | { type: typeof SelectionAction.END_TRANSFORM };
+  | { type: typeof SelectionAction.END_TRANSFORM }
+  | { type: typeof SelectionAction.START_CONTROL_POINT_DRAG }
+  | { type: typeof SelectionAction.END_CONTROL_POINT_DRAG };
 
 // Reducer that uses the state machine configuration
 function selectionReducer(context: SelectionContext, action: Action): SelectionContext {
@@ -152,6 +154,14 @@ function selectionReducer(context: SelectionContext, action: Action): SelectionC
       
     case SelectionAction.END_TRANSFORM:
       // Transformer operation completed
+      break;
+      
+    case SelectionAction.START_CONTROL_POINT_DRAG:
+      // Control point dragging started
+      break;
+      
+    case SelectionAction.END_CONTROL_POINT_DRAG:
+      // Control point dragging ended
       break;
   }
 
@@ -338,6 +348,14 @@ export function useSelectionMachine() {
     dispatch({ type: SelectionAction.END_TRANSFORM });
   }, []);
 
+  const startControlPointDrag = useCallback(() => {
+    dispatch({ type: SelectionAction.START_CONTROL_POINT_DRAG });
+  }, []);
+
+  const endControlPointDrag = useCallback(() => {
+    dispatch({ type: SelectionAction.END_CONTROL_POINT_DRAG });
+  }, []);
+
   return {
     // Context
     context,
@@ -350,6 +368,7 @@ export function useSelectionMachine() {
     isDragSelecting: context.state === SelectionState.DRAG_SELECTING,
     isDraggingShape: context.state === SelectionState.DRAGGING_SHAPE,
     isTransforming: context.state === SelectionState.TRANSFORMING,
+    isDraggingControlPoint: context.state === SelectionState.DRAGGING_CONTROL_POINT,
     
     // Actions
     handleShapeHover,
@@ -366,6 +385,8 @@ export function useSelectionMachine() {
     clearSelection,
     startTransform,
     endTransform,
+    startControlPointDrag,
+    endControlPointDrag,
     
     // Direct state access
     hoveredShapeId: context.hoveredShapeId,

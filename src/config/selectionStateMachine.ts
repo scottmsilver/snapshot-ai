@@ -223,6 +223,32 @@ export const selectionStateMachine: Record<SelectionState, StateConfig> = {
       },
     ],
   },
+
+  [SelectionState.DRAGGING_CONTROL_POINT]: {
+    onEnter: (context) => {
+      context.isDragging = true;
+    },
+    onExit: (context) => {
+      context.isDragging = false;
+    },
+    transitions: [
+      {
+        action: SelectionAction.END_CONTROL_POINT_DRAG,
+        target: SelectionState.SINGLE_SELECTED,
+        condition: (context) => context.selectedShapeIds.length === 1,
+      },
+      {
+        action: SelectionAction.END_CONTROL_POINT_DRAG,
+        target: SelectionState.MULTI_SELECTED,
+        condition: (context) => context.selectedShapeIds.length > 1,
+      },
+      {
+        action: SelectionAction.CANCEL_DRAG,
+        target: SelectionState.SINGLE_SELECTED,
+        condition: (context) => context.selectedShapeIds.length === 1,
+      },
+    ],
+  },
 };
 
 // Helper function to get next state from current state and action

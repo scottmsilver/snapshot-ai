@@ -8,6 +8,7 @@ export const SelectionState = {
   DRAG_SELECTING: 'drag_selecting',
   DRAGGING_SHAPE: 'dragging_shape',
   TRANSFORMING: 'transforming',
+  DRAGGING_CONTROL_POINT: 'dragging_control_point',
 } as const;
 
 export type SelectionState = typeof SelectionState[keyof typeof SelectionState];
@@ -63,6 +64,10 @@ export const SelectionAction = {
   // Transformer
   START_TRANSFORM: 'START_TRANSFORM',
   END_TRANSFORM: 'END_TRANSFORM',
+  
+  // Control points
+  START_CONTROL_POINT_DRAG: 'START_CONTROL_POINT_DRAG',
+  END_CONTROL_POINT_DRAG: 'END_CONTROL_POINT_DRAG',
 } as const;
 
 export type SelectionAction = typeof SelectionAction[keyof typeof SelectionAction];
