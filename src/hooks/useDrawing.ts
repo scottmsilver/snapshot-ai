@@ -40,10 +40,14 @@ export const useDrawing = () => {
 
   // Save current state to history
   const saveToHistory = useCallback((description?: string) => {
-    // We'll implement this when we have the stage reference
-    // For now, just log
-    console.log('Would save to history:', description);
-  }, [pushState]);
+    // For now, we save a simple representation of shapes
+    // Later we can enhance this with full stage serialization
+    const stateData = JSON.stringify({
+      shapes: state.shapes,
+      timestamp: Date.now()
+    });
+    pushState(stateData, description);
+  }, [pushState, state.shapes]);
 
   // Start drawing based on current tool
   const startDrawing = useCallback((point: Point, event?: React.MouseEvent) => {

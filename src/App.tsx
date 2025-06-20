@@ -3,15 +3,19 @@ import { Stage, Layer, Image as KonvaImage } from 'react-konva'
 import Konva from 'konva'
 import { ImageUploader } from '@/components/ImageUploader'
 import { DrawingToolbar } from '@/components/Toolbar'
+import { DrawingLayer } from '@/components/Canvas/DrawingLayer'
 import { useImage } from '@/hooks/useImage'
 import { useHistory } from '@/hooks/useHistory'
+import { useDrawing } from '@/hooks/useDrawing'
 import { calculateImageFit } from '@/utils/imageHelpers'
+import { saveStageState, restoreStageState } from '@/utils/stageHelpers'
 
 function App() {
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
   const stageRef = useRef<Konva.Stage>(null)
   const { imageData, loadImage, clearImage } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
+  const { shapes, activeTool } = useDrawing()
   const { 
     canUndo, 
     canRedo, 
@@ -209,7 +213,8 @@ function App() {
               ref={stageRef}
               style={{
                 border: '1px solid #ddd',
-                backgroundColor: '#fafafa'
+                backgroundColor: '#fafafa',
+                cursor: activeTool === 'select' ? 'default' : 'crosshair'
               }}
             >
               <Layer>
@@ -226,6 +231,9 @@ function App() {
                   );
                 })()}
               </Layer>
+              
+              {/* Drawing Layer for annotations */}
+              <DrawingLayer stageRef={stageRef} />
             </Stage>
           )}
         </section>
