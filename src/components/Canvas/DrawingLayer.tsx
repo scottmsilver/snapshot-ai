@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Layer, Line, Rect, Circle, Arrow, Text, Group, Transformer } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
+import { useSelectionMachine } from '@/hooks/useSelectionMachine';
 import { DrawingTool } from '@/types/drawing';
 import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, Point } from '@/types/drawing';
 
@@ -18,18 +19,45 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     isDrawing,
     shapes,
     tempPoints,
-    selectedShapeIds,
     startDrawing,
     continueDrawing,
     finishDrawing,
     getSortedShapes,
-    selectShape,
-    clearSelection,
     updateShape,
+    deleteSelected,
+    selectMultiple,
   } = useDrawing();
+  
+  const {
+    context: selectionContext,
+    handleShapeClick,
+    handleEmptyClick,
+    handleShapeHover,
+    startDragSelection,
+    updateDragSelection,
+    endDragSelection,
+    startDragShape,
+    updateDragShape,
+    endDragShape,
+    cancelDrag,
+    selectedShapeIds,
+    hoveredShapeId,
+    selectionBox,
+    isDragSelecting,
+    isDraggingShape,
+    isTransforming,
+    startTransform,
+    endTransform,
+  } = useSelectionMachine();
   
   const transformerRef = useRef<Konva.Transformer>(null);
   const selectedShapeRefs = useRef<Map<string, Konva.Node>>(new Map());
+  const isTransformingRef = useRef(false);
+
+  // Sync selection state with drawing context
+  useEffect(() => {
+    selectMultiple(selectedShapeIds);
+  }, [selectedShapeIds, selectMultiple]);
 
   // Update transformer when selection changes
   useEffect(() => {
@@ -56,7 +84,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       if (!pos) return;
 
       // Check if clicking on empty space (no shape)
-      const clickedOnEmpty = e.target === stage || e.target.getLayer();
+      const clickedOnEmpty = e.target === stage || e.target.getLayer() === stage.findOne('Layer');
       
       // Check if clicking on transformer or its anchors
       const targetName = e.target.name?.() || '';
@@ -68,7 +96,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       
       if (activeTool === DrawingTool.SELECT) {
         if (clickedOnEmpty && !isTransformerClick) {
-          clearSelection();
+          // Check if we should start drag selection
+          if (e.evt.button === 0) { // Left mouse button
+            startDragSelection(pos);
+          }
+        } else if (!isTransformerClick) {
+          // Check if we clicked on a shape
+          const target = e.target;
+          const shapeId = target.id();
+          
+          // Shape clicks are now handled by the shape's onClick handler
         }
         return;
       }
@@ -90,13 +127,67 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       const pos = stage.getPointerPosition();
       if (!pos) return;
 
-      if (isDrawing) {
+      if (activeTool === DrawingTool.SELECT) {
+        // Handle hover
+        const target = e.target;
+        if (target && target.id() && target.getClassName() !== 'Transformer') {
+          handleShapeHover(target.id());
+        } else {
+          handleShapeHover(null);
+        }
+        
+        // Handle drag operations
+        if (isDragSelecting) {
+          updateDragSelection(pos, shapes);
+        } else if (isDraggingShape) {
+          updateDragShape(pos);
+          
+          // Update shape positions
+          const dx = pos.x - (selectionContext.dragStartPoint?.x || 0);
+          const dy = pos.y - (selectionContext.dragStartPoint?.y || 0);
+          
+          selectedShapeIds.forEach(shapeId => {
+            const initialPos = selectionContext.initialShapePositions.get(shapeId);
+            if (initialPos) {
+              updateShape(shapeId, {
+                x: initialPos.x + dx,
+                y: initialPos.y + dy,
+              });
+            }
+          });
+        }
+      } else if (isDrawing) {
         continueDrawing(pos, e.evt);
       }
     };
 
     const handleMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
-      if (isDrawing) {
+      // Check if we clicked on transformer anchors
+      const target = e.target;
+      const targetName = target.name?.() || '';
+      const targetClass = target.getClassName?.() || '';
+      const isTransformerClick = targetClass === 'Transformer' || 
+                                targetName.includes('_anchor') ||
+                                targetName.includes('rotater');
+      
+      if (isTransformerClick) {
+        // Don't process mouseup from transformer handles
+        return;
+      }
+      
+      if (activeTool === DrawingTool.SELECT) {
+        if (isDragSelecting) {
+          endDragSelection();
+        } else if (isDraggingShape) {
+          endDragShape();
+        } else if (isTransformingRef.current) {
+          // Don't deselect when finishing a transform
+          return;
+        } else if (e.target === stage || e.target.getLayer()) {
+          // Click on empty space (not drag)
+          handleEmptyClick();
+        }
+      } else if (isDrawing) {
         const pos = stage.getPointerPosition();
         finishDrawing(pos || undefined, e.evt);
       }
@@ -106,21 +197,60 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     stage.on('mousedown touchstart', handleMouseDown);
     stage.on('mousemove touchmove', handleMouseMove);
     stage.on('mouseup touchend', handleMouseUp);
+    
+    // Keyboard handler for escape and delete
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      if (e.key === 'Escape') {
+        if (isDragSelecting || isDraggingShape) {
+          cancelDrag();
+        }
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeIds.length > 0) {
+        e.preventDefault();
+        deleteSelected();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
 
     // Cleanup
     return () => {
       stage.off('mousedown touchstart', handleMouseDown);
       stage.off('mousemove touchmove', handleMouseMove);
       stage.off('mouseup touchend', handleMouseUp);
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [
     stageRef,
     activeTool,
     isDrawing,
+    shapes,
     startDrawing,
     continueDrawing,
     finishDrawing,
-    clearSelection,
+    handleShapeClick,
+    handleEmptyClick,
+    handleShapeHover,
+    startDragSelection,
+    updateDragSelection,
+    endDragSelection,
+    startDragShape,
+    updateDragShape,
+    endDragShape,
+    cancelDrag,
+    isDragSelecting,
+    isDraggingShape,
+    isTransforming,
+    startTransform,
+    endTransform,
+    selectedShapeIds,
+    selectionContext,
+    updateShape,
+    deleteSelected,
   ]);
 
   // Render temporary drawing preview
@@ -216,6 +346,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
   // Render a shape based on its type
   const renderShape = (shape: Shape) => {
     const isSelected = selectedShapeIds.includes(shape.id);
+    const isHovered = hoveredShapeId === shape.id && activeTool === DrawingTool.SELECT;
     
     const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
       const node = e.target;
@@ -239,23 +370,33 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       opacity: shape.style.opacity,
       visible: shape.visible,
       listening: true,
-      draggable: activeTool === DrawingTool.SELECT && isSelected,
-      onClick: () => {
+      draggable: false, // We handle dragging manually now
+      onClick: (e: Konva.KonvaEventObject<MouseEvent>) => {
         if (activeTool === DrawingTool.SELECT) {
-          selectShape(shape.id, false);
+          const isSelected = selectedShapeIds.includes(shape.id);
+          
+          if (isSelected && selectedShapeIds.length > 0 && !e.evt.ctrlKey && !e.evt.metaKey) {
+            // Start dragging if clicking on already selected shape
+            const pos = e.target.getStage()?.getPointerPosition();
+            if (pos) startDragShape(pos, shapes);
+          } else {
+            // Select the shape
+            handleShapeClick(shape.id, {
+              ctrlKey: e.evt.ctrlKey || e.evt.metaKey,
+              shiftKey: e.evt.shiftKey
+            });
+          }
         }
       },
-      onTap: () => {
-        if (activeTool === DrawingTool.SELECT) {
-          selectShape(shape.id, false);
-        }
+      onTap: (e: Konva.KonvaEventObject<MouseEvent>) => {
+        // Don't cancel bubble - let it reach stage mousedown handler
       },
       onDragEnd: handleDragEnd,
-      // Change cursor when hovering over draggable shapes
+      // Change cursor when hovering over shapes
       onMouseEnter: (e: Konva.KonvaEventObject<MouseEvent>) => {
         const stage = e.target.getStage();
         if (stage && activeTool === DrawingTool.SELECT) {
-          stage.container().style.cursor = 'move';
+          stage.container().style.cursor = isSelected ? 'move' : 'pointer';
         }
       },
       onMouseLeave: (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -275,7 +416,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             {...commonProps}
             points={penShape.points}
             stroke={penShape.style.stroke}
-            strokeWidth={penShape.style.strokeWidth}
+            strokeWidth={penShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
             lineCap={penShape.style.lineCap}
             lineJoin={penShape.style.lineJoin}
             tension={penShape.tension || 0.5}
@@ -302,7 +443,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             width={rectShape.width}
             height={rectShape.height}
             stroke={rectShape.style.stroke}
-            strokeWidth={rectShape.style.strokeWidth}
+            strokeWidth={rectShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
             fill={rectShape.style.fill}
             cornerRadius={rectShape.cornerRadius}
             rotation={rectShape.rotation || 0}
@@ -327,7 +468,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             radiusX={circleShape.radiusX}
             radiusY={circleShape.radiusY}
             stroke={circleShape.style.stroke}
-            strokeWidth={circleShape.style.strokeWidth}
+            strokeWidth={circleShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
             fill={circleShape.style.fill}
             rotation={circleShape.rotation || 0}
             ref={(node) => {
@@ -348,7 +489,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             {...commonProps}
             points={arrowShape.points}
             stroke={arrowShape.style.stroke}
-            strokeWidth={arrowShape.style.strokeWidth}
+            strokeWidth={arrowShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
             pointerLength={arrowShape.pointerLength}
             pointerWidth={arrowShape.pointerWidth}
             hitStrokeWidth={Math.max(arrowShape.style.strokeWidth, 10)}
@@ -411,6 +552,21 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       {/* Render temporary drawing preview */}
       {renderTempDrawing()}
       
+      {/* Render selection rectangle */}
+      {isDragSelecting && selectionBox.visible && (
+        <Rect
+          x={selectionBox.x}
+          y={selectionBox.y}
+          width={selectionBox.width}
+          height={selectionBox.height}
+          fill="rgba(74, 144, 226, 0.1)"
+          stroke="#4a90e2"
+          strokeWidth={1}
+          dash={[5, 5]}
+          listening={false}
+        />
+      )}
+      
       {/* Render transformer for selected shapes */}
       {activeTool === DrawingTool.SELECT && selectedShapeIds.length > 0 && (
         <Transformer
@@ -428,6 +584,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
           ignoreStroke={true}
           keepRatio={false}
+          onTransformStart={() => {
+            isTransformingRef.current = true;
+            startTransform();
+          }}
           onTransform={(e) => {
             // Live update during transform - optional for visual feedback
             const nodes = transformerRef.current?.nodes();
@@ -438,6 +598,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             }
           }}
           onTransformEnd={(e) => {
+            // End transform state
+            setTimeout(() => {
+              isTransformingRef.current = false;
+              endTransform();
+            }, 50); // Small delay to ensure mouseup is processed first
+            
             // Get transformed nodes from the transformer
             const nodes = transformerRef.current?.nodes();
             if (!nodes || nodes.length === 0) return;
