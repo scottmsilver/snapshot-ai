@@ -56,8 +56,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
       // Check if clicking on empty space (no shape)
       const clickedOnEmpty = e.target === stage || e.target.getLayer();
       
+      // Check if clicking on transformer or its anchors
+      const targetName = e.target.name?.() || '';
+      const targetClass = e.target.getClassName?.() || '';
+      const isTransformerClick = targetClass === 'Transformer' || 
+                                targetName.includes('_anchor') ||
+                                targetName.includes('rotater');
+      
+      
       if (activeTool === DrawingTool.SELECT) {
-        if (clickedOnEmpty) {
+        if (clickedOnEmpty && !isTransformerClick) {
           clearSelection();
         }
         return;
@@ -398,56 +406,107 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
           anchorSize={8}
           rotateEnabled={true}
           enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
+          ignoreStroke={true}
+          keepRatio={false}
+          onTransform={(e) => {
+            // Live update during transform - optional for visual feedback
+            const nodes = transformerRef.current?.nodes();
+            if (nodes) {
+              nodes.forEach(node => {
+                node.getLayer()?.batchDraw();
+              });
+            }
+          }}
           onTransformEnd={(e) => {
-            const node = e.target;
-            if (!node || typeof node.scaleX !== 'function') return;
+            // Get transformed nodes from the transformer
+            const nodes = transformerRef.current?.nodes();
+            if (!nodes || nodes.length === 0) return;
             
-            const scaleX = node.scaleX();
-            const scaleY = node.scaleY();
-            const rotation = node.rotation();
-            
-            // Reset scale to 1 and update the actual shape dimensions
-            node.scaleX(1);
-            node.scaleY(1);
-            
-            const shapeId = node.id();
-            if (!shapeId) return;
-            
-            const shape = shapes.find(s => s.id === shapeId);
-            if (!shape) return;
+            nodes.forEach(node => {
+              if (!node || typeof node.scaleX !== 'function') return;
+              
+              const scaleX = node.scaleX();
+              const scaleY = node.scaleY();
+              const rotation = node.rotation();
+              const x = node.x();
+              const y = node.y();
+              
+              
+              const shapeId = node.id();
+              if (!shapeId) return;
+              
+              const shape = shapes.find(s => s.id === shapeId);
+              if (!shape) return;
+              
             
             // Update shape based on its type
             try {
               if (shape.type === DrawingTool.RECTANGLE) {
                 const rectShape = shape as RectShape;
+                // Calculate new dimensions and position
+                const newWidth = Math.max(5, rectShape.width * scaleX);
+                const newHeight = Math.max(5, rectShape.height * scaleY);
+                
                 updateShape(shapeId, {
-                  x: node.x(),
-                  y: node.y(),
-                  width: Math.max(5, rectShape.width * scaleX),
-                  height: Math.max(5, rectShape.height * scaleY),
+                  x: x,
+                  y: y,
+                  width: newWidth,
+                  height: newHeight,
                   rotation: rotation
                 });
+                
+                // Reset transform but keep the visual position
+                node.scaleX(1);
+                node.scaleY(1);
+                node.x(x);
+                node.y(y);
+                node.rotation(rotation);
+                
               } else if (shape.type === DrawingTool.CIRCLE) {
                 const circleShape = shape as CircleShape;
+                const newRadiusX = Math.max(5, circleShape.radiusX * scaleX);
+                const newRadiusY = Math.max(5, circleShape.radiusY * scaleY);
+                
                 updateShape(shapeId, {
-                  x: node.x(),
-                  y: node.y(),
-                  radiusX: Math.max(5, circleShape.radiusX * scaleX),
-                  radiusY: Math.max(5, circleShape.radiusY * scaleY),
+                  x: x,
+                  y: y,
+                  radiusX: newRadiusX,
+                  radiusY: newRadiusY,
                   rotation: rotation
                 });
+                
+                // Reset transform
+                node.scaleX(1);
+                node.scaleY(1);
+                node.x(x);
+                node.y(y);
+                node.rotation(rotation);
+                
               } else if (shape.type === DrawingTool.TEXT) {
                 const textShape = shape as TextShape;
+                const newFontSize = Math.max(8, textShape.fontSize * scaleY);
+                
                 updateShape(shapeId, {
-                  x: node.x(),
-                  y: node.y(),
-                  fontSize: Math.max(8, textShape.fontSize * scaleY),
+                  x: x,
+                  y: y,
+                  fontSize: newFontSize,
                   rotation: rotation
                 });
+                
+                // Reset transform
+                node.scaleX(1);
+                node.scaleY(1);
+                node.x(x);
+                node.y(y);
+                node.rotation(rotation);
               }
             } catch (error) {
               console.error('Error updating shape after transform:', error);
             }
+            });
+            
+            // Force a redraw to ensure the updated dimensions are reflected
+            transformerRef.current?.getLayer()?.batchDraw();
           }}
         />
       )}
