@@ -153,7 +153,9 @@ function App() {
           backgroundColor: 'white',
           borderRadius: '8px',
           padding: '1rem',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          overflowY: 'auto',
+          maxHeight: 'calc(100vh - 5rem)'
         }}>
           <h2 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Tools</h2>
           {imageData ? (
