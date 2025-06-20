@@ -3,6 +3,7 @@ import { Stage, Layer, Image as KonvaImage } from 'react-konva'
 import Konva from 'konva'
 import { ImageUploader } from '@/components/ImageUploader'
 import { useImage } from '@/hooks/useImage'
+import { useHistory } from '@/hooks/useHistory'
 import { calculateImageFit } from '@/utils/imageHelpers'
 
 function App() {
@@ -10,6 +11,14 @@ function App() {
   const stageRef = useRef<Konva.Stage>(null)
   const { imageData, loadImage, clearImage } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
+  const { 
+    canUndo, 
+    canRedo, 
+    pushState, 
+    undo, 
+    redo, 
+    getCurrentState 
+  } = useHistory()
 
   // Load image when imageData changes
   useEffect(() => {
@@ -25,6 +34,45 @@ function App() {
   const handleImageUpload = async (file: File) => {
     await loadImage(file)
   }
+
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + Z for undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        if (canUndo) {
+          undo()
+        }
+      }
+      // Ctrl/Cmd + Y or Ctrl/Cmd + Shift + Z for redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault()
+        if (canRedo) {
+          redo()
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [canUndo, canRedo, undo, redo])
+
+  // Apply history state to stage when it changes
+  useEffect(() => {
+    const currentState = getCurrentState()
+    if (currentState && stageRef.current) {
+      try {
+        const stageData = JSON.parse(currentState.data)
+        // We'll implement stage restoration after we have drawing tools
+        console.log('Would restore stage:', stageData)
+      } catch (error) {
+        console.error('Failed to restore stage:', error)
+      }
+    }
+  }, [getCurrentState])
 
   return (
     <div style={{ 
@@ -61,6 +109,53 @@ function App() {
           <h2 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Tools</h2>
           {imageData ? (
             <>
+              <div style={{ 
+                display: 'flex', 
+                gap: '0.5rem', 
+                marginBottom: '1rem' 
+              }}>
+                <button
+                  onClick={undo}
+                  disabled={!canUndo}
+                  title="Undo (Ctrl+Z)"
+                  style={{
+                    flex: 1,
+                    padding: '0.5rem',
+                    backgroundColor: canUndo ? '#f0f0f0' : '#fafafa',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    cursor: canUndo ? 'pointer' : 'not-allowed',
+                    fontSize: '0.875rem',
+                    opacity: canUndo ? 1 : 0.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  ↶ Undo
+                </button>
+                <button
+                  onClick={redo}
+                  disabled={!canRedo}
+                  title="Redo (Ctrl+Y)"
+                  style={{
+                    flex: 1,
+                    padding: '0.5rem',
+                    backgroundColor: canRedo ? '#f0f0f0' : '#fafafa',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    cursor: canRedo ? 'pointer' : 'not-allowed',
+                    fontSize: '0.875rem',
+                    opacity: canRedo ? 1 : 0.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  ↷ Redo
+                </button>
+              </div>
+              
               <button
                 onClick={() => {
                   clearImage();
@@ -79,6 +174,13 @@ function App() {
               >
                 Upload New Image
               </button>
+              
+              <hr style={{ 
+                margin: '1rem 0', 
+                border: 'none', 
+                borderTop: '1px solid #eee' 
+              }} />
+              
               <p style={{ color: '#666', fontSize: '0.875rem' }}>Drawing tools coming soon...</p>
             </>
           ) : (
