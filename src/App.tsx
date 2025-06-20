@@ -4,20 +4,26 @@ import Konva from 'konva'
 import { ImageUploader } from '@/components/ImageUploader'
 import { DrawingToolbar } from '@/components/Toolbar'
 import { DrawingLayer } from '@/components/Canvas/DrawingLayer'
+import { TextInputDialog } from '@/components/TextInputDialog'
 import { useImage } from '@/hooks/useImage'
 import { useHistory } from '@/hooks/useHistory'
 import { useDrawing } from '@/hooks/useDrawing'
 import { useDrawingContext } from '@/contexts/DrawingContext'
 import { calculateImageFit } from '@/utils/imageHelpers'
 import { saveStageState, restoreStageState } from '@/utils/stageHelpers'
+import { DrawingTool, type Point, type TextShape } from '@/types/drawing'
 
 function App() {
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
   const stageRef = useRef<Konva.Stage>(null)
   const { imageData, loadImage, clearImage } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
-  const { shapes, activeTool, clearSelection } = useDrawing()
+  const { shapes, activeTool, clearSelection, addShape, currentStyle } = useDrawing()
   const { state: drawingState, setShapes } = useDrawingContext()
+  
+  // Text dialog state
+  const [textDialogOpen, setTextDialogOpen] = useState(false)
+  const [textPosition, setTextPosition] = useState<Point | null>(null)
   const { 
     canUndo, 
     canRedo, 
@@ -272,11 +278,52 @@ function App() {
               </Layer>
               
               {/* Drawing Layer for annotations */}
-              <DrawingLayer stageRef={stageRef} />
+              <DrawingLayer 
+                stageRef={stageRef} 
+                onTextClick={(pos) => {
+                  setTextPosition(pos);
+                  setTextDialogOpen(true);
+                }}
+              />
             </Stage>
           )}
         </section>
       </main>
+      
+      {/* Text Input Dialog - rendered outside canvas */}
+      <TextInputDialog
+        isOpen={textDialogOpen}
+        onSubmit={(text, fontSize) => {
+          if (!textPosition) return;
+          
+          const textShape: Omit<TextShape, 'zIndex'> = {
+            id: `text_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            type: DrawingTool.TEXT,
+            x: textPosition.x,
+            y: textPosition.y,
+            text: text,
+            fontSize: fontSize,
+            fontFamily: 'Arial',
+            style: {
+              stroke: currentStyle.stroke,
+              strokeWidth: 0,
+              opacity: currentStyle.opacity,
+            },
+            visible: true,
+            locked: false,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          
+          addShape(textShape);
+          setTextDialogOpen(false);
+          setTextPosition(null);
+        }}
+        onCancel={() => {
+          setTextDialogOpen(false);
+          setTextPosition(null);
+        }}
+      />
     </div>
   )
 }

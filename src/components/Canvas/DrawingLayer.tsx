@@ -3,13 +3,14 @@ import { Layer, Line, Rect, Circle, Arrow, Text, Group, Transformer } from 'reac
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
 import { DrawingTool } from '@/types/drawing';
-import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape } from '@/types/drawing';
+import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, Point } from '@/types/drawing';
 
 interface DrawingLayerProps {
   stageRef: React.RefObject<Konva.Stage>;
+  onTextClick?: (position: Point) => void;
 }
 
-export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
+export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClick }) => {
   const {
     activeTool,
     currentStyle,
@@ -67,6 +68,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
       if (activeTool === DrawingTool.SELECT) {
         if (clickedOnEmpty && !isTransformerClick) {
           clearSelection();
+        }
+        return;
+      }
+
+      if (activeTool === DrawingTool.TEXT) {
+        // For text tool, notify parent to show dialog
+        if (clickedOnEmpty && onTextClick) {
+          onTextClick(pos);
         }
         return;
       }
@@ -508,8 +517,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
             // Force a redraw to ensure the updated dimensions are reflected
             transformerRef.current?.getLayer()?.batchDraw();
           }}
-        />
-      )}
-    </Layer>
-  );
+          />
+        )}
+      </Layer>
+    );
 };

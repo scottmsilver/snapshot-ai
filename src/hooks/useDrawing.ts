@@ -10,6 +10,7 @@ import {
   type RectShape,
   type CircleShape,
   type ArrowShape,
+  type TextShape,
 } from '@/types/drawing';
 
 export const useDrawing = () => {
@@ -61,9 +62,8 @@ export const useDrawing = () => {
         break;
 
       case DrawingTool.TEXT:
-        // Text tool creates shape immediately
-        // We'll implement text input dialog later
-        break;
+        // Text tool is handled in DrawingLayer with dialog
+        return;
     }
   }, [state.activeTool, setDrawingState, setTempPoints]);
 
