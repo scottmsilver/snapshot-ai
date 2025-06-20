@@ -19,6 +19,7 @@ const initialContext: SelectionContext = {
   dragStartPoint: null,
   draggedShapeIds: [],
   initialShapePositions: new Map(),
+  initialShapeData: new Map(),
 };
 
 // Action types
@@ -35,7 +36,7 @@ type Action =
   | { type: typeof SelectionAction.START_DRAG_SELECT; point: Point }
   | { type: typeof SelectionAction.UPDATE_DRAG_SELECT; point: Point }
   | { type: typeof SelectionAction.END_DRAG_SELECT }
-  | { type: typeof SelectionAction.START_DRAG_SHAPE; point: Point; shapePositions: Map<string, Point> }
+  | { type: typeof SelectionAction.START_DRAG_SHAPE; point: Point; shapePositions: Map<string, Point>; shapeData: Map<string, any> }
   | { type: typeof SelectionAction.UPDATE_DRAG_SHAPE; point: Point }
   | { type: typeof SelectionAction.END_DRAG_SHAPE }
   | { type: typeof SelectionAction.CANCEL_DRAG }
@@ -123,6 +124,7 @@ function selectionReducer(context: SelectionContext, action: Action): SelectionC
       newContext.dragStartPoint = action.point;
       newContext.draggedShapeIds = [...newContext.selectedShapeIds];
       newContext.initialShapePositions = action.shapePositions;
+      newContext.initialShapeData = action.shapeData;
       break;
 
     case SelectionAction.UPDATE_DRAG_SHAPE:
@@ -133,6 +135,7 @@ function selectionReducer(context: SelectionContext, action: Action): SelectionC
       newContext.dragStartPoint = null;
       newContext.draggedShapeIds = [];
       newContext.initialShapePositions = new Map();
+      newContext.initialShapeData = new Map();
       break;
 
     case SelectionAction.CANCEL_DRAG:
@@ -140,6 +143,7 @@ function selectionReducer(context: SelectionContext, action: Action): SelectionC
       newContext.selectionBox.visible = false;
       newContext.draggedShapeIds = [];
       newContext.initialShapePositions = new Map();
+      newContext.initialShapeData = new Map();
       break;
       
     case SelectionAction.START_TRANSFORM:
@@ -283,14 +287,26 @@ export function useSelectionMachine() {
 
   const startDragShape = useCallback((point: Point, shapes: Shape[]) => {
     const shapePositions = new Map<string, Point>();
+    const shapeData = new Map<string, any>();
+    
     context.selectedShapeIds.forEach(id => {
       const shape = shapes.find(s => s.id === id);
-      if (shape && 'x' in shape && 'y' in shape) {
-        shapePositions.set(id, { x: shape.x, y: shape.y });
+      if (shape) {
+        // Store full shape data for complex shapes
+        if ('points' in shape) {
+          shapeData.set(id, { points: [...shape.points] });
+        }
+        
+        if ('x' in shape && 'y' in shape) {
+          shapePositions.set(id, { x: shape.x, y: shape.y });
+        } else if ('points' in shape && shape.points.length >= 2) {
+          // For pen/arrow shapes, store the first point as reference
+          shapePositions.set(id, { x: shape.points[0], y: shape.points[1] });
+        }
       }
     });
     
-    dispatch({ type: SelectionAction.START_DRAG_SHAPE, point, shapePositions });
+    dispatch({ type: SelectionAction.START_DRAG_SHAPE, point, shapePositions, shapeData });
   }, [context.selectedShapeIds]);
 
   const updateDragShape = useCallback((point: Point) => {

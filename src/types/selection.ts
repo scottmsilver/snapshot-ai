@@ -29,6 +29,7 @@ export interface SelectionContext {
   dragStartPoint: { x: number; y: number } | null;
   draggedShapeIds: string[];
   initialShapePositions: Map<string, { x: number; y: number }>;
+  initialShapeData: Map<string, any>; // Store full shape data for complex shapes
 }
 
 // Selection actions

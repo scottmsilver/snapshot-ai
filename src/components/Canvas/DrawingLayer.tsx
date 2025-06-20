@@ -100,12 +100,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           if (e.evt.button === 0) { // Left mouse button
             startDragSelection(pos);
           }
-        } else if (!isTransformerClick) {
-          // Check if we clicked on a shape
-          const target = e.target;
-          const shapeId = target.id();
-          
-          // Shape clicks are now handled by the shape's onClick handler
+        } else if (!isTransformerClick && e.target.id()) {
+          // Shape clicks and dragging are handled by the shape's event handlers
         }
         return;
       }
@@ -139,23 +135,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         // Handle drag operations
         if (isDragSelecting) {
           updateDragSelection(pos, shapes);
-        } else if (isDraggingShape) {
-          updateDragShape(pos);
-          
-          // Update shape positions
-          const dx = pos.x - (selectionContext.dragStartPoint?.x || 0);
-          const dy = pos.y - (selectionContext.dragStartPoint?.y || 0);
-          
-          selectedShapeIds.forEach(shapeId => {
-            const initialPos = selectionContext.initialShapePositions.get(shapeId);
-            if (initialPos) {
-              updateShape(shapeId, {
-                x: initialPos.x + dx,
-                y: initialPos.y + dy,
-              });
-            }
-          });
         }
+        // Shape dragging is now handled by Konva's native dragging
       } else if (isDrawing) {
         continueDrawing(pos, e.evt);
       }
@@ -370,17 +351,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       opacity: shape.style.opacity,
       visible: shape.visible,
       listening: true,
-      draggable: false, // We handle dragging manually now
+      draggable: activeTool === DrawingTool.SELECT && isSelected,
       onClick: (e: Konva.KonvaEventObject<MouseEvent>) => {
         if (activeTool === DrawingTool.SELECT) {
           const isSelected = selectedShapeIds.includes(shape.id);
           
-          if (isSelected && selectedShapeIds.length > 0 && !e.evt.ctrlKey && !e.evt.metaKey) {
-            // Start dragging if clicking on already selected shape
-            const pos = e.target.getStage()?.getPointerPosition();
-            if (pos) startDragShape(pos, shapes);
-          } else {
-            // Select the shape
+          // Don't handle click if we're dragging
+          if (isDraggingShape) return;
+          
+          if (!isSelected || e.evt.ctrlKey || e.evt.metaKey) {
+            // Select the shape if not selected or using modifier keys
             handleShapeClick(shape.id, {
               ctrlKey: e.evt.ctrlKey || e.evt.metaKey,
               shiftKey: e.evt.shiftKey
@@ -391,7 +371,50 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       onTap: (e: Konva.KonvaEventObject<MouseEvent>) => {
         // Don't cancel bubble - let it reach stage mousedown handler
       },
-      onDragEnd: handleDragEnd,
+      onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => {
+        const pos = e.target.getStage()?.getPointerPosition();
+        if (pos && !isDraggingShape) {
+          startDragShape(pos, shapes);
+        }
+        
+        // Store initial positions for multi-drag
+        if (selectedShapeIds.length > 1) {
+          e.target.setAttrs({ _dragStartX: e.target.x(), _dragStartY: e.target.y() });
+        }
+      },
+      onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => {
+        // Handle multi-shape dragging
+        if (selectedShapeIds.length > 1) {
+          const node = e.target;
+          const dx = node.x() - (node.attrs._dragStartX || node.x());
+          const dy = node.y() - (node.attrs._dragStartY || node.y());
+          
+          // Move other selected shapes by the same amount
+          selectedShapeIds.forEach(id => {
+            if (id !== shape.id) {
+              const otherNode = selectedShapeRefs.current.get(id);
+              if (otherNode) {
+                const initialPos = selectionContext.initialShapePositions.get(id);
+                if (initialPos) {
+                  otherNode.position({
+                    x: initialPos.x + dx,
+                    y: initialPos.y + dy
+                  });
+                }
+              }
+            }
+          });
+        }
+      },
+      onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
+        handleDragEnd(e);
+        if (isDraggingShape) {
+          endDragShape();
+        }
+        
+        // Clean up drag attributes
+        e.target.setAttrs({ _dragStartX: undefined, _dragStartY: undefined });
+      },
       // Change cursor when hovering over shapes
       onMouseEnter: (e: Konva.KonvaEventObject<MouseEvent>) => {
         const stage = e.target.getStage();
