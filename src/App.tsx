@@ -18,12 +18,13 @@ function App() {
   const stageRef = useRef<Konva.Stage>(null)
   const { imageData, loadImage, clearImage } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
-  const { shapes, activeTool, clearSelection, addShape, currentStyle } = useDrawing()
+  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle } = useDrawing()
   const { state: drawingState, setShapes } = useDrawingContext()
   
   // Text dialog state
   const [textDialogOpen, setTextDialogOpen] = useState(false)
   const [textPosition, setTextPosition] = useState<Point | null>(null)
+  const [editingTextId, setEditingTextId] = useState<string | null>(null)
   const { 
     canUndo, 
     canRedo, 
@@ -282,7 +283,16 @@ function App() {
                 stageRef={stageRef} 
                 onTextClick={(pos) => {
                   setTextPosition(pos);
+                  setEditingTextId(null);
                   setTextDialogOpen(true);
+                }}
+                onTextEdit={(shapeId) => {
+                  const shape = shapes.find(s => s.id === shapeId);
+                  if (shape && shape.type === DrawingTool.TEXT) {
+                    setEditingTextId(shapeId);
+                    setTextPosition({ x: shape.x, y: shape.y });
+                    setTextDialogOpen(true);
+                  }
                 }}
               />
             </Stage>
@@ -293,35 +303,49 @@ function App() {
       {/* Text Input Dialog - rendered outside canvas */}
       <TextInputDialog
         isOpen={textDialogOpen}
-        onSubmit={(text, fontSize) => {
-          if (!textPosition) return;
+        initialText={editingTextId ? (shapes.find(s => s.id === editingTextId) as TextShape)?.text || '' : ''}
+        initialFontSize={editingTextId ? (shapes.find(s => s.id === editingTextId) as TextShape)?.fontSize || 16 : 16}
+        initialFontFamily={editingTextId ? (shapes.find(s => s.id === editingTextId) as TextShape)?.fontFamily || 'Arial' : currentStyle.fontFamily || 'Arial'}
+        onSubmit={(text, fontSize, fontFamily) => {
+          if (editingTextId) {
+            // Update existing text
+            updateShape(editingTextId, {
+              text: text,
+              fontSize: fontSize,
+              fontFamily: fontFamily,
+              updatedAt: Date.now(),
+            });
+          } else if (textPosition) {
+            // Create new text
+            const textShape: Omit<TextShape, 'zIndex'> = {
+              id: `text_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              type: DrawingTool.TEXT,
+              x: textPosition.x,
+              y: textPosition.y,
+              text: text,
+              fontSize: fontSize,
+              fontFamily: currentStyle.fontFamily || 'Arial',
+              style: {
+                stroke: currentStyle.stroke,
+                strokeWidth: 0,
+                opacity: currentStyle.opacity,
+              },
+              visible: true,
+              locked: false,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            };
+            addShape(textShape);
+          }
           
-          const textShape: Omit<TextShape, 'zIndex'> = {
-            id: `text_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            type: DrawingTool.TEXT,
-            x: textPosition.x,
-            y: textPosition.y,
-            text: text,
-            fontSize: fontSize,
-            fontFamily: 'Arial',
-            style: {
-              stroke: currentStyle.stroke,
-              strokeWidth: 0,
-              opacity: currentStyle.opacity,
-            },
-            visible: true,
-            locked: false,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-          
-          addShape(textShape);
           setTextDialogOpen(false);
           setTextPosition(null);
+          setEditingTextId(null);
         }}
         onCancel={() => {
           setTextDialogOpen(false);
           setTextPosition(null);
+          setEditingTextId(null);
         }}
       />
     </div>

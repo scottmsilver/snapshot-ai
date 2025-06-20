@@ -210,6 +210,85 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style }) => {
             </span>
           </div>
         </div>
+
+        {/* Text Controls (for text tool) - Always rendered but visibility controlled */}
+        <div style={{ 
+          marginBottom: '1rem',
+          visibility: activeTool === DrawingTool.TEXT ? 'visible' : 'hidden',
+          height: activeTool === DrawingTool.TEXT ? 'auto' : '0',
+          overflow: 'hidden'
+        }}>
+          <h3 style={{ 
+            fontSize: '0.875rem', 
+            fontWeight: '600',
+            color: '#333',
+            marginBottom: '0.75rem',
+            marginTop: '1rem',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em'
+          }}>
+            Text Settings
+          </h3>
+          
+          {/* Font Size */}
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ 
+              display: 'block', 
+              fontSize: '0.75rem', 
+              color: '#666',
+              marginBottom: '0.25rem'
+            }}>
+              Font Size: {currentStyle.strokeWidth * 8}px
+            </label>
+            <input
+              type="range"
+              min="8"
+              max="72"
+              value={currentStyle.strokeWidth * 8}
+              onChange={(e) => updateStyle({ strokeWidth: parseInt(e.target.value) / 8 })}
+              style={{
+                width: '100%',
+                height: '4px',
+                cursor: 'pointer'
+              }}
+            />
+          </div>
+
+          {/* Font Family */}
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ 
+              display: 'block', 
+              fontSize: '0.75rem', 
+              color: '#666',
+              marginBottom: '0.25rem'
+            }}>
+              Font Family
+            </label>
+            <select
+              value={currentStyle.fontFamily || 'Arial'}
+              onChange={(e) => {
+                updateStyle({ fontFamily: e.target.value });
+              }}
+              style={{
+                width: '100%',
+                padding: '6px 10px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '0.75rem',
+                backgroundColor: 'white',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="Arial">Arial</option>
+              <option value="Helvetica">Helvetica</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Courier New">Courier New</option>
+              <option value="Verdana">Verdana</option>
+              <option value="Comic Sans MS">Comic Sans MS</option>
+            </select>
+          </div>
+        </div>
       </div>
     </div>
   );

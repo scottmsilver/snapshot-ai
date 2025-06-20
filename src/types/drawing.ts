@@ -46,6 +46,7 @@ export interface DrawingStyle {
   lineCap?: 'round' | 'square' | 'butt';
   lineJoin?: 'round' | 'bevel' | 'miter';
   dash?: number[];
+  fontFamily?: string; // For text shapes
 }
 
 // Base shape interface - includes z-order

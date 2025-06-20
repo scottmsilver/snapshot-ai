@@ -63,6 +63,7 @@ const initialState: DrawingState = {
     opacity: 1,
     lineCap: 'round',
     lineJoin: 'round',
+    fontFamily: 'Arial',
   },
   activeShape: null,
   tempPoints: [],

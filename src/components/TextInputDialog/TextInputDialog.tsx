@@ -5,8 +5,9 @@ interface TextInputDialogProps {
   isOpen: boolean;
   initialText?: string;
   initialFontSize?: number;
+  initialFontFamily?: string;
   position?: { x: number; y: number };
-  onSubmit: (text: string, fontSize: number) => void;
+  onSubmit: (text: string, fontSize: number, fontFamily: string) => void;
   onCancel: () => void;
 }
 
@@ -14,12 +15,14 @@ export const TextInputDialog: React.FC<TextInputDialogProps> = ({
   isOpen,
   initialText = '',
   initialFontSize = 16,
+  initialFontFamily = 'Arial',
   position,
   onSubmit,
   onCancel,
 }) => {
   const [text, setText] = useState(initialText);
   const [fontSize, setFontSize] = useState(initialFontSize);
+  const [fontFamily, setFontFamily] = useState(initialFontFamily);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -32,12 +35,13 @@ export const TextInputDialog: React.FC<TextInputDialogProps> = ({
   useEffect(() => {
     setText(initialText);
     setFontSize(initialFontSize);
-  }, [initialText, initialFontSize]);
+    setFontFamily(initialFontFamily);
+  }, [initialText, initialFontSize, initialFontFamily]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (text.trim()) {
-      onSubmit(text, fontSize);
+      onSubmit(text, fontSize, fontFamily);
     }
   };
 
@@ -82,7 +86,7 @@ export const TextInputDialog: React.FC<TextInputDialogProps> = ({
           fontWeight: '600',
           color: '#333'
         }}>
-          Add Text
+          {initialText ? 'Edit Text' : 'Add Text'}
         </h3>
         
         <form onSubmit={handleSubmit}>
@@ -151,6 +155,39 @@ export const TextInputDialog: React.FC<TextInputDialogProps> = ({
             </div>
           </div>
 
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{
+              display: 'block',
+              marginBottom: '8px',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#555'
+            }}>
+              Font Family
+            </label>
+            <select
+              value={fontFamily}
+              onChange={(e) => setFontFamily(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '6px 10px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '14px',
+                backgroundColor: 'white',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="Arial">Arial</option>
+              <option value="Helvetica">Helvetica</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Courier New">Courier New</option>
+              <option value="Verdana">Verdana</option>
+              <option value="Comic Sans MS">Comic Sans MS</option>
+            </select>
+          </div>
+
           <div style={{
             display: 'flex',
             gap: '12px',
@@ -204,7 +241,7 @@ export const TextInputDialog: React.FC<TextInputDialogProps> = ({
                 }
               }}
             >
-              Add Text
+              {initialText ? 'Update Text' : 'Add Text'}
             </button>
           </div>
         </form>

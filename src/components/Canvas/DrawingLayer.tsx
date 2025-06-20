@@ -8,9 +8,10 @@ import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, Po
 interface DrawingLayerProps {
   stageRef: React.RefObject<Konva.Stage>;
   onTextClick?: (position: Point) => void;
+  onTextEdit?: (shapeId: string) => void;
 }
 
-export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClick }) => {
+export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClick, onTextEdit }) => {
   const {
     activeTool,
     currentStyle,
@@ -377,6 +378,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             align={textShape.align}
             width={textShape.width}
             rotation={textShape.rotation || 0}
+            onDblClick={() => {
+              if (onTextEdit) {
+                onTextEdit(shape.id);
+              }
+            }}
+            onDblTap={() => {
+              if (onTextEdit) {
+                onTextEdit(shape.id);
+              }
+            }}
             ref={(node) => {
               if (node) {
                 selectedShapeRefs.current.set(shape.id, node);
