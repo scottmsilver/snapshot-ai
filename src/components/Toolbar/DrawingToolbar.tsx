@@ -8,8 +8,7 @@ import {
   RectangleIcon,
   CircleIcon,
   ArrowIcon,
-  TextIcon,
-  EraserIcon
+  TextIcon
 } from '@/components/Icons/ToolIcons';
 
 const tools = [
@@ -19,7 +18,6 @@ const tools = [
   { tool: DrawingTool.CIRCLE, icon: CircleIcon, label: 'Circle', shortcut: 'C' },
   { tool: DrawingTool.ARROW, icon: ArrowIcon, label: 'Arrow', shortcut: 'A' },
   { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' },
-  { tool: DrawingTool.ERASER, icon: EraserIcon, label: 'Eraser', shortcut: 'E' },
 ];
 
 interface DrawingToolbarProps {

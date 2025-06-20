@@ -5,8 +5,7 @@ export const DrawingTool = {
   RECTANGLE: 'rectangle',
   CIRCLE: 'circle',
   ARROW: 'arrow',
-  TEXT: 'text',
-  ERASER: 'eraser'
+  TEXT: 'text'
 } as const;
 
 export type DrawingTool = typeof DrawingTool[keyof typeof DrawingTool];

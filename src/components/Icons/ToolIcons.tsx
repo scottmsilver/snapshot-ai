@@ -48,10 +48,3 @@ export const TextIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor
   </svg>
 );
 
-export const EraserIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor' }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
-    <path d="M7 21h10" />
-    <path d="M5.5 13.5L9 10l10 10-3.5 3.5a2.12 2.12 0 01-3 0L5.5 16.5a2.12 2.12 0 010-3z" />
-    <path d="M8.5 8.5L12 5l7 7-3.5 3.5" />
-  </svg>
-);
