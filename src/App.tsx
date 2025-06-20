@@ -11,6 +11,7 @@ import { useDrawing } from '@/hooks/useDrawing'
 import { useDrawingContext } from '@/contexts/DrawingContext'
 import { calculateImageFit } from '@/utils/imageHelpers'
 import { saveStageState, restoreStageState } from '@/utils/stageHelpers'
+import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils'
 import { DrawingTool, type Point, type TextShape } from '@/types/drawing'
 
 function App() {
@@ -50,6 +51,31 @@ function App() {
     await loadImage(file)
   }
 
+  // Track if we're in the middle of history navigation
+  const isHistoryNavigationRef = useRef(false)
+  const lastShapesRef = useRef<string>('')
+
+  // Export functions
+  const handleCopyToClipboard = async () => {
+    if (!stageRef.current) return;
+    
+    try {
+      await copyCanvasToClipboard(stageRef.current);
+      // You could add a toast notification here
+      console.log('Canvas copied to clipboard!');
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+      alert('Failed to copy to clipboard. Your browser may not support this feature.');
+    }
+  };
+
+  const handleDownloadImage = () => {
+    if (!stageRef.current) return;
+    
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
+    downloadCanvasAsImage(stageRef.current, `markup-${timestamp}.png`);
+  };
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -67,6 +93,19 @@ function App() {
           redo()
         }
       }
+      // Ctrl/Cmd + C for copy to clipboard (when not in text input)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.shiftKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          handleCopyToClipboard();
+        }
+      }
+      // Ctrl/Cmd + S for download
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleDownloadImage();
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -74,10 +113,6 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [canUndo, canRedo, undo, redo])
-
-  // Track if we're in the middle of history navigation
-  const isHistoryNavigationRef = useRef(false)
-  const lastShapesRef = useRef<string>('')
 
   // Initialize history with empty state
   useEffect(() => {
@@ -227,6 +262,63 @@ function App() {
               >
                 Upload New Image
               </button>
+              
+              <div style={{ 
+                display: 'flex', 
+                gap: '0.5rem', 
+                marginBottom: '1rem' 
+              }}>
+                <button
+                  onClick={handleCopyToClipboard}
+                  title="Copy to Clipboard (Ctrl+C)"
+                  style={{
+                    flex: 1,
+                    padding: '0.5rem',
+                    backgroundColor: '#4a90e2',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#357abd';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#4a90e2';
+                  }}
+                >
+                  📋 Copy
+                </button>
+                <button
+                  onClick={handleDownloadImage}
+                  title="Download Image (Ctrl+S)"
+                  style={{
+                    flex: 1,
+                    padding: '0.5rem',
+                    backgroundColor: '#5cb85c',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#4cae4c';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#5cb85c';
+                  }}
+                >
+                  💾 Save
+                </button>
+              </div>
               
               <hr style={{ 
                 margin: '1rem 0', 
