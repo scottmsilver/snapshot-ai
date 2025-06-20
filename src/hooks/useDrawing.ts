@@ -1,6 +1,5 @@
 import { useCallback, useRef } from 'react';
 import { useDrawingContext } from '@/contexts/DrawingContext';
-import { useHistory } from '@/hooks/useHistory';
 import {
   DrawingTool,
   DrawingMode,
@@ -32,22 +31,11 @@ export const useDrawing = () => {
     getSortedShapes,
   } = useDrawingContext();
 
-  const { pushState } = useHistory();
   const isDrawingRef = useRef(false);
 
   // Generate unique ID for shapes
   const generateId = () => `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-  // Save current state to history
-  const saveToHistory = useCallback((description?: string) => {
-    // For now, we save a simple representation of shapes
-    // Later we can enhance this with full stage serialization
-    const stateData = JSON.stringify({
-      shapes: state.shapes,
-      timestamp: Date.now()
-    });
-    pushState(stateData, description);
-  }, [pushState, state.shapes]);
 
   // Start drawing based on current tool
   const startDrawing = useCallback((point: Point, event?: React.MouseEvent) => {
@@ -201,7 +189,6 @@ export const useDrawing = () => {
     // Add shape if created
     if (newShape) {
       addShape(newShape);
-      saveToHistory(`Draw ${state.activeTool}`);
     }
 
     // Reset drawing state
@@ -217,7 +204,6 @@ export const useDrawing = () => {
     state.tempPoints,
     state.currentStyle,
     addShape,
-    saveToHistory,
     setDrawingState,
     setTempPoints,
     setActiveShape,
@@ -261,7 +247,6 @@ export const useDrawing = () => {
       case 'backspace':
         if (state.selectedShapeIds.length > 0) {
           deleteSelected();
-          saveToHistory('Delete shapes');
         }
         break;
       case 'escape':
@@ -283,14 +268,12 @@ export const useDrawing = () => {
           } else {
             reorderShape(shapeId, LayerOperation.BRING_FORWARD);
           }
-          saveToHistory('Reorder shape');
         } else if (e.key === '[') {
           if (e.shiftKey) {
             reorderShape(shapeId, LayerOperation.SEND_TO_BACK);
           } else {
             reorderShape(shapeId, LayerOperation.SEND_BACKWARD);
           }
-          saveToHistory('Reorder shape');
         }
       }
     }
@@ -302,7 +285,6 @@ export const useDrawing = () => {
     clearSelection,
     cancelDrawing,
     reorderShape,
-    saveToHistory,
   ]);
 
   return {

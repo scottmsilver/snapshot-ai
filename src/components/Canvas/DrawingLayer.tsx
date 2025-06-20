@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Layer, Line, Rect, Circle, Arrow, Text, Group, Transformer } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
@@ -25,6 +25,24 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
     clearSelection,
     updateShape,
   } = useDrawing();
+  
+  const transformerRef = useRef<Konva.Transformer>(null);
+  const selectedShapeRefs = useRef<Map<string, Konva.Node>>(new Map());
+
+  // Update transformer when selection changes
+  useEffect(() => {
+    if (transformerRef.current) {
+      const nodes: Konva.Node[] = [];
+      selectedShapeIds.forEach(id => {
+        const node = selectedShapeRefs.current.get(id);
+        if (node) {
+          nodes.push(node);
+        }
+      });
+      transformerRef.current.nodes(nodes);
+      transformerRef.current.getLayer()?.batchDraw();
+    }
+  }, [selectedShapeIds]);
 
   // Set up mouse event handlers
   useEffect(() => {
@@ -186,38 +204,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
       const newPosition = node.position();
       
       // Update shape position based on its type
-      if (shape.type === DrawingTool.PEN) {
-        // For pen shapes, we need to update all points
-        const penShape = shape as PenShape;
-        const dx = newPosition.x;
-        const dy = newPosition.y;
-        const newPoints = [...penShape.points];
-        for (let i = 0; i < newPoints.length; i += 2) {
-          newPoints[i] += dx;
-          newPoints[i + 1] += dy;
-        }
-        updateShape(shape.id, { points: newPoints });
-        // Reset the position after updating points
-        node.position({ x: 0, y: 0 });
-      } else if (shape.type === DrawingTool.ARROW) {
-        // For arrow shapes, update the points
-        const arrowShape = shape as ArrowShape;
-        const dx = newPosition.x;
-        const dy = newPosition.y;
-        const newPoints: [number, number, number, number] = [
-          arrowShape.points[0] + dx,
-          arrowShape.points[1] + dy,
-          arrowShape.points[2] + dx,
-          arrowShape.points[3] + dy,
-        ];
-        updateShape(shape.id, { points: newPoints });
-        node.position({ x: 0, y: 0 });
+      if (shape.type === DrawingTool.PEN || shape.type === DrawingTool.ARROW) {
+        // For pen and arrow shapes, apply transform directly without updating data
+        // This allows Konva to handle the dragging naturally
       } else {
         // For other shapes, update x/y position
-        const shapeWithPos = shape as any; // Type assertion for shapes with x/y
         updateShape(shape.id, { 
-          x: shapeWithPos.x + newPosition.x, 
-          y: shapeWithPos.y + newPosition.y 
+          x: newPosition.x, 
+          y: newPosition.y 
         });
       }
     };
@@ -239,9 +233,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
         }
       },
       onDragEnd: handleDragEnd,
-      shadowColor: isSelected ? '#4a90e2' : undefined,
-      shadowBlur: isSelected ? 5 : 0,
-      shadowOpacity: isSelected ? 0.5 : 0,
       // Change cursor when hovering over draggable shapes
       onMouseEnter: (e: Konva.KonvaEventObject<MouseEvent>) => {
         const stage = e.target.getStage();
@@ -271,6 +262,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
             lineJoin={penShape.style.lineJoin}
             tension={penShape.tension || 0.5}
             globalCompositeOperation="source-over"
+            hitStrokeWidth={Math.max(penShape.style.strokeWidth, 10)}
+            ref={(node) => {
+              if (node) {
+                selectedShapeRefs.current.set(shape.id, node);
+              } else {
+                selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
           />
         );
 
@@ -288,6 +287,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
             strokeWidth={rectShape.style.strokeWidth}
             fill={rectShape.style.fill}
             cornerRadius={rectShape.cornerRadius}
+            rotation={rectShape.rotation || 0}
+            ref={(node) => {
+              if (node) {
+                selectedShapeRefs.current.set(shape.id, node);
+              } else {
+                selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
           />
         );
 
@@ -304,6 +311,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
             stroke={circleShape.style.stroke}
             strokeWidth={circleShape.style.strokeWidth}
             fill={circleShape.style.fill}
+            rotation={circleShape.rotation || 0}
+            ref={(node) => {
+              if (node) {
+                selectedShapeRefs.current.set(shape.id, node);
+              } else {
+                selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
           />
         );
 
@@ -318,6 +333,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
             strokeWidth={arrowShape.style.strokeWidth}
             pointerLength={arrowShape.pointerLength}
             pointerWidth={arrowShape.pointerWidth}
+            hitStrokeWidth={Math.max(arrowShape.style.strokeWidth, 10)}
+            ref={(node) => {
+              if (node) {
+                selectedShapeRefs.current.set(shape.id, node);
+              } else {
+                selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
           />
         );
 
@@ -336,6 +359,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
             fill={textShape.style.stroke}
             align={textShape.align}
             width={textShape.width}
+            rotation={textShape.rotation || 0}
+            ref={(node) => {
+              if (node) {
+                selectedShapeRefs.current.set(shape.id, node);
+              } else {
+                selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
           />
         );
 
@@ -351,6 +382,75 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef }) => {
       
       {/* Render temporary drawing preview */}
       {renderTempDrawing()}
+      
+      {/* Render transformer for selected shapes */}
+      {activeTool === DrawingTool.SELECT && selectedShapeIds.length > 0 && (
+        <Transformer
+          key={selectedShapeIds.join(',')}
+          ref={transformerRef}
+          borderEnabled={true}
+          borderStroke="#4a90e2"
+          borderStrokeWidth={1}
+          borderDash={[4, 4]}
+          anchorFill="white"
+          anchorStroke="#4a90e2"
+          anchorStrokeWidth={2}
+          anchorSize={8}
+          rotateEnabled={true}
+          enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
+          onTransformEnd={(e) => {
+            const node = e.target;
+            if (!node || typeof node.scaleX !== 'function') return;
+            
+            const scaleX = node.scaleX();
+            const scaleY = node.scaleY();
+            const rotation = node.rotation();
+            
+            // Reset scale to 1 and update the actual shape dimensions
+            node.scaleX(1);
+            node.scaleY(1);
+            
+            const shapeId = node.id();
+            if (!shapeId) return;
+            
+            const shape = shapes.find(s => s.id === shapeId);
+            if (!shape) return;
+            
+            // Update shape based on its type
+            try {
+              if (shape.type === DrawingTool.RECTANGLE) {
+                const rectShape = shape as RectShape;
+                updateShape(shapeId, {
+                  x: node.x(),
+                  y: node.y(),
+                  width: Math.max(5, rectShape.width * scaleX),
+                  height: Math.max(5, rectShape.height * scaleY),
+                  rotation: rotation
+                });
+              } else if (shape.type === DrawingTool.CIRCLE) {
+                const circleShape = shape as CircleShape;
+                updateShape(shapeId, {
+                  x: node.x(),
+                  y: node.y(),
+                  radiusX: Math.max(5, circleShape.radiusX * scaleX),
+                  radiusY: Math.max(5, circleShape.radiusY * scaleY),
+                  rotation: rotation
+                });
+              } else if (shape.type === DrawingTool.TEXT) {
+                const textShape = shape as TextShape;
+                updateShape(shapeId, {
+                  x: node.x(),
+                  y: node.y(),
+                  fontSize: Math.max(8, textShape.fontSize * scaleY),
+                  rotation: rotation
+                });
+              }
+            } catch (error) {
+              console.error('Error updating shape after transform:', error);
+            }
+          }}
+        />
+      )}
     </Layer>
   );
 };

@@ -13,7 +13,7 @@ import {
 } from '@/types/drawing';
 
 // Action types
-enum DrawingActionType {
+export enum DrawingActionType {
   SET_TOOL = 'SET_TOOL',
   SET_MODE = 'SET_MODE',
   UPDATE_STYLE = 'UPDATE_STYLE',
@@ -202,6 +202,7 @@ interface DrawingContextType {
   updateStyle: (style: Partial<DrawingStyle>) => void;
   
   // Shape management
+  setShapes: (shapes: Shape[]) => void;
   addShape: (shape: Omit<Shape, 'zIndex'>) => void;
   updateShape: (id: string, updates: Partial<Shape>) => void;
   deleteShape: (id: string) => void;
@@ -242,6 +243,10 @@ export const DrawingProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, []);
 
   // Shape management
+  const setShapes = useCallback((shapes: Shape[]) => {
+    dispatch({ type: DrawingActionType.SET_SHAPES, shapes });
+  }, []);
+
   const addShape = useCallback((shape: Omit<Shape, 'zIndex'>) => {
     const fullShape: Shape = {
       ...shape,
@@ -314,6 +319,7 @@ export const DrawingProvider: React.FC<{ children: ReactNode }> = ({ children })
     dispatch,
     setActiveTool,
     updateStyle,
+    setShapes,
     addShape,
     updateShape,
     deleteShape,

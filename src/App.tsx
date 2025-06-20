@@ -7,6 +7,7 @@ import { DrawingLayer } from '@/components/Canvas/DrawingLayer'
 import { useImage } from '@/hooks/useImage'
 import { useHistory } from '@/hooks/useHistory'
 import { useDrawing } from '@/hooks/useDrawing'
+import { useDrawingContext } from '@/contexts/DrawingContext'
 import { calculateImageFit } from '@/utils/imageHelpers'
 import { saveStageState, restoreStageState } from '@/utils/stageHelpers'
 
@@ -15,14 +16,16 @@ function App() {
   const stageRef = useRef<Konva.Stage>(null)
   const { imageData, loadImage, clearImage } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
-  const { shapes, activeTool } = useDrawing()
+  const { shapes, activeTool, clearSelection } = useDrawing()
+  const { state: drawingState, setShapes } = useDrawingContext()
   const { 
     canUndo, 
     canRedo, 
     pushState, 
     undo, 
     redo, 
-    getCurrentState 
+    getCurrentState,
+    currentIndex 
   } = useHistory()
 
   // Load image when imageData changes
@@ -65,19 +68,53 @@ function App() {
     }
   }, [canUndo, canRedo, undo, redo])
 
-  // Apply history state to stage when it changes
+  // Track if we're in the middle of history navigation
+  const isHistoryNavigationRef = useRef(false)
+  const lastShapesRef = useRef<string>('')
+
+  // Initialize history with empty state
   useEffect(() => {
-    const currentState = getCurrentState()
-    if (currentState && stageRef.current) {
-      try {
-        const stageData = JSON.parse(currentState.data)
-        // We'll implement stage restoration after we have drawing tools
-        console.log('Would restore stage:', stageData)
-      } catch (error) {
-        console.error('Failed to restore stage:', error)
+    if (getCurrentState() === null) {
+      pushState(JSON.stringify({ shapes: [] }), 'Initial state')
+    }
+  }, [])
+
+  // Save shapes to history when they change (but not on history navigation)
+  useEffect(() => {
+    if (!isHistoryNavigationRef.current) {
+      const currentShapesJson = JSON.stringify({ shapes: drawingState.shapes })
+      
+      // Only push if state actually changed
+      if (currentShapesJson !== lastShapesRef.current) {
+        lastShapesRef.current = currentShapesJson
+        // Only push to history if we have shapes or if this is clearing shapes
+        if (drawingState.shapes.length > 0 || 
+            (drawingState.shapes.length === 0 && lastShapesRef.current && JSON.parse(lastShapesRef.current).shapes?.length > 0)) {
+          pushState(currentShapesJson, 'Shape change')
+        }
       }
     }
-  }, [getCurrentState])
+    isHistoryNavigationRef.current = false
+  }, [drawingState.shapes, pushState])
+
+  // Apply history state when currentIndex changes (undo/redo)
+  useEffect(() => {
+    const currentState = getCurrentState()
+    if (currentState) {
+      try {
+        const { shapes } = JSON.parse(currentState.data)
+        const currentShapesJson = JSON.stringify({ shapes: drawingState.shapes })
+        
+        // Only update if shapes are different
+        if (JSON.stringify({ shapes }) !== currentShapesJson) {
+          isHistoryNavigationRef.current = true
+          setShapes(shapes)
+        }
+      } catch (error) {
+        console.error('Failed to restore shapes:', error)
+      }
+    }
+  }, [currentIndex, getCurrentState, setShapes, drawingState.shapes])
 
   return (
     <div style={{ 
@@ -165,6 +202,8 @@ function App() {
                 onClick={() => {
                   clearImage();
                   setKonvaImage(null);
+                  clearSelection();
+                  setShapes([]);
                 }}
                 style={{
                   width: '100%',

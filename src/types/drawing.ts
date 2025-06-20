@@ -75,6 +75,7 @@ export interface RectShape extends BaseShape {
   width: number;
   height: number;
   cornerRadius?: number;
+  rotation?: number;
 }
 
 export interface CircleShape extends BaseShape {
@@ -83,6 +84,7 @@ export interface CircleShape extends BaseShape {
   y: number;
   radiusX: number;
   radiusY: number;
+  rotation?: number;
 }
 
 export interface ArrowShape extends BaseShape {
@@ -102,6 +104,7 @@ export interface TextShape extends BaseShape {
   fontStyle?: string;
   align?: string;
   width?: number;
+  rotation?: number;
 }
 
 // Union type for all shapes
