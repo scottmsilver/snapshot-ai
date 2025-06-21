@@ -10,12 +10,11 @@ import { useHistory } from '@/hooks/useHistory'
 import { useDrawing } from '@/hooks/useDrawing'
 import { useDrawingContext } from '@/contexts/DrawingContext'
 import { calculateImageFit } from '@/utils/imageHelpers'
-import { saveStageState, restoreStageState } from '@/utils/stageHelpers'
 import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils'
 import { DrawingTool, type Point, type TextShape } from '@/types/drawing'
 
 function App() {
-  const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
+  const [stageSize] = useState({ width: 800, height: 600 })
   const stageRef = useRef<Konva.Stage>(null)
   const { imageData, loadImage, clearImage } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
@@ -26,6 +25,7 @@ function App() {
   const [textDialogOpen, setTextDialogOpen] = useState(false)
   const [textPosition, setTextPosition] = useState<Point | null>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  
   const { 
     canUndo, 
     canRedo, 
@@ -157,6 +157,7 @@ function App() {
       }
     }
   }, [currentIndex, getCurrentState, setShapes, drawingState.shapes])
+  
 
   return (
     <div style={{ 
@@ -383,8 +384,9 @@ function App() {
                 onTextEdit={(shapeId) => {
                   const shape = shapes.find(s => s.id === shapeId);
                   if (shape && shape.type === DrawingTool.TEXT) {
+                    const textShape = shape as TextShape;
                     setEditingTextId(shapeId);
-                    setTextPosition({ x: shape.x, y: shape.y });
+                    setTextPosition({ x: textShape.x, y: textShape.y });
                     setTextDialogOpen(true);
                   }
                 }}
@@ -442,6 +444,7 @@ function App() {
           setEditingTextId(null);
         }}
       />
+      
     </div>
   )
 }

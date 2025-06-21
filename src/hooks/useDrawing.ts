@@ -2,7 +2,6 @@ import { useCallback, useRef } from 'react';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import {
   DrawingTool,
-  DrawingMode,
   LayerOperation,
   type Point,
   type Shape,
@@ -10,7 +9,6 @@ import {
   type RectShape,
   type CircleShape,
   type ArrowShape,
-  type TextShape,
 } from '@/types/drawing';
 
 export const useDrawing = () => {
@@ -39,7 +37,7 @@ export const useDrawing = () => {
 
 
   // Start drawing based on current tool
-  const startDrawing = useCallback((point: Point, event?: React.MouseEvent) => {
+  const startDrawing = useCallback((point: Point, _event?: React.MouseEvent) => {
     if (state.activeTool === DrawingTool.SELECT) {
       // Handle selection logic
       return;
@@ -68,7 +66,7 @@ export const useDrawing = () => {
   }, [state.activeTool, setDrawingState, setTempPoints]);
 
   // Continue drawing (mouse move)
-  const continueDrawing = useCallback((point: Point, event?: React.MouseEvent) => {
+  const continueDrawing = useCallback((point: Point, _event?: React.MouseEvent) => {
     if (!isDrawingRef.current || !state.isDrawing) return;
 
     const startPoint = state.startPoint;
@@ -92,7 +90,7 @@ export const useDrawing = () => {
   }, [state.activeTool, state.isDrawing, state.startPoint, state.tempPoints, setDrawingState, setTempPoints]);
 
   // Finish drawing (mouse up)
-  const finishDrawing = useCallback((point?: Point, event?: React.MouseEvent) => {
+  const finishDrawing = useCallback((point?: Point, _event?: React.MouseEvent) => {
     if (!isDrawingRef.current || !state.isDrawing) return;
 
     const startPoint = state.startPoint;

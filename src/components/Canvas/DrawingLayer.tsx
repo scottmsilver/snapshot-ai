@@ -139,6 +139,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         }
         return;
       }
+      
 
       if (clickedOnEmpty) {
         startDrawing(pos, e.evt as any);
@@ -748,6 +749,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             }}
           />
         );
+        
 
       default:
         return null;
@@ -963,8 +965,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           onTransformStart={() => {
             isTransformingRef.current = true;
             startTransform();
+            
           }}
-          onTransform={(_e) => {
+          onTransform={() => {
             // Live update during transform - optional for visual feedback
             const nodes = transformerRef.current?.nodes();
             if (nodes) {
@@ -1108,6 +1111,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               console.error('Error updating shape after transform:', error);
             }
             });
+            
             
             // Force a redraw to ensure the updated dimensions are reflected
             transformerRef.current?.getLayer()?.batchDraw();

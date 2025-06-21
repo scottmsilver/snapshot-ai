@@ -63,13 +63,13 @@ export interface BaseShape {
 
 // Specific shape types
 export interface PenShape extends BaseShape {
-  type: DrawingTool.PEN;
+  type: typeof DrawingTool.PEN;
   points: number[]; // [x1, y1, x2, y2, ...]
   tension?: number;
 }
 
 export interface RectShape extends BaseShape {
-  type: DrawingTool.RECTANGLE;
+  type: typeof DrawingTool.RECTANGLE;
   x: number;
   y: number;
   width: number;
@@ -79,7 +79,7 @@ export interface RectShape extends BaseShape {
 }
 
 export interface CircleShape extends BaseShape {
-  type: DrawingTool.CIRCLE;
+  type: typeof DrawingTool.CIRCLE;
   x: number;
   y: number;
   radiusX: number;
@@ -88,14 +88,14 @@ export interface CircleShape extends BaseShape {
 }
 
 export interface ArrowShape extends BaseShape {
-  type: DrawingTool.ARROW;
+  type: typeof DrawingTool.ARROW;
   points: [number, number, number, number]; // [x1, y1, x2, y2]
   pointerLength?: number;
   pointerWidth?: number;
 }
 
 export interface TextShape extends BaseShape {
-  type: DrawingTool.TEXT;
+  type: typeof DrawingTool.TEXT;
   x: number;
   y: number;
   text: string;
@@ -106,6 +106,7 @@ export interface TextShape extends BaseShape {
   width?: number;
   rotation?: number;
 }
+
 
 // Union type for all shapes
 export type Shape = PenShape | RectShape | CircleShape | ArrowShape | TextShape;

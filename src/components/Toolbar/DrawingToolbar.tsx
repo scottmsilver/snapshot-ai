@@ -17,7 +17,7 @@ const tools = [
   { tool: DrawingTool.RECTANGLE, icon: RectangleIcon, label: 'Rectangle', shortcut: 'R' },
   { tool: DrawingTool.CIRCLE, icon: CircleIcon, label: 'Circle', shortcut: 'C' },
   { tool: DrawingTool.ARROW, icon: ArrowIcon, label: 'Arrow', shortcut: 'A' },
-  { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' },
+  { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' }
 ];
 
 interface DrawingToolbarProps {
