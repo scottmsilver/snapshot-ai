@@ -56,18 +56,19 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
             title={`${label} (${shortcut})`}
             onClick={() => setActiveTool(tool)}
             style={{
-              padding: '0.5rem 0.75rem',
+              padding: '0.375rem',
               backgroundColor: activeTool === tool ? '#e3f2fd' : 'transparent',
               border: activeTool === tool ? '1px solid #2196f3' : '1px solid transparent',
               borderRadius: '4px',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
+              justifyContent: 'center',
               fontSize: '0.875rem',
               color: activeTool === tool ? '#1976d2' : '#666',
               transition: 'all 0.2s',
-              whiteSpace: 'nowrap'
+              width: '32px',
+              height: '32px'
             }}
             onMouseEnter={(e) => {
               if (activeTool !== tool) {
@@ -81,7 +82,6 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
             }}
           >
             <Icon size={18} />
-            <span>{label}</span>
           </button>
         ))}
       </div>

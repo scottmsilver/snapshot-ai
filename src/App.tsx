@@ -21,6 +21,7 @@ function App() {
   const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle } = useDrawing()
   const { state: drawingState, setShapes } = useDrawingContext()
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true)
+  const [zoomLevel, setZoomLevel] = useState(1) // 1 = 100%
   
   // Text dialog state
   const [textDialogOpen, setTextDialogOpen] = useState(false)
@@ -107,13 +108,28 @@ function App() {
         e.preventDefault();
         handleDownloadImage();
       }
+      // Ctrl/Cmd + = or + for zoom in
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        setZoomLevel(prev => Math.min(4, prev + 0.25));
+      }
+      // Ctrl/Cmd + - for zoom out
+      if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+        e.preventDefault();
+        setZoomLevel(prev => Math.max(0.1, prev - 0.25));
+      }
+      // Ctrl/Cmd + 0 for reset zoom
+      if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+        e.preventDefault();
+        setZoomLevel(1);
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [canUndo, canRedo, undo, redo])
+  }, [canUndo, canRedo, undo, redo, zoomLevel])
 
   // Initialize history with empty state
   useEffect(() => {
@@ -301,17 +317,17 @@ function App() {
         <div style={{
           backgroundColor: '#ffffff',
           borderBottom: '1px solid #e0e0e0',
-          padding: '0.5rem 1rem',
+          padding: '0.25rem 0.5rem',
           display: 'flex',
           alignItems: 'center',
-          gap: '1rem',
+          gap: '0.5rem',
           boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
         }}>
           {/* Undo/Redo Group */}
           <div style={{
             display: 'flex',
-            gap: '0.25rem',
-            paddingRight: '1rem',
+            gap: '0.125rem',
+            paddingRight: '0.5rem',
             borderRight: '1px solid #e0e0e0'
           }}>
             <button
@@ -319,7 +335,7 @@ function App() {
               disabled={!canUndo}
               title="Undo (Ctrl+Z)"
               style={{
-                padding: '0.375rem',
+                padding: '0.25rem 0.375rem',
                 backgroundColor: canUndo ? 'transparent' : 'transparent',
                 border: '1px solid transparent',
                 borderRadius: '4px',
@@ -327,7 +343,7 @@ function App() {
                 opacity: canUndo ? 1 : 0.3,
                 display: 'flex',
                 alignItems: 'center',
-                fontSize: '1.25rem',
+                fontSize: '1rem',
                 transition: 'all 0.2s'
               }}
               onMouseEnter={(e) => {
@@ -344,7 +360,7 @@ function App() {
               disabled={!canRedo}
               title="Redo (Ctrl+Y)"
               style={{
-                padding: '0.375rem',
+                padding: '0.25rem 0.375rem',
                 backgroundColor: 'transparent',
                 border: '1px solid transparent',
                 borderRadius: '4px',
@@ -352,7 +368,7 @@ function App() {
                 opacity: canRedo ? 1 : 0.3,
                 display: 'flex',
                 alignItems: 'center',
-                fontSize: '1.25rem',
+                fontSize: '1rem',
                 transition: 'all 0.2s'
               }}
               onMouseEnter={(e) => {
@@ -374,6 +390,103 @@ function App() {
           }}>
             {/* Tools will be rendered here */}
             <DrawingToolbar horizontal={true} />
+          </div>
+
+          {/* Zoom Controls */}
+          <div style={{
+            display: 'flex',
+            gap: '0.125rem',
+            alignItems: 'center',
+            paddingLeft: '0.5rem',
+            borderLeft: '1px solid #e0e0e0'
+          }}>
+            <button
+              onClick={() => setZoomLevel(Math.max(0.1, zoomLevel - 0.25))}
+              disabled={zoomLevel <= 0.1}
+              title="Zoom Out"
+              style={{
+                padding: '0.25rem',
+                backgroundColor: 'transparent',
+                border: '1px solid transparent',
+                borderRadius: '4px',
+                cursor: zoomLevel > 0.1 ? 'pointer' : 'not-allowed',
+                opacity: zoomLevel > 0.1 ? 1 : 0.3,
+                fontSize: '0.875rem',
+                display: 'flex',
+                alignItems: 'center',
+                width: '28px',
+                height: '28px',
+                justifyContent: 'center'
+              }}
+              onMouseEnter={(e) => {
+                if (zoomLevel > 0.1) e.currentTarget.style.backgroundColor = '#f5f5f5';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              －
+            </button>
+            
+            <select
+              value={zoomLevel}
+              onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
+              title="Zoom Level"
+              style={{
+                padding: '0.25rem 0.375rem',
+                backgroundColor: 'white',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                color: '#666',
+                minWidth: '65px',
+                appearance: 'none',
+                backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 0.125rem center',
+                backgroundSize: '14px',
+                paddingRight: '1.25rem',
+                height: '28px'
+              }}
+            >
+              <option value="0.5">50%</option>
+              <option value="0.75">75%</option>
+              <option value="1">100%</option>
+              <option value="1.5">150%</option>
+              <option value="2">200%</option>
+              <option value="3">300%</option>
+              <option value="4">400%</option>
+            </select>
+            
+            <button
+              onClick={() => setZoomLevel(Math.min(4, zoomLevel + 0.25))}
+              disabled={zoomLevel >= 4}
+              title="Zoom In"
+              style={{
+                padding: '0.25rem',
+                backgroundColor: 'transparent',
+                border: '1px solid transparent',
+                borderRadius: '4px',
+                cursor: zoomLevel < 4 ? 'pointer' : 'not-allowed',
+                opacity: zoomLevel < 4 ? 1 : 0.3,
+                fontSize: '0.875rem',
+                display: 'flex',
+                alignItems: 'center',
+                width: '28px',
+                height: '28px',
+                justifyContent: 'center'
+              }}
+              onMouseEnter={(e) => {
+                if (zoomLevel < 4) e.currentTarget.style.backgroundColor = '#f5f5f5';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              ＋
+            </button>
           </div>
         </div>
       )}
@@ -493,6 +606,8 @@ function App() {
               width={stageSize.width}
               height={stageSize.height}
               ref={stageRef}
+              scaleX={zoomLevel}
+              scaleY={zoomLevel}
               style={{
                 border: '1px solid #ddd',
                 backgroundColor: '#fafafa',
