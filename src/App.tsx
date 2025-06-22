@@ -20,6 +20,7 @@ function App() {
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
   const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle } = useDrawing()
   const { state: drawingState, setShapes } = useDrawingContext()
+  const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true)
   
   // Text dialog state
   const [textDialogOpen, setTextDialogOpen] = useState(false)
@@ -387,15 +388,90 @@ function App() {
         {/* Properties Panel */}
         {imageData && (
           <aside style={{
-            width: '200px',
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            padding: '1rem',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-            overflowY: 'auto',
-            maxHeight: 'calc(100vh - 96px)' // Adjusted for header + toolbar
+            position: 'relative',
+            transition: 'width 0.3s ease',
+            width: propertiesPanelOpen ? '200px' : '40px',
           }}>
-            <DrawingToolbar />
+            {/* Toggle Button */}
+            <button
+              onClick={() => setPropertiesPanelOpen(!propertiesPanelOpen)}
+              style={{
+                position: 'absolute',
+                left: propertiesPanelOpen ? '200px' : '40px',
+                top: '1rem',
+                transform: 'translateX(-50%)',
+                width: '24px',
+                height: '48px',
+                backgroundColor: 'white',
+                border: '1px solid #e0e0e0',
+                borderRadius: '0 4px 4px 0',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.75rem',
+                color: '#666',
+                boxShadow: '1px 0 2px rgba(0,0,0,0.05)',
+                zIndex: 10,
+                padding: 0,
+                transition: 'left 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#f5f5f5';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'white';
+              }}
+            >
+              {propertiesPanelOpen ? '◀' : '▶'}
+            </button>
+            
+            {/* Panel Content */}
+            <div style={{
+              width: propertiesPanelOpen ? '200px' : '40px',
+              backgroundColor: 'white',
+              borderRadius: '8px',
+              padding: propertiesPanelOpen ? '1rem' : '0.5rem',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              maxHeight: 'calc(100vh - 96px)', // Adjusted for header + toolbar
+              transition: 'all 0.3s ease'
+            }}>
+              {propertiesPanelOpen ? (
+                <DrawingToolbar />
+              ) : (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '1rem',
+                  marginTop: '3rem'
+                }}>
+                  {/* Minimized indicators */}
+                  <div 
+                    title={`Stroke: ${currentStyle.stroke}`}
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      backgroundColor: currentStyle.stroke,
+                      borderRadius: '4px',
+                      border: '1px solid #ddd'
+                    }} 
+                  />
+                  <div 
+                    title={`Width: ${currentStyle.strokeWidth}px`}
+                    style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 'bold',
+                      color: '#666'
+                    }}
+                  >
+                    {currentStyle.strokeWidth}
+                  </div>
+                </div>
+              )}
+            </div>
           </aside>
         )}
 
