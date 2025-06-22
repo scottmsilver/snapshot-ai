@@ -110,7 +110,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       if (!pos) return;
 
       // Check if clicking on empty space (no shape)
-      const clickedOnEmpty = e.target === stage || e.target.getLayer() === stage.findOne('Layer');
+      const clickedOnEmpty = e.target === stage || 
+                           e.target.getLayer() === stage.findOne('Layer') ||
+                           e.target.getClassName() === 'Layer';
       
       // Check if clicking on transformer or its anchors
       const targetName = e.target.name?.() || '';
@@ -323,17 +325,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         if (tempPoints.length < 2) return null;
         const circleStart = tempPoints[0];
         const circleEnd = tempPoints[1];
-        const radiusX = Math.abs(circleEnd.x - circleStart.x) / 2;
-        const radiusY = Math.abs(circleEnd.y - circleStart.y) / 2;
-        const centerX = (circleStart.x + circleEnd.x) / 2;
-        const centerY = (circleStart.y + circleEnd.y) / 2;
+        // Calculate distance from start point to end point
+        const dx = circleEnd.x - circleStart.x;
+        const dy = circleEnd.y - circleStart.y;
+        // Use the larger dimension to create a perfect circle
+        const radius = Math.max(Math.abs(dx), Math.abs(dy)) / 2;
+        // Center based on the start point and the direction of drag
+        const centerX = circleStart.x + (dx > 0 ? radius : -radius);
+        const centerY = circleStart.y + (dy > 0 ? radius : -radius);
         
         return (
           <Circle
             x={centerX}
             y={centerY}
-            radiusX={radiusX}
-            radiusY={radiusY}
+            radius={radius}
             stroke={currentStyle.stroke}
             strokeWidth={currentStyle.strokeWidth}
             fill={currentStyle.fill}
@@ -643,8 +648,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             {...commonProps}
             x={circleShape.x}
             y={circleShape.y}
-            radiusX={circleShape.radiusX}
-            radiusY={circleShape.radiusY}
+            radius={circleShape.radiusX} // Use radiusX as the radius (they should be equal for circles)
             stroke={circleShape.style.stroke}
             strokeWidth={circleShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
             fill={circleShape.style.fill}
@@ -956,6 +960,22 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           ignoreStroke={false}
           keepRatio={false}
           boundBoxFunc={(oldBox, newBox) => {
+            // Check if any selected shape is a circle
+            const hasCircle = selectedShapeIds.some(id => {
+              const shape = shapes.find(s => s.id === id);
+              return shape?.type === DrawingTool.CIRCLE;
+            });
+            
+            // For circles, maintain aspect ratio
+            if (hasCircle && selectedShapeIds.length === 1) {
+              const size = Math.max(newBox.width, newBox.height);
+              return {
+                ...newBox,
+                width: size,
+                height: size
+              };
+            }
+            
             // Prevent negative width/height which can cause issues with arrows
             if (newBox.width < 5 || newBox.height < 5) {
               return oldBox;
@@ -1029,14 +1049,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                 
               } else if (shape.type === DrawingTool.CIRCLE) {
                 const circleShape = shape as CircleShape;
-                const newRadiusX = Math.max(5, circleShape.radiusX * scaleX);
-                const newRadiusY = Math.max(5, circleShape.radiusY * scaleY);
+                // Keep it as a perfect circle by using the larger scale factor
+                const scale = Math.max(scaleX, scaleY);
+                const newRadius = Math.max(5, circleShape.radiusX * scale);
                 
                 updateShape(shapeId, {
                   x: x,
                   y: y,
-                  radiusX: newRadiusX,
-                  radiusY: newRadiusY,
+                  radiusX: newRadius,
+                  radiusY: newRadius,
                   rotation: rotation
                 });
                 

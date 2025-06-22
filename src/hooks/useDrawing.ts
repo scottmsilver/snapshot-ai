@@ -146,18 +146,22 @@ export const useDrawing = () => {
         break;
 
       case DrawingTool.CIRCLE:
-        const radiusX = Math.abs(endPoint.x - startPoint.x) / 2;
-        const radiusY = Math.abs(endPoint.y - startPoint.y) / 2;
-        const centerX = (startPoint.x + endPoint.x) / 2;
-        const centerY = (startPoint.y + endPoint.y) / 2;
+        // Calculate distance from start point to end point
+        const dx = endPoint.x - startPoint.x;
+        const dy = endPoint.y - startPoint.y;
+        // Use the larger dimension to create a perfect circle
+        const radius = Math.max(Math.abs(dx), Math.abs(dy)) / 2;
+        // Center based on the start point and the direction of drag
+        const centerX = startPoint.x + (dx > 0 ? radius : -radius);
+        const centerY = startPoint.y + (dy > 0 ? radius : -radius);
 
         newShape = {
           id: generateId(),
           type: DrawingTool.CIRCLE,
           x: centerX,
           y: centerY,
-          radiusX: radiusX,
-          radiusY: radiusY,
+          radiusX: radius,
+          radiusY: radius,
           style: { ...state.currentStyle },
           visible: true,
           locked: false,
