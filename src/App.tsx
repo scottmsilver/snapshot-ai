@@ -168,12 +168,131 @@ function App() {
     }}>
       {/* Header */}
       <header style={{
-        backgroundColor: '#333',
-        color: 'white',
-        padding: '1rem',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        backgroundColor: '#ffffff',
+        borderBottom: '1px solid #e0e0e0',
+        padding: '0 1rem',
+        height: '40px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
       }}>
-        <h1 style={{ margin: 0, fontSize: '1.5rem' }}>Image Markup Tool</h1>
+        {/* Left: Logo and App Name */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <span style={{ fontSize: '1.25rem' }}>🎨</span>
+          <h1 style={{ 
+            margin: 0, 
+            fontSize: '1rem',
+            fontWeight: '600',
+            color: '#333'
+          }}>
+            Markup
+          </h1>
+        </div>
+
+        {/* Center: File name */}
+        <div style={{
+          position: 'absolute',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          color: '#666',
+          fontSize: '0.875rem'
+        }}>
+          {imageData ? imageData.name : 'No image loaded'}
+        </div>
+
+        {/* Right: Quick Actions */}
+        <div style={{ 
+          display: 'flex', 
+          gap: '0.5rem',
+          alignItems: 'center'
+        }}>
+          {imageData && (
+            <>
+              <button
+                onClick={() => {
+                  clearImage();
+                  setKonvaImage(null);
+                  clearSelection();
+                  setShapes([]);
+                }}
+                title="New Image"
+                style={{
+                  padding: '0.25rem 0.75rem',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  color: '#666',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f5f5f5';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                📄 New
+              </button>
+              <button
+                onClick={handleCopyToClipboard}
+                title="Copy to Clipboard (Ctrl+C)"
+                style={{
+                  padding: '0.25rem 0.75rem',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  color: '#666',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f5f5f5';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                📋 Copy
+              </button>
+              <button
+                onClick={handleDownloadImage}
+                title="Download Image (Ctrl+S)"
+                style={{
+                  padding: '0.25rem 0.75rem',
+                  backgroundColor: '#4a90e2',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#357abd';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#4a90e2';
+                }}
+              >
+                💾 Export
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
       {/* Main Content */}
@@ -191,9 +310,8 @@ function App() {
           padding: '1rem',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
           overflowY: 'auto',
-          maxHeight: 'calc(100vh - 5rem)'
+          maxHeight: 'calc(100vh - 56px)' // Adjusted for smaller header
         }}>
-          <h2 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Tools</h2>
           {imageData ? (
             <>
               <div style={{ 
@@ -243,94 +361,17 @@ function App() {
                 </button>
               </div>
               
-              <button
-                onClick={() => {
-                  clearImage();
-                  setKonvaImage(null);
-                  clearSelection();
-                  setShapes([]);
-                }}
-                style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  marginBottom: '1rem',
-                  backgroundColor: '#f0f0f0',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '0.875rem'
-                }}
-              >
-                Upload New Image
-              </button>
-              
-              <div style={{ 
-                display: 'flex', 
-                gap: '0.5rem', 
-                marginBottom: '1rem' 
-              }}>
-                <button
-                  onClick={handleCopyToClipboard}
-                  title="Copy to Clipboard (Ctrl+C)"
-                  style={{
-                    flex: 1,
-                    padding: '0.5rem',
-                    backgroundColor: '#4a90e2',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#357abd';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#4a90e2';
-                  }}
-                >
-                  📋 Copy
-                </button>
-                <button
-                  onClick={handleDownloadImage}
-                  title="Download Image (Ctrl+S)"
-                  style={{
-                    flex: 1,
-                    padding: '0.5rem',
-                    backgroundColor: '#5cb85c',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#4cae4c';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#5cb85c';
-                  }}
-                >
-                  💾 Save
-                </button>
-              </div>
-              
-              <hr style={{ 
-                margin: '1rem 0', 
-                border: 'none', 
-                borderTop: '1px solid #eee' 
-              }} />
-              
               <DrawingToolbar />
             </>
           ) : (
-            <p style={{ color: '#666' }}>Upload an image to get started</p>
+            <div style={{ 
+              textAlign: 'center',
+              color: '#666',
+              marginTop: '2rem'
+            }}>
+              <p style={{ marginBottom: '1rem' }}>No image loaded</p>
+              <p style={{ fontSize: '0.875rem' }}>Drop an image on the canvas or click to upload</p>
+            </div>
           )}
         </aside>
 

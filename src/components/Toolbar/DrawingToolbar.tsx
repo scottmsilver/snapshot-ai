@@ -47,7 +47,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style }) => {
           textTransform: 'uppercase',
           letterSpacing: '0.05em'
         }}>
-          Drawing Tools
+          Tools
         </h3>
         <div style={{
           display: 'grid',
