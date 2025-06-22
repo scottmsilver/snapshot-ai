@@ -18,10 +18,13 @@ function App() {
   const stageRef = useRef<Konva.Stage>(null)
   const { imageData, loadImage, clearImage } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
-  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle } = useDrawing()
+  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds } = useDrawing()
   const { state: drawingState, setShapes } = useDrawingContext()
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true)
   const [zoomLevel, setZoomLevel] = useState(1) // 1 = 100%
+  
+  // Get selected shapes
+  const selectedShapes = shapes.filter(shape => selectedShapeIds.includes(shape.id))
   
   // Text dialog state
   const [textDialogOpen, setTextDialogOpen] = useState(false)
@@ -552,7 +555,7 @@ function App() {
               transition: 'all 0.3s ease'
             }}>
               {propertiesPanelOpen ? (
-                <DrawingToolbar />
+                <DrawingToolbar selectedShapes={selectedShapes} />
               ) : (
                 <div style={{
                   display: 'flex',
@@ -562,6 +565,15 @@ function App() {
                   marginTop: '3rem'
                 }}>
                   {/* Minimized indicators */}
+                  {selectedShapes.length > 0 && (
+                    <div style={{
+                      fontSize: '0.625rem',
+                      color: '#666',
+                      textAlign: 'center'
+                    }}>
+                      {selectedShapes.length}<br/>selected
+                    </div>
+                  )}
                   <div 
                     title={`Stroke: ${currentStyle.stroke}`}
                     style={{
