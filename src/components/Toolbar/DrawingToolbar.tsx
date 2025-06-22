@@ -22,9 +22,10 @@ const tools = [
 
 interface DrawingToolbarProps {
   style?: React.CSSProperties;
+  horizontal?: boolean;
 }
 
-export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style }) => {
+export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizontal = false }) => {
   const { activeTool, setActiveTool, currentStyle, updateStyle, handleKeyPress } = useDrawing();
 
   // Set up keyboard shortcuts
@@ -35,37 +36,56 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style }) => {
     };
   }, [handleKeyPress]);
 
+  // Horizontal layout for main toolbar
+  if (horizontal) {
+    return (
+      <div style={{
+        display: 'flex',
+        gap: '0.25rem',
+        alignItems: 'center',
+        ...style
+      }}>
+        {tools.map(({ tool, icon: Icon, label, shortcut }) => (
+          <button
+            key={tool}
+            title={`${label} (${shortcut})`}
+            onClick={() => setActiveTool(tool)}
+            style={{
+              padding: '0.5rem 0.75rem',
+              backgroundColor: activeTool === tool ? '#e3f2fd' : 'transparent',
+              border: activeTool === tool ? '1px solid #2196f3' : '1px solid transparent',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.875rem',
+              color: activeTool === tool ? '#1976d2' : '#666',
+              transition: 'all 0.2s',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTool !== tool) {
+                e.currentTarget.style.backgroundColor = '#f5f5f5';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTool !== tool) {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }
+            }}
+          >
+            <Icon size={18} />
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  // Vertical layout for sidebar - now only shows style controls
   return (
     <div style={{ ...style }}>
-      {/* Drawing Tools Section */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ 
-          fontSize: '0.875rem', 
-          fontWeight: '600',
-          color: '#333',
-          marginBottom: '0.75rem',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em'
-        }}>
-          Tools
-        </h3>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '8px'
-        }}>
-          {tools.map(({ tool, icon: Icon, label, shortcut }) => (
-            <ToolButton
-              key={tool}
-              icon={<Icon size={20} />}
-              label={label}
-              shortcut={shortcut}
-              isActive={activeTool === tool}
-              onClick={() => setActiveTool(tool)}
-            />
-          ))}
-        </div>
-      </div>
 
       {/* Style Controls Section */}
       <div>
@@ -77,7 +97,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style }) => {
           textTransform: 'uppercase',
           letterSpacing: '0.05em'
         }}>
-          Style
+          Properties
         </h3>
         
         {/* Color Picker */}
@@ -122,13 +142,39 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style }) => {
         {/* Stroke Width */}
         <div style={{ marginBottom: '1rem' }}>
           <label style={{ 
-            display: 'block', 
+            display: 'flex',
+            justifyContent: 'space-between',
             fontSize: '0.75rem', 
             color: '#666',
-            marginBottom: '0.25rem'
+            marginBottom: '0.5rem'
           }}>
-            Stroke Width: {currentStyle.strokeWidth}px
+            <span>Stroke Width</span>
+            <span style={{ 
+              fontWeight: '600',
+              color: '#333'
+            }}>{currentStyle.strokeWidth}px</span>
           </label>
+          <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '0.5rem' }}>
+            {[1, 3, 5, 10].map(width => (
+              <button
+                key={width}
+                onClick={() => updateStyle({ strokeWidth: width })}
+                style={{
+                  flex: 1,
+                  padding: '0.25rem',
+                  fontSize: '0.75rem',
+                  backgroundColor: currentStyle.strokeWidth === width ? '#e3f2fd' : '#f5f5f5',
+                  border: currentStyle.strokeWidth === width ? '1px solid #2196f3' : '1px solid #ddd',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  color: currentStyle.strokeWidth === width ? '#1976d2' : '#666',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {width}
+              </button>
+            ))}
+          </div>
           <input
             type="range"
             min="1"
@@ -146,12 +192,17 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style }) => {
         {/* Opacity */}
         <div style={{ marginBottom: '1rem' }}>
           <label style={{ 
-            display: 'block', 
+            display: 'flex',
+            justifyContent: 'space-between',
             fontSize: '0.75rem', 
             color: '#666',
-            marginBottom: '0.25rem'
+            marginBottom: '0.5rem'
           }}>
-            Opacity: {Math.round(currentStyle.opacity * 100)}%
+            <span>Opacity</span>
+            <span style={{ 
+              fontWeight: '600',
+              color: '#333'
+            }}>{Math.round(currentStyle.opacity * 100)}%</span>
           </label>
           <input
             type="range"

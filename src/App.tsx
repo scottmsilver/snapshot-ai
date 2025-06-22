@@ -295,6 +295,88 @@ function App() {
         </div>
       </header>
 
+      {/* Horizontal Toolbar */}
+      {imageData && (
+        <div style={{
+          backgroundColor: '#ffffff',
+          borderBottom: '1px solid #e0e0e0',
+          padding: '0.5rem 1rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+        }}>
+          {/* Undo/Redo Group */}
+          <div style={{
+            display: 'flex',
+            gap: '0.25rem',
+            paddingRight: '1rem',
+            borderRight: '1px solid #e0e0e0'
+          }}>
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              style={{
+                padding: '0.375rem',
+                backgroundColor: canUndo ? 'transparent' : 'transparent',
+                border: '1px solid transparent',
+                borderRadius: '4px',
+                cursor: canUndo ? 'pointer' : 'not-allowed',
+                opacity: canUndo ? 1 : 0.3,
+                display: 'flex',
+                alignItems: 'center',
+                fontSize: '1.25rem',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                if (canUndo) e.currentTarget.style.backgroundColor = '#f5f5f5';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              ↶
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Y)"
+              style={{
+                padding: '0.375rem',
+                backgroundColor: 'transparent',
+                border: '1px solid transparent',
+                borderRadius: '4px',
+                cursor: canRedo ? 'pointer' : 'not-allowed',
+                opacity: canRedo ? 1 : 0.3,
+                display: 'flex',
+                alignItems: 'center',
+                fontSize: '1.25rem',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                if (canRedo) e.currentTarget.style.backgroundColor = '#f5f5f5';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              ↷
+            </button>
+          </div>
+
+          {/* Drawing Tools */}
+          <div style={{ 
+            display: 'flex', 
+            gap: '0.25rem',
+            flex: 1
+          }}>
+            {/* Tools will be rendered here */}
+            <DrawingToolbar horizontal={true} />
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
       <main style={{
         flex: 1,
@@ -302,78 +384,20 @@ function App() {
         gap: '1rem',
         padding: '1rem'
       }}>
-        {/* Toolbar */}
-        <aside style={{
-          width: '200px',
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          padding: '1rem',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-          overflowY: 'auto',
-          maxHeight: 'calc(100vh - 56px)' // Adjusted for smaller header
-        }}>
-          {imageData ? (
-            <>
-              <div style={{ 
-                display: 'flex', 
-                gap: '0.5rem', 
-                marginBottom: '1rem' 
-              }}>
-                <button
-                  onClick={undo}
-                  disabled={!canUndo}
-                  title="Undo (Ctrl+Z)"
-                  style={{
-                    flex: 1,
-                    padding: '0.5rem',
-                    backgroundColor: canUndo ? '#f0f0f0' : '#fafafa',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px',
-                    cursor: canUndo ? 'pointer' : 'not-allowed',
-                    fontSize: '0.875rem',
-                    opacity: canUndo ? 1 : 0.5,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  ↶ Undo
-                </button>
-                <button
-                  onClick={redo}
-                  disabled={!canRedo}
-                  title="Redo (Ctrl+Y)"
-                  style={{
-                    flex: 1,
-                    padding: '0.5rem',
-                    backgroundColor: canRedo ? '#f0f0f0' : '#fafafa',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px',
-                    cursor: canRedo ? 'pointer' : 'not-allowed',
-                    fontSize: '0.875rem',
-                    opacity: canRedo ? 1 : 0.5,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  ↷ Redo
-                </button>
-              </div>
-              
-              <DrawingToolbar />
-            </>
-          ) : (
-            <div style={{ 
-              textAlign: 'center',
-              color: '#666',
-              marginTop: '2rem'
-            }}>
-              <p style={{ marginBottom: '1rem' }}>No image loaded</p>
-              <p style={{ fontSize: '0.875rem' }}>Drop an image on the canvas or click to upload</p>
-            </div>
-          )}
-        </aside>
+        {/* Properties Panel */}
+        {imageData && (
+          <aside style={{
+            width: '200px',
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            padding: '1rem',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            overflowY: 'auto',
+            maxHeight: 'calc(100vh - 96px)' // Adjusted for header + toolbar
+          }}>
+            <DrawingToolbar />
+          </aside>
+        )}
 
         {/* Canvas Area */}
         <section style={{
