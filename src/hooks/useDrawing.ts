@@ -198,6 +198,11 @@ export const useDrawing = () => {
     setDrawingState(false, null, null);
     setTempPoints([]);
     setActiveShape(null);
+    
+    // Switch to select tool after creating a shape (except for pen tool which allows continuous drawing)
+    if (newShape && state.activeTool !== DrawingTool.PEN) {
+      setActiveTool(DrawingTool.SELECT);
+    }
   }, [
     state.activeTool,
     state.isDrawing,
@@ -209,6 +214,7 @@ export const useDrawing = () => {
     setDrawingState,
     setTempPoints,
     setActiveShape,
+    setActiveTool,
   ]);
 
   // Cancel current drawing operation

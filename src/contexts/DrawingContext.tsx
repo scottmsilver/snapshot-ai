@@ -114,6 +114,7 @@ const drawingReducer = (state: DrawingState, action: DrawingAction): DrawingStat
         ...state,
         shapes: newShapes,
         maxZIndex: action.shape.zIndex,
+        selectedShapeIds: [action.shape.id], // Select the newly created shape
       };
 
     case DrawingActionType.UPDATE_SHAPE:
