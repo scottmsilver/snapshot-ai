@@ -15,7 +15,7 @@ import { DrawingTool, type Point, type TextShape } from '@/types/drawing'
 
 function App() {
   const [stageSize] = useState({ width: 800, height: 600 })
-  const stageRef = useRef<Konva.Stage>(null)
+  const stageRef = useRef<Konva.Stage | null>(null)
   const { imageData, loadImage, clearImage } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
   const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds } = useDrawing()
@@ -648,15 +648,6 @@ function App() {
                   setTextPosition(pos);
                   setEditingTextId(null);
                   setTextDialogOpen(true);
-                }}
-                onTextEdit={(shapeId) => {
-                  const shape = shapes.find(s => s.id === shapeId);
-                  if (shape && shape.type === DrawingTool.TEXT) {
-                    const textShape = shape as TextShape;
-                    setEditingTextId(shapeId);
-                    setTextPosition({ x: textShape.x, y: textShape.y });
-                    setTextDialogOpen(true);
-                  }
                 }}
               />
             </Stage>
