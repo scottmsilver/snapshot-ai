@@ -5,7 +5,8 @@ export const DrawingTool = {
   RECTANGLE: 'rectangle',
   CIRCLE: 'circle',
   ARROW: 'arrow',
-  TEXT: 'text'
+  TEXT: 'text',
+  CALLOUT: 'callout'
 } as const;
 
 export type DrawingTool = typeof DrawingTool[keyof typeof DrawingTool];
@@ -107,9 +108,39 @@ export interface TextShape extends BaseShape {
   rotation?: number;
 }
 
+export interface CalloutShape extends BaseShape {
+  type: typeof DrawingTool.CALLOUT;
+  // Text box position and properties
+  textX: number;
+  textY: number;
+  text: string;
+  fontSize: number;
+  fontFamily: string;
+  textWidth?: number;
+  textHeight?: number;
+  padding: number;
+  
+  // Arrow properties
+  arrowX: number;  // Arrow tip X
+  arrowY: number;  // Arrow tip Y
+  
+  // Arrow base position on perimeter (0 to 1, where 0 = top-left corner going clockwise)
+  perimeterOffset: number;  // 0-0.25 = top edge, 0.25-0.5 = right edge, 0.5-0.75 = bottom edge, 0.75-1 = left edge
+  
+  // Control points for cubic Bezier curve (user-adjustable)
+  curveControl1X?: number;
+  curveControl1Y?: number;
+  curveControl2X?: number;
+  curveControl2Y?: number;
+  
+  // Styling
+  backgroundColor?: string;
+  borderRadius?: number;
+}
+
 
 // Union type for all shapes
-export type Shape = PenShape | RectShape | CircleShape | ArrowShape | TextShape;
+export type Shape = PenShape | RectShape | CircleShape | ArrowShape | TextShape | CalloutShape;
 
 // Drawing state
 export interface DrawingState {

@@ -48,3 +48,12 @@ export const TextIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor
   </svg>
 );
 
+export const CalloutIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+    <rect x="4" y="4" width="16" height="10" rx="2" />
+    <path d="M8 14v3l3-3" />
+    <line x1="8" y1="8" x2="16" y2="8" />
+    <line x1="8" y1="11" x2="14" y2="11" />
+  </svg>
+);
+

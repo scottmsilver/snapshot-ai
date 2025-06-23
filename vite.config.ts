@@ -8,6 +8,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    watch: {
+      ignored: ['**/vite-debug.log', '**/vite-output.log', '**/vite.log', '**/*.log']
+    }
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

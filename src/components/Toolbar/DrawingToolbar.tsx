@@ -1,13 +1,14 @@
 import React, { useEffect } from 'react';
 import { useDrawing } from '@/hooks/useDrawing';
-import { DrawingTool, type Shape, type TextShape, type DrawingStyle } from '@/types/drawing';
+import { DrawingTool, type Shape, type TextShape, type CalloutShape, type DrawingStyle } from '@/types/drawing';
 import {
   SelectIcon,
   PenIcon,
   RectangleIcon,
   CircleIcon,
   ArrowIcon,
-  TextIcon
+  TextIcon,
+  CalloutIcon
 } from '@/components/Icons/ToolIcons';
 
 const tools = [
@@ -16,7 +17,8 @@ const tools = [
   { tool: DrawingTool.RECTANGLE, icon: RectangleIcon, label: 'Rectangle', shortcut: 'R' },
   { tool: DrawingTool.CIRCLE, icon: CircleIcon, label: 'Circle', shortcut: 'C' },
   { tool: DrawingTool.ARROW, icon: ArrowIcon, label: 'Arrow', shortcut: 'A' },
-  { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' }
+  { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' },
+  { tool: DrawingTool.CALLOUT, icon: CalloutIcon, label: 'Callout', shortcut: 'L' }
 ];
 
 interface DrawingToolbarProps {
@@ -41,14 +43,15 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
   
   // Text-specific display values
   const selectedTextShape = selectedShape && selectedShape.type === DrawingTool.TEXT ? selectedShape as TextShape : null;
-  const displayFontSize = selectedTextShape ? selectedTextShape.fontSize : currentStyle.strokeWidth * 8;
-  const displayFontFamily = selectedTextShape ? selectedTextShape.fontFamily : currentStyle.fontFamily || 'Arial';
+  const selectedCalloutShape = selectedShape && selectedShape.type === DrawingTool.CALLOUT ? selectedShape as CalloutShape : null;
+  const displayFontSize = selectedTextShape ? selectedTextShape.fontSize : selectedCalloutShape ? selectedCalloutShape.fontSize : currentStyle.strokeWidth * 8;
+  const displayFontFamily = selectedTextShape ? selectedTextShape.fontFamily : selectedCalloutShape ? selectedCalloutShape.fontFamily : currentStyle.fontFamily || 'Arial';
   
   // Determine which properties to show
   const toolOrShapeType = selectedShape ? selectedShape.type : activeTool;
   const showFillOption = toolOrShapeType === DrawingTool.RECTANGLE || toolOrShapeType === DrawingTool.CIRCLE;
-  const showStrokeWidth = toolOrShapeType !== DrawingTool.TEXT;
-  const showTextOptions = toolOrShapeType === DrawingTool.TEXT;
+  const showStrokeWidth = toolOrShapeType !== DrawingTool.TEXT && toolOrShapeType !== DrawingTool.CALLOUT;
+  const showTextOptions = toolOrShapeType === DrawingTool.TEXT || toolOrShapeType === DrawingTool.CALLOUT;
 
   // Handle property updates for both selected shapes and default style
   const handlePropertyChange = (updates: Partial<DrawingStyle>) => {
@@ -84,6 +87,18 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
           // Also reset width if alignment changes to ensure proper reflow
           if (updates.align !== undefined) {
             shapeUpdates.width = undefined;
+          }
+          
+          updateShape(shape.id, shapeUpdates);
+        } else if (shape.type === DrawingTool.CALLOUT) {
+          const shapeUpdates: any = {
+            ...updates,
+            updatedAt: Date.now()
+          };
+          
+          // If text content or font properties change, reset text width to allow reflow
+          if (updates.text !== undefined || updates.fontSize || updates.fontFamily) {
+            shapeUpdates.textWidth = undefined;
           }
           
           updateShape(shape.id, shapeUpdates);
@@ -170,7 +185,8 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
         }}>
           {hasSelection ? (singleSelection ? 'Shape Properties' : `${selectedShapes.length} Shapes Selected`) :
            activeTool === DrawingTool.SELECT ? 'Selection' : 
-           activeTool === DrawingTool.TEXT ? 'Text Properties' : 'Drawing Properties'}
+           activeTool === DrawingTool.TEXT ? 'Text Properties' : 
+           activeTool === DrawingTool.CALLOUT ? 'Callout Properties' : 'Drawing Properties'}
         </h3>
         
         {/* Selection tool message - only show if nothing selected */}
@@ -363,11 +379,11 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
               textTransform: 'uppercase',
               letterSpacing: '0.05em'
             }}>
-              {selectedTextShape ? 'Text Properties' : 'Text Settings'}
+              {selectedTextShape ? 'Text Properties' : selectedCalloutShape ? 'Callout Properties' : 'Text Settings'}
             </h3>
             
-            {/* Text Content Editor for selected text */}
-            {selectedTextShape && (
+            {/* Text Content Editor for selected text or callout */}
+            {(selectedTextShape || selectedCalloutShape) && (
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ 
                   display: 'block', 
@@ -375,12 +391,12 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
                   color: '#666',
                   marginBottom: '0.25rem'
                 }}>
-                  Text Content
+                  {selectedCalloutShape ? 'Callout Text' : 'Text Content'}
                 </label>
                 <textarea
-                  value={selectedTextShape.text}
+                  value={selectedTextShape ? selectedTextShape.text : selectedCalloutShape?.text || ''}
                   onChange={(e) => handleTextPropertyChange({ text: e.target.value })}
-                  placeholder="Enter text..."
+                  placeholder={selectedCalloutShape ? "Enter callout text..." : "Enter text..."}
                   style={{
                     width: '100%',
                     minHeight: '60px',
@@ -388,7 +404,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
                     border: '1px solid #ddd',
                     borderRadius: '4px',
                     fontSize: '0.75rem',
-                    fontFamily: selectedTextShape.fontFamily || 'Arial',
+                    fontFamily: selectedTextShape ? selectedTextShape.fontFamily : selectedCalloutShape?.fontFamily || 'Arial',
                     resize: 'vertical',
                     backgroundColor: 'white'
                   }}
@@ -399,7 +415,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
                   marginTop: '0.25rem',
                   textAlign: 'right'
                 }}>
-                  {selectedTextShape.text.length} characters
+                  {(selectedTextShape ? selectedTextShape.text : selectedCalloutShape?.text || '').length} characters
                 </div>
               </div>
             )}
@@ -463,8 +479,8 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
               </select>
             </div>
 
-            {/* Text Alignment - only for selected text */}
-            {selectedTextShape && (
+            {/* Text Alignment - only for selected text (not callouts) */}
+            {selectedTextShape && !selectedCalloutShape && (
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ 
                   display: 'block', 

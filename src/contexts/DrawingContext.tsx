@@ -122,7 +122,7 @@ const drawingReducer = (state: DrawingState, action: DrawingAction): DrawingStat
         ...state,
         shapes: state.shapes.map(shape =>
           shape.id === action.id
-            ? { ...shape, ...action.updates, updatedAt: Date.now() }
+            ? { ...shape, ...action.updates, updatedAt: Date.now() } as Shape
             : shape
         ),
       };

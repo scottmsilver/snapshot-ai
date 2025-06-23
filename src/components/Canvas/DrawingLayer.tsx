@@ -1,10 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Layer, Line, Rect, Circle, Arrow, Text, Transformer } from 'react-konva';
+import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, RegularPolygon } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
 import { useSelectionMachine } from '@/hooks/useSelectionMachine';
 import { DrawingTool } from '@/types/drawing';
-import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, Point } from '@/types/drawing';
+import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, Point } from '@/types/drawing';
+import { 
+  perimeterOffsetToPoint, 
+  getArrowPathString, 
+  calculateArrowHeadRotation, 
+  pointToPerimeterOffset, 
+  calculateInitialPerimeterOffset,
+  autoAdjustControlPoint,
+  isValidControlPoint,
+  getOptimalControlPoints
+} from '@/utils/calloutGeometry';
 
 interface DrawingLayerProps {
   stageRef: React.RefObject<Konva.Stage | null>;
@@ -75,15 +85,25 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     if (transformerRef.current) {
       const nodes: Konva.Node[] = [];
       drawingSelectedShapeIds.forEach(id => {
-        const node = selectedShapeRefs.current.get(id);
-        if (node) {
-          nodes.push(node);
+        const shape = shapes.find(s => s.id === id);
+        if (shape?.type === DrawingTool.CALLOUT) {
+          // For callouts, only transform the text box rect
+          const rectNode = selectedShapeRefs.current.get(id + '_textbox');
+          if (rectNode) {
+            nodes.push(rectNode);
+          }
+        } else {
+          // For other shapes, transform the whole shape
+          const node = selectedShapeRefs.current.get(id);
+          if (node) {
+            nodes.push(node);
+          }
         }
       });
       transformerRef.current.nodes(nodes);
       transformerRef.current.getLayer()?.batchDraw();
     }
-  }, [drawingSelectedShapeIds]);
+  }, [drawingSelectedShapeIds, shapes]);
   
   // Force updates while dragging arrow
   useEffect(() => {
@@ -379,6 +399,106 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           />
         );
 
+      case DrawingTool.CALLOUT:
+        if (tempPoints.length < 2) return null;
+        const calloutStart = tempPoints[0]; // Arrow tip (what we're pointing at)
+        const calloutEnd = tempPoints[1];   // Where text box will be
+        
+        // Calculate text box dimensions and position
+        const textPadding = 10;
+        const textWidth = 120;
+        const textHeight = 40;
+        const bgWidth = textWidth;
+        const bgHeight = textHeight;
+        
+        // Calculate text box position based on drag
+        const minDistance = 50;
+        const calloutDx = calloutEnd.x - calloutStart.x;
+        const calloutDy = calloutEnd.y - calloutStart.y;
+        const distance = Math.sqrt(calloutDx * calloutDx + calloutDy * calloutDy);
+        
+        let textX: number, textY: number;
+        
+        if (distance < minDistance) {
+          // If drag is too short, position with minimum distance
+          const angle = Math.atan2(calloutDy, calloutDx);
+          textX = calloutStart.x + Math.cos(angle) * minDistance - bgWidth / 2;
+          textY = calloutStart.y + Math.sin(angle) * minDistance - bgHeight / 2;
+        } else {
+          // Position text box centered at cursor
+          textX = calloutEnd.x - bgWidth / 2;
+          textY = calloutEnd.y - bgHeight / 2;
+        }
+        
+        // Calculate perimeter-based arrow for preview
+        const previewTextBox = {
+          x: textX,
+          y: textY,
+          width: bgWidth,
+          height: bgHeight
+        };
+        const previewPerimeterOffset = calculateInitialPerimeterOffset(previewTextBox, calloutStart);
+        const previewBasePoint = perimeterOffsetToPoint(previewTextBox, previewPerimeterOffset);
+        const previewControlPoints = getOptimalControlPoints(previewBasePoint, calloutStart, previewTextBox);
+        
+        return (
+          <Group>
+            {/* Background rectangle */}
+            <Rect
+              x={textX}
+              y={textY}
+              width={bgWidth}
+              height={bgHeight}
+              fill="#ffffff"
+              stroke={currentStyle.stroke}
+              strokeWidth={currentStyle.strokeWidth}
+              cornerRadius={4}
+              opacity={0.8}
+              shadowColor="rgba(0, 0, 0, 0.1)"
+              shadowBlur={3}
+              shadowOffset={{ x: 1, y: 1 }}
+              listening={false}
+            />
+            
+            {/* Curved arrow using Path */}
+            <Path
+              data={getArrowPathString(
+                previewBasePoint,
+                previewControlPoints.control1,
+                previewControlPoints.control2,
+                calloutStart  // Arrow points to start point
+              )}
+              stroke={currentStyle.stroke}
+              strokeWidth={currentStyle.strokeWidth}
+              opacity={currentStyle.opacity}
+              listening={false}
+            />
+            
+            {/* Arrow head */}
+            <RegularPolygon
+              sides={3}
+              radius={5}
+              x={calloutStart.x}  // Arrow head at start point
+              y={calloutStart.y}
+              rotation={calculateArrowHeadRotation(previewControlPoints.control2, calloutStart)}
+              fill={currentStyle.stroke}
+              listening={false}
+            />
+            
+            {/* Text preview */}
+            <Text
+              x={textX + textPadding}
+              y={textY + textPadding}
+              text="Callout"
+              fontSize={16}
+              fontFamily={currentStyle.fontFamily || 'Arial'}
+              fill={currentStyle.stroke}
+              width={textWidth - textPadding * 2}
+              listening={false}
+            />
+          </Group>
+        );
+
       default:
         return null;
     }
@@ -411,6 +531,36 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           // Reset the node position since we updated the points
           node.position({ x: 0, y: 0 });
         }
+      } else if (shape.type === DrawingTool.CALLOUT) {
+        // For callout shapes, update both text position and arrow endpoint
+        const dx = newPosition.x;
+        const dy = newPosition.y;
+        const calloutShape = shape as CalloutShape;
+        
+        // Update all positions
+        const updates: Partial<CalloutShape> = {
+          textX: calloutShape.textX + dx,
+          textY: calloutShape.textY + dy,
+          arrowX: calloutShape.arrowX + dx,
+          arrowY: calloutShape.arrowY + dy
+        };
+        
+        // Update control points if they exist
+        if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined) {
+          updates.curveControl1X = calloutShape.curveControl1X + dx;
+          updates.curveControl1Y = calloutShape.curveControl1Y + dy;
+        }
+        if (calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
+          updates.curveControl2X = calloutShape.curveControl2X + dx;
+          updates.curveControl2Y = calloutShape.curveControl2Y + dy;
+        }
+        
+        // Note: perimeterOffset remains the same as it's relative to the text box
+        
+        updateShape(shape.id, updates);
+        
+        // Reset the node position since we updated the coordinates
+        node.position({ x: 0, y: 0 });
       } else {
         // For other shapes, update x/y position
         updateShape(shape.id, { 
@@ -564,6 +714,28 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                     updateShape(id, { points: newPoints });
                     otherNode.position({ x: 0, y: 0 });
                   }
+                } else if (otherShape.type === DrawingTool.CALLOUT) {
+                  // For callout shapes, update all positions
+                  const calloutShape = otherShape as CalloutShape;
+                  const updates: Partial<CalloutShape> = {
+                    textX: calloutShape.textX + dx,
+                    textY: calloutShape.textY + dy,
+                    arrowX: calloutShape.arrowX + dx,
+                    arrowY: calloutShape.arrowY + dy
+                  };
+                  
+                  // Update control points if they exist
+                  if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined) {
+                    updates.curveControl1X = calloutShape.curveControl1X + dx;
+                    updates.curveControl1Y = calloutShape.curveControl1Y + dy;
+                  }
+                  if (calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
+                    updates.curveControl2X = calloutShape.curveControl2X + dx;
+                    updates.curveControl2Y = calloutShape.curveControl2Y + dy;
+                  }
+                  
+                  updateShape(id, updates);
+                  otherNode.position({ x: 0, y: 0 });
                 } else {
                   // For other shapes, update position
                   const newPos = otherNode.position();
@@ -778,8 +950,154 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             }}
           />
         );
-        
 
+      case DrawingTool.CALLOUT:
+        const calloutShape = shape as CalloutShape;
+        
+        // Calculate text dimensions
+        const textPadding = calloutShape.padding;
+        const bgWidth = calloutShape.textWidth || 120;
+        const bgHeight = calloutShape.textHeight || 40;
+        
+        // Calculate arrow base point from perimeter offset
+        const textBox = {
+          x: calloutShape.textX,
+          y: calloutShape.textY,
+          width: bgWidth,
+          height: bgHeight
+        };
+        
+        const basePoint = perimeterOffsetToPoint(textBox, calloutShape.perimeterOffset);
+        const arrowTip = {
+          x: calloutShape.arrowX,
+          y: calloutShape.arrowY
+        };
+        
+        // Use stored control points or calculate optimal ones
+        let control1: Point, control2: Point;
+        
+        if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined &&
+            calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
+          control1 = { x: calloutShape.curveControl1X, y: calloutShape.curveControl1Y };
+          control2 = { x: calloutShape.curveControl2X, y: calloutShape.curveControl2Y };
+        } else {
+          const optimalPoints = getOptimalControlPoints(basePoint, arrowTip, textBox);
+          control1 = optimalPoints.control1;
+          control2 = optimalPoints.control2;
+        }
+        
+        return (
+          <Group
+            key={shape.id}
+            {...commonProps}
+            ref={(node) => {
+              if (node) {
+                selectedShapeRefs.current.set(shape.id, node);
+              } else {
+                selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
+          >
+            {/* Background rectangle - registered separately for transformer */}
+            <Rect
+              id={shape.id + '_textbox'}
+              x={calloutShape.textX}
+              y={calloutShape.textY}
+              width={bgWidth}
+              height={bgHeight}
+              fill={calloutShape.backgroundColor || '#ffffff'}
+              stroke={calloutShape.style.stroke}
+              strokeWidth={calloutShape.style.strokeWidth}
+              cornerRadius={calloutShape.borderRadius || 4}
+              shadowColor="rgba(0, 0, 0, 0.1)"
+              shadowBlur={3}
+              shadowOffset={{ x: 1, y: 1 }}
+              listening={false}
+              ref={(node) => {
+                if (node) {
+                  selectedShapeRefs.current.set(shape.id + '_textbox', node);
+                } else {
+                  selectedShapeRefs.current.delete(shape.id + '_textbox');
+                }
+              }}
+              onTransform={(e) => {
+                // When the text box is transformed, update the callout shape
+                const node = e.target;
+                const scaleX = node.scaleX();
+                const scaleY = node.scaleY();
+                
+                // Reset scale on node
+                node.scaleX(1);
+                node.scaleY(1);
+                
+                // Apply scale to shape data
+                const newWidth = Math.max(50, node.width() * scaleX);
+                const newHeight = Math.max(30, node.height() * scaleY);
+                const newX = node.x();
+                const newY = node.y();
+                
+                // Recalculate arrow base point for new text box position
+                const newTextBox = {
+                  x: newX,
+                  y: newY,
+                  width: newWidth,
+                  height: newHeight
+                };
+                
+                const newBasePoint = perimeterOffsetToPoint(newTextBox, calloutShape.perimeterOffset);
+                const newControlPoints = getOptimalControlPoints(
+                  newBasePoint,
+                  { x: calloutShape.arrowX, y: calloutShape.arrowY },
+                  newTextBox
+                );
+                
+                updateShape(shape.id, {
+                  textX: newX,
+                  textY: newY,
+                  textWidth: newWidth,
+                  textHeight: newHeight,
+                  curveControl1X: newControlPoints.control1.x,
+                  curveControl1Y: newControlPoints.control1.y,
+                  curveControl2X: newControlPoints.control2.x,
+                  curveControl2Y: newControlPoints.control2.y
+                });
+              }}
+            />
+            
+            {/* Curved arrow using Path with cubic Bezier */}
+            <Path
+              data={getArrowPathString(basePoint, control1, control2, arrowTip)}
+              stroke={calloutShape.style.stroke}
+              strokeWidth={calloutShape.style.strokeWidth}
+              opacity={calloutShape.style.opacity}
+              listening={false}
+            />
+            
+            {/* Arrow head */}
+            <RegularPolygon
+              sides={3}
+              radius={5}
+              x={arrowTip.x}
+              y={arrowTip.y}
+              rotation={calculateArrowHeadRotation(control2, arrowTip)}
+              fill={calloutShape.style.stroke}
+              listening={false}
+            />
+            
+            {/* Text */}
+            <Text
+              x={calloutShape.textX + textPadding}
+              y={calloutShape.textY + textPadding}
+              text={calloutShape.text}
+              fontSize={calloutShape.fontSize}
+              fontFamily={calloutShape.fontFamily}
+              fill={calloutShape.style.stroke}
+              width={bgWidth - textPadding * 2}
+              listening={false}
+            />
+          </Group>
+        );
+        
       default:
         return null;
     }
@@ -865,10 +1183,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         <Circle
           x={actualX1}
           y={actualY1}
-          radius={8}
+          radius={5}
           fill="#4a90e2"
           stroke="white"
-          strokeWidth={2}
+          strokeWidth={1.5}
+          opacity={0.8}
           shadowColor="rgba(0,0,0,0.3)"
           shadowBlur={5}
           shadowOffset={{ x: 1, y: 1 }}
@@ -902,13 +1221,24 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         />
         
         {/* Head control point (red - arrow head where pointer is) */}
-        <Circle
-          x={actualX2}
-          y={actualY2}
-          radius={8}
-          fill="#e24a4a"
-          stroke="white"
-          strokeWidth={2}
+        {(() => {
+          // Offset from arrow head
+          const offsetDistance = 15;
+          const dx = actualX2 - actualX1;
+          const dy = actualY2 - actualY1;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          const offsetX = length > 0 ? (dx / length) * offsetDistance : offsetDistance;
+          const offsetY = length > 0 ? (dy / length) * offsetDistance : 0;
+          
+          return (
+            <Circle
+              x={actualX2 + offsetX}
+              y={actualY2 + offsetY}
+              radius={5}
+              fill="#e24a4a"
+              stroke="white"
+              strokeWidth={1.5}
+              opacity={0.8}
           shadowColor="rgba(0,0,0,0.3)"
           shadowBlur={5}
           shadowOffset={{ x: 1, y: 1 }}
@@ -940,6 +1270,367 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             }
           }}
         />
+          );
+        })()}
+      </>
+    );
+  };
+
+  // Render callout control points
+  const renderCalloutControlPoints = () => {
+    if (activeTool !== DrawingTool.SELECT || drawingSelectedShapeIds.length !== 1) {
+      return null;
+    }
+
+    const selectedShape = shapes.find(s => s.id === drawingSelectedShapeIds[0]);
+    if (!selectedShape || selectedShape.type !== DrawingTool.CALLOUT) {
+      return null;
+    }
+    
+    const calloutShape = selectedShape as CalloutShape;
+    const calloutNode = selectedShapeRefs.current.get(calloutShape.id);
+    if (!calloutNode) return null;
+    
+    // Get current position
+    const nodePos = calloutNode.position();
+    
+    // Calculate actual positions
+    const textBox = {
+      x: calloutShape.textX + nodePos.x,
+      y: calloutShape.textY + nodePos.y,
+      width: calloutShape.textWidth || 120,
+      height: calloutShape.textHeight || 40
+    };
+    
+    const arrowTip = {
+      x: calloutShape.arrowX + nodePos.x,
+      y: calloutShape.arrowY + nodePos.y
+    };
+    
+    // Get base point from perimeter offset
+    const basePoint = perimeterOffsetToPoint(textBox, calloutShape.perimeterOffset);
+    
+    // Get control points - they are stored relative to the shape, not absolute
+    let control1: Point, control2: Point;
+    
+    if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined &&
+        calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
+      // Control points are stored in local coordinates, need to convert to global
+      control1 = { x: calloutShape.curveControl1X, y: calloutShape.curveControl1Y };
+      control2 = { x: calloutShape.curveControl2X, y: calloutShape.curveControl2Y };
+    } else {
+      // Calculate optimal points - these will be in global coordinates
+      const optimalPoints = getOptimalControlPoints(basePoint, arrowTip, textBox);
+      control1 = optimalPoints.control1;
+      control2 = optimalPoints.control2;
+    }
+
+    return (
+      <>
+        {/* Arrow tip control (red) - offset from arrow head */}
+        {(() => {
+          // Calculate offset position to be tangent to arrow tip
+          const offsetDistance = 15; // Distance from arrow tip
+          
+          // Direction from control point to arrow tip (for offset)
+          const dx = arrowTip.x - control2.x;
+          const dy = arrowTip.y - control2.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          
+          // Normalize and offset in the direction of the arrow
+          const offsetX = length > 0 ? (dx / length) * offsetDistance : offsetDistance;
+          const offsetY = length > 0 ? (dy / length) * offsetDistance : 0;
+          
+          const handleX = arrowTip.x + offsetX;
+          const handleY = arrowTip.y + offsetY;
+          
+          return (
+            <>
+              {/* Small line connecting handle to arrow tip */}
+              <Line
+                points={[handleX, handleY, arrowTip.x, arrowTip.y]}
+                stroke="#e74c3c"
+                strokeWidth={1}
+                opacity={0.3}
+                listening={false}
+              />
+              
+              {/* Control handle */}
+              <Circle
+                x={handleX}
+                y={handleY}
+                radius={5}
+                fill="#e74c3c"
+                stroke="white"
+                strokeWidth={1.5}
+                opacity={0.8}
+                shadowColor="rgba(0,0,0,0.3)"
+                shadowBlur={5}
+                shadowOffset={{ x: 1, y: 1 }}
+                draggable={true}
+                onClick={(e) => {
+                  e.cancelBubble = true;
+                }}
+                onDragStart={(e) => {
+                  e.cancelBubble = true;
+                  isDraggingControlPointRef.current = true;
+                }}
+                onDragMove={(e) => {
+                  const pos = e.target.position();
+                  // Calculate offset back to arrow tip
+                  const dx = pos.x - handleX;
+                  const dy = pos.y - handleY;
+                  
+                  // Update arrow tip position
+                  const newArrowX = arrowTip.x + dx - nodePos.x;
+                  const newArrowY = arrowTip.y + dy - nodePos.y;
+                  
+                  // Auto-adjust control points if needed
+                  const newArrowTip = { x: newArrowX + nodePos.x, y: newArrowY + nodePos.y };
+                  const newControlPoints = autoAdjustControlPoint(
+                    basePoint,
+                    newArrowTip,
+                    control1,
+                    control2,
+                    textBox
+                  );
+                  
+                  updateShape(calloutShape.id, {
+                    arrowX: newArrowX,
+                    arrowY: newArrowY,
+                    curveControl1X: newControlPoints.control1.x - nodePos.x,
+                    curveControl1Y: newControlPoints.control1.y - nodePos.y,
+                    curveControl2X: newControlPoints.control2.x - nodePos.x,
+                    curveControl2Y: newControlPoints.control2.y - nodePos.y
+                  });
+                }}
+                onDragEnd={(e) => {
+                  e.cancelBubble = true;
+                  setTimeout(() => {
+                    isDraggingControlPointRef.current = false;
+                  }, 50);
+                }}
+                onMouseEnter={(e) => {
+                  const stage = e.target.getStage();
+                  if (stage) {
+                    stage.container().style.cursor = 'move';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  const stage = e.target.getStage();
+                  if (stage) {
+                    stage.container().style.cursor = 'default';
+                  }
+                }}
+              />
+            </>
+          );
+        })()}
+        
+        {/* Arrow base control point (green) - moves along perimeter */}
+        <Circle
+          x={basePoint.x}
+          y={basePoint.y}
+          radius={5}
+          fill="#27ae60"
+          stroke="white"
+          strokeWidth={1.5}
+          opacity={0.8}
+          shadowColor="rgba(0,0,0,0.3)"
+          shadowBlur={5}
+          shadowOffset={{ x: 1, y: 1 }}
+          draggable={true}
+          onClick={(e) => {
+            e.cancelBubble = true;
+          }}
+          onDragStart={(e) => {
+            e.cancelBubble = true;
+            isDraggingControlPointRef.current = true;
+          }}
+          onDragMove={(e) => {
+            const pos = e.target.position();
+            // Convert position to perimeter offset
+            const localTextBox = {
+              x: calloutShape.textX,
+              y: calloutShape.textY,
+              width: calloutShape.textWidth || 120,
+              height: calloutShape.textHeight || 40
+            };
+            const newOffset = pointToPerimeterOffset(localTextBox, { x: pos.x - nodePos.x, y: pos.y - nodePos.y });
+            
+            // Get new base point position
+            const newBasePoint = perimeterOffsetToPoint(localTextBox, newOffset);
+            const globalNewBase = { x: newBasePoint.x + nodePos.x, y: newBasePoint.y + nodePos.y };
+            
+            // Auto-adjust control points if needed
+            const newControlPoints = autoAdjustControlPoint(
+              globalNewBase,
+              arrowTip,
+              control1,
+              control2,
+              textBox
+            );
+            
+            updateShape(calloutShape.id, {
+              perimeterOffset: newOffset,
+              curveControl1X: newControlPoints.control1.x - nodePos.x,
+              curveControl1Y: newControlPoints.control1.y - nodePos.y,
+              curveControl2X: newControlPoints.control2.x - nodePos.x,
+              curveControl2Y: newControlPoints.control2.y - nodePos.y
+            });
+            
+            // Snap the control point to the perimeter
+            const snappedPoint = perimeterOffsetToPoint(localTextBox, newOffset);
+            e.target.position({ x: snappedPoint.x + nodePos.x, y: snappedPoint.y + nodePos.y });
+          }}
+          onDragEnd={(e) => {
+            e.cancelBubble = true;
+            setTimeout(() => {
+              isDraggingControlPointRef.current = false;
+            }, 50);
+          }}
+          onMouseEnter={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'move';
+            }
+          }}
+          onMouseLeave={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'default';
+            }
+          }}
+        />
+        
+        {/* Curve control point 1 (blue - closer to base) */}
+        <Circle
+          x={control1.x + nodePos.x}
+          y={control1.y + nodePos.y}
+          radius={5}
+          fill="#3498db"
+          stroke="white"
+          strokeWidth={1.5}
+          opacity={0.8}
+          shadowColor="rgba(0,0,0,0.3)"
+          shadowBlur={5}
+          shadowOffset={{ x: 1, y: 1 }}
+          draggable={true}
+          onClick={(e) => {
+            e.cancelBubble = true;
+          }}
+          onDragStart={(e) => {
+            e.cancelBubble = true;
+            isDraggingControlPointRef.current = true;
+          }}
+          onDragMove={(e) => {
+            const pos = e.target.position();
+            updateShape(calloutShape.id, {
+              curveControl1X: pos.x - nodePos.x,
+              curveControl1Y: pos.y - nodePos.y
+            });
+          }}
+          onDragEnd={(e) => {
+            e.cancelBubble = true;
+            setTimeout(() => {
+              isDraggingControlPointRef.current = false;
+            }, 50);
+          }}
+          onMouseEnter={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'move';
+            }
+          }}
+          onMouseLeave={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'default';
+            }
+          }}
+        />
+        
+        {/* Curve control point 2 (purple - closer to tip) */}
+        <Circle
+          x={control2.x + nodePos.x}
+          y={control2.y + nodePos.y}
+          radius={5}
+          fill="#9b59b6"
+          stroke="white"
+          strokeWidth={1.5}
+          opacity={0.8}
+          shadowColor="rgba(0,0,0,0.3)"
+          shadowBlur={5}
+          shadowOffset={{ x: 1, y: 1 }}
+          draggable={true}
+          onClick={(e) => {
+            e.cancelBubble = true;
+          }}
+          onDragStart={(e) => {
+            e.cancelBubble = true;
+            isDraggingControlPointRef.current = true;
+          }}
+          onDragMove={(e) => {
+            const pos = e.target.position();
+            updateShape(calloutShape.id, {
+              curveControl2X: pos.x - nodePos.x,
+              curveControl2Y: pos.y - nodePos.y
+            });
+          }}
+          onDragEnd={(e) => {
+            e.cancelBubble = true;
+            setTimeout(() => {
+              isDraggingControlPointRef.current = false;
+            }, 50);
+          }}
+          onMouseEnter={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'move';
+            }
+          }}
+          onMouseLeave={(e) => {
+            const stage = e.target.getStage();
+            if (stage) {
+              stage.container().style.cursor = 'default';
+            }
+          }}
+        />
+        
+        {/* Visual guides */}
+        {(() => {
+          const isValid = isValidControlPoint(basePoint, control1, control2, arrowTip, textBox);
+          const guideColor = isValid ? "#3498db" : "#e74c3c";
+          
+          return (
+            <>
+              <Line
+                points={[basePoint.x, basePoint.y, control1.x + nodePos.x, control1.y + nodePos.y]}
+                stroke={guideColor}
+                strokeWidth={1}
+                dash={[5, 5]}
+                opacity={0.5}
+                listening={false}
+              />
+              <Line
+                points={[control1.x + nodePos.x, control1.y + nodePos.y, control2.x + nodePos.x, control2.y + nodePos.y]}
+                stroke={guideColor}
+                strokeWidth={1}
+                dash={[5, 5]}
+                opacity={0.5}
+                listening={false}
+              />
+              <Line
+                points={[control2.x + nodePos.x, control2.y + nodePos.y, arrowTip.x, arrowTip.y]}
+                stroke={guideColor}
+                strokeWidth={1}
+                dash={[5, 5]}
+                opacity={0.5}
+                listening={false}
+              />
+            </>
+          );
+        })()}
       </>
     );
   };
@@ -1042,10 +1733,25 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               const y = node.y();
               
               
-              const shapeId = node.id();
+              let shapeId = node.id();
               if (!shapeId) return;
               
-              const shape = shapes.find(s => s.id === shapeId);
+              // Handle callout textbox nodes
+              let shape;
+              if (shapeId.endsWith('_textbox')) {
+                // Extract the actual shape ID
+                shapeId = shapeId.replace('_textbox', '');
+                shape = shapes.find(s => s.id === shapeId);
+                // Skip the standard transform handling for callouts as it's handled in onTransform
+                if (shape?.type === DrawingTool.CALLOUT) {
+                  node.scaleX(1);
+                  node.scaleY(1);
+                  return;
+                }
+              } else {
+                shape = shapes.find(s => s.id === shapeId);
+              }
+              
               if (!shape) return;
               
             
@@ -1167,6 +1873,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         
       {/* Render arrow control points */}
       {renderArrowControlPoints()}
+      
+      {/* Render callout control points */}
+      {renderCalloutControlPoints()}
     </Layer>
   );
 };

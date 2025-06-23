@@ -18,6 +18,7 @@ const initialContext: SelectionContext = {
   dragStartPoint: null,
   draggedShapeIds: [],
   initialShapePositions: new Map(),
+  initialShapeData: new Map(),
 };
 
 // Selection reducer

@@ -9,7 +9,9 @@ import {
   type RectShape,
   type CircleShape,
   type ArrowShape,
+  type CalloutShape,
 } from '@/types/drawing';
+import { calculateInitialPerimeterOffset, perimeterOffsetToPoint, getOptimalControlPoints } from '@/utils/calloutGeometry';
 
 export const useDrawing = () => {
   const {
@@ -56,6 +58,7 @@ export const useDrawing = () => {
       case DrawingTool.RECTANGLE:
       case DrawingTool.CIRCLE:
       case DrawingTool.ARROW:
+      case DrawingTool.CALLOUT:
         // These tools need start and end points
         break;
 
@@ -83,6 +86,7 @@ export const useDrawing = () => {
       case DrawingTool.RECTANGLE:
       case DrawingTool.CIRCLE:
       case DrawingTool.ARROW:
+      case DrawingTool.CALLOUT:
         // Update end point for preview
         setTempPoints([startPoint, point]);
         break;
@@ -186,6 +190,84 @@ export const useDrawing = () => {
           pointerWidth: 10,
         } as ArrowShape;
         break;
+
+      case DrawingTool.CALLOUT:
+        // Calculate text box dimensions
+        const textBoxWidth = 120;
+        const textBoxHeight = 40;
+        const padding = 10;
+        
+        // First click is arrow tip (what we're pointing at)
+        // End point is where the text box should be
+        const arrowTipX = startPoint.x;
+        const arrowTipY = startPoint.y;
+        
+        // Calculate text box position based on drag direction
+        // Ensure minimum distance from arrow tip
+        const minDistance = 50;
+        const calloutDx = endPoint.x - startPoint.x;
+        const calloutDy = endPoint.y - startPoint.y;
+        const distance = Math.sqrt(calloutDx * calloutDx + calloutDy * calloutDy);
+        
+        let textX: number, textY: number;
+        
+        if (distance < minDistance) {
+          // If drag was too short, position text box with minimum distance
+          const angle = Math.atan2(calloutDy, calloutDx);
+          textX = arrowTipX + Math.cos(angle) * minDistance - textBoxWidth / 2;
+          textY = arrowTipY + Math.sin(angle) * minDistance - textBoxHeight / 2;
+        } else {
+          // Position text box centered at end point
+          textX = endPoint.x - textBoxWidth / 2;
+          textY = endPoint.y - textBoxHeight / 2;
+        }
+        
+        // Calculate initial perimeter offset for arrow base
+        const textBox = {
+          x: textX,
+          y: textY,
+          width: textBoxWidth,
+          height: textBoxHeight
+        };
+        
+        const perimeterOffset = calculateInitialPerimeterOffset(textBox, { x: arrowTipX, y: arrowTipY });
+        const basePoint = perimeterOffsetToPoint(textBox, perimeterOffset);
+        
+        // Use optimal cubic Bezier control points to avoid rectangle intersection
+        const controlPoints = getOptimalControlPoints(
+          basePoint, 
+          { x: arrowTipX, y: arrowTipY },
+          textBox
+        );
+        
+        newShape = {
+          id: generateId(),
+          type: DrawingTool.CALLOUT,
+          textX: textX,
+          textY: textY,
+          text: 'Callout',
+          fontSize: 16,
+          fontFamily: state.currentStyle.fontFamily || 'Arial',
+          textWidth: textBoxWidth,
+          textHeight: textBoxHeight,
+          padding: padding,
+          arrowX: arrowTipX,
+          arrowY: arrowTipY,
+          perimeterOffset: perimeterOffset,
+          curveControl1X: controlPoints.control1.x,
+          curveControl1Y: controlPoints.control1.y,
+          curveControl2X: controlPoints.control2.x,
+          curveControl2Y: controlPoints.control2.y,
+          backgroundColor: '#ffffff',
+          borderRadius: 4,
+          style: { ...state.currentStyle },
+          visible: true,
+          locked: false,
+          zIndex: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as CalloutShape;
+        break;
     }
 
     // Add shape if created
@@ -256,6 +338,9 @@ export const useDrawing = () => {
         break;
       case 't':
         setActiveTool(DrawingTool.TEXT);
+        break;
+      case 'l':
+        setActiveTool(DrawingTool.CALLOUT);
         break;
       case 'delete':
       case 'backspace':
