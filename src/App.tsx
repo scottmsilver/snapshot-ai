@@ -667,6 +667,14 @@ function App() {
                 backgroundColor: '#fafafa',
                 cursor: activeTool === 'select' ? 'default' : 'crosshair'
               }}
+              onMouseDown={(e) => {
+                // Check if we clicked on empty space (the stage itself)
+                if (e.target === e.target.getStage()) {
+                  if (activeTool === DrawingTool.SELECT) {
+                    clearSelection();
+                  }
+                }
+              }}
             >
               <Layer>
                 {konvaImage && imageData && (() => {
