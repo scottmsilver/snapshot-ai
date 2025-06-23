@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-oauth/google": "^0.12.2",
+    "gapi-script": "^1.2.0",
     "html2canvas": "^1.4.1",
     "konva": "^9.3.20",
     "quill": "^2.0.3",

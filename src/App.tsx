@@ -5,10 +5,13 @@ import { ImageUploader } from '@/components/ImageUploader'
 import { DrawingToolbar } from '@/components/Toolbar'
 import { DrawingLayer } from '@/components/Canvas/DrawingLayer'
 import { TextInputDialog } from '@/components/TextInputDialog'
+import { UserMenu } from '@/components/Auth/UserMenu'
+import { FileMenu } from '@/components/FileMenu/FileMenu'
 import { useImage } from '@/hooks/useImage'
 import { useHistory } from '@/hooks/useHistory'
 import { useDrawing } from '@/hooks/useDrawing'
 import { useDrawingContext } from '@/contexts/DrawingContext'
+import { useAuth } from '@/contexts/AuthContext'
 import { calculateImageFit } from '@/utils/imageHelpers'
 import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils'
 import { DrawingTool, type Point, type TextShape } from '@/types/drawing'
@@ -233,6 +236,7 @@ function App() {
         }}>
           {imageData && (
             <>
+              <FileMenu stageRef={stageRef} />
               <button
                 onClick={() => {
                   clearImage();
@@ -312,6 +316,7 @@ function App() {
               </button>
             </>
           )}
+          <UserMenu />
         </div>
       </header>
 
