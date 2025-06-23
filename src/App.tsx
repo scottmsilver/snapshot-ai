@@ -18,7 +18,7 @@ function App() {
   const stageRef = useRef<Konva.Stage | null>(null)
   const { imageData, loadImage, clearImage } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
-  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds } = useDrawing()
+  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool } = useDrawing()
   const { state: drawingState, setShapes } = useDrawingContext()
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true)
   const [zoomLevel, setZoomLevel] = useState(1) // 1 = 100%
@@ -393,6 +393,48 @@ function App() {
           }}>
             {/* Tools will be rendered here */}
             <DrawingToolbar horizontal={true} />
+          </div>
+
+          {/* Select Last Shape Button */}
+          <div style={{
+            paddingLeft: '0.5rem',
+            borderLeft: '1px solid #e0e0e0'
+          }}>
+            <button
+              onClick={() => {
+                if (shapes.length > 0) {
+                  const lastShape = shapes[shapes.length - 1];
+                  selectShape(lastShape.id);
+                  // Also switch to select tool to see the selection
+                  if (activeTool !== DrawingTool.SELECT) {
+                    setActiveTool(DrawingTool.SELECT);
+                  }
+                }
+              }}
+              disabled={shapes.length === 0}
+              title="Select Last Drawn Shape"
+              style={{
+                padding: '0.25rem 0.75rem',
+                backgroundColor: 'transparent',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                cursor: shapes.length > 0 ? 'pointer' : 'not-allowed',
+                opacity: shapes.length > 0 ? 1 : 0.3,
+                fontSize: '0.75rem',
+                color: '#666',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem'
+              }}
+              onMouseEnter={(e) => {
+                if (shapes.length > 0) e.currentTarget.style.backgroundColor = '#f5f5f5';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              Select Last
+            </button>
           </div>
 
           {/* Zoom Controls */}

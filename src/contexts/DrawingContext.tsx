@@ -144,10 +144,11 @@ const drawingReducer = (state: DrawingState, action: DrawingAction): DrawingStat
             : [...state.selectedShapeIds, action.id],
         };
       }
-      return {
+      const newState = {
         ...state,
         selectedShapeIds: [action.id],
       };
+      return newState;
 
     case DrawingActionType.SELECT_MULTIPLE:
       return {

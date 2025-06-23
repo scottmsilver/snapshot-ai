@@ -25,6 +25,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     updateShape,
     deleteSelected,
     selectMultiple,
+    selectedShapeIds: drawingSelectedShapeIds,
+    selectShape,
+    clearSelection,
   } = useDrawing();
   
   const {
@@ -58,20 +61,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
   const isDraggingControlPointRef = useRef(false);
   const [draggedArrowId, setDraggedArrowId] = useState<string | null>(null);
   const [, forceUpdate] = useState({});
+  const justFinishedDraggingRef = useRef(false);
   
   // Track which control point is being dragged (0 = start, 1 = end)
   const [_draggingControlPointIndex, setDraggingControlPointIndex] = useState<number | null>(null);
 
-  // Sync selection state with drawing context
+  // Log selection changes for debugging
   useEffect(() => {
-    selectMultiple(selectedShapeIds);
-  }, [selectedShapeIds, selectMultiple]);
+  }, [drawingSelectedShapeIds]);
 
   // Update transformer when selection changes
   useEffect(() => {
     if (transformerRef.current) {
       const nodes: Konva.Node[] = [];
-      selectedShapeIds.forEach(id => {
+      drawingSelectedShapeIds.forEach(id => {
         const node = selectedShapeRefs.current.get(id);
         if (node) {
           nodes.push(node);
@@ -80,7 +83,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       transformerRef.current.nodes(nodes);
       transformerRef.current.getLayer()?.batchDraw();
     }
-  }, [selectedShapeIds]);
+  }, [drawingSelectedShapeIds]);
   
   // Force updates while dragging arrow
   useEffect(() => {
@@ -171,6 +174,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     };
 
     const handleMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
+      
       // Check if we clicked on transformer anchors or control points
       const target = e.target;
       const targetName = target.name?.() || '';
@@ -193,15 +197,23 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           endDragSelection();
         } else if (isDraggingShape) {
           endDragShape();
+          // Also set the flag here for drag selection
+          justFinishedDraggingRef.current = true;
+          setTimeout(() => {
+            justFinishedDraggingRef.current = false;
+          }, 100);
         } else if (isTransformingRef.current) {
           // Don't deselect when finishing a transform
           return;
         } else if (isDraggingControlPoint || isDraggingControlPointRef.current) {
           // Don't deselect when finishing control point drag
           return;
-        } else if (e.target === stage || e.target.getLayer()) {
+        } else if (e.target === stage || (e.target.getLayer() && e.target.getClassName() === 'Layer')) {
           // Click on empty space (not drag)
-          handleEmptyClick();
+          // Don't clear selection if we just finished dragging
+          if (!justFinishedDraggingRef.current) {
+            clearSelection();
+          }
         }
       } else if (isDrawing) {
         const pos = stage.getPointerPosition();
@@ -227,7 +239,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         if (isDragSelecting || isDraggingShape) {
           cancelDrag();
         }
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeIds.length > 0) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && drawingSelectedShapeIds.length > 0) {
         e.preventDefault();
         deleteSelected();
       }
@@ -265,7 +277,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     isTransforming,
     startTransform,
     endTransform,
-    selectedShapeIds,
+    drawingSelectedShapeIds,
     selectionContext,
     updateShape,
     deleteSelected,
@@ -273,6 +285,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     startControlPointDrag,
     endControlPointDrag,
     onTextClick,
+    selectShape,
+    clearSelection,
+    selectedShapeIds,
+    selectMultiple,
   ]);
 
   // Render temporary drawing preview
@@ -370,7 +386,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
 
   // Render a shape based on its type
   const renderShape = (shape: Shape) => {
-    const isSelected = selectedShapeIds.includes(shape.id);
+    const isSelected = drawingSelectedShapeIds.includes(shape.id);
     const isHovered = hoveredShapeId === shape.id && activeTool === DrawingTool.SELECT;
     
     const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
@@ -412,7 +428,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       draggable: activeTool === DrawingTool.SELECT && !isDraggingControlPoint,
       onClick: (e: Konva.KonvaEventObject<MouseEvent>) => {
         if (activeTool === DrawingTool.SELECT) {
-          const isSelected = selectedShapeIds.includes(shape.id);
+          const isSelected = drawingSelectedShapeIds.includes(shape.id);
           
           // Don't handle click if we're dragging or if drag distance was significant
           const node = e.target;
@@ -423,19 +439,32 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           }
           
           if (!isSelected || e.evt.ctrlKey || e.evt.metaKey) {
-            // Select the shape if not selected or using modifier keys
-            handleShapeClick(shape.id, {
-              ctrlKey: e.evt.ctrlKey || e.evt.metaKey,
-              shiftKey: e.evt.shiftKey
-            });
+            // Use DrawingContext's selection
+            if (e.evt.ctrlKey || e.evt.metaKey || e.evt.shiftKey) {
+              // Multi-select: toggle selection
+              if (isSelected) {
+                selectMultiple(drawingSelectedShapeIds.filter(id => id !== shape.id));
+              } else {
+                selectMultiple([...drawingSelectedShapeIds, shape.id]);
+              }
+            } else {
+              // Single select
+              selectShape(shape.id);
+            }
           }
         }
       },
       onTap: (_e: Konva.KonvaEventObject<MouseEvent>) => {
         // Don't cancel bubble - let it reach stage mousedown handler
       },
+      onMouseUp: (e: Konva.KonvaEventObject<MouseEvent>) => {
+        // Cancel bubble to prevent stage mouseup when releasing on a shape after drag
+        if (justFinishedDraggingRef.current) {
+          e.cancelBubble = true;
+        }
+      },
       onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => {
-        const isSelected = selectedShapeIds.includes(shape.id);
+        const isSelected = drawingSelectedShapeIds.includes(shape.id);
         
         // Track arrow dragging
         if (shape.type === DrawingTool.ARROW) {
@@ -444,10 +473,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         
         // If shape is not selected, select it first
         if (!isSelected) {
-          handleShapeClick(shape.id, {
-            ctrlKey: e.evt.ctrlKey || e.evt.metaKey,
-            shiftKey: e.evt.shiftKey
-          });
+          selectShape(shape.id);
         }
         
         const pos = e.target.getStage()?.getPointerPosition();
@@ -456,7 +482,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         }
         
         // Store initial positions for multi-drag
-        if (selectedShapeIds.length > 1 || (!isSelected && !e.evt.ctrlKey && !e.evt.metaKey)) {
+        if (drawingSelectedShapeIds.length > 1 || (!isSelected && !e.evt.ctrlKey && !e.evt.metaKey)) {
           e.target.setAttrs({ _dragStartX: e.target.x(), _dragStartY: e.target.y() });
         }
       },
@@ -476,12 +502,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         }
         
         // Handle multi-shape dragging
-        if (selectedShapeIds.length > 1) {
+        if (drawingSelectedShapeIds.length > 1) {
           const dx = node.x() - (node.attrs._dragStartX || node.x());
           const dy = node.y() - (node.attrs._dragStartY || node.y());
           
           // Move other selected shapes by the same amount
-          selectedShapeIds.forEach(id => {
+          drawingSelectedShapeIds.forEach(id => {
             if (id !== shape.id) {
               const otherNode = selectedShapeRefs.current.get(id);
               if (otherNode) {
@@ -498,7 +524,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         }
       },
       onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
+        
+        // Prevent the event from bubbling to stage
+        e.cancelBubble = true;
+        
         handleDragEnd(e);
+        
+        // Set flag to prevent deselection on mouse up
+        justFinishedDraggingRef.current = true;
+        setTimeout(() => {
+          justFinishedDraggingRef.current = false;
+        }, 100);
         
         // Clear arrow dragging state
         if (shape.type === DrawingTool.ARROW) {
@@ -506,12 +542,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         }
         
         // Handle multi-shape drag end
-        if (selectedShapeIds.length > 1) {
+        if (drawingSelectedShapeIds.length > 1) {
           const dx = e.target.x() - (e.target.attrs._dragStartX || e.target.x());
           const dy = e.target.y() - (e.target.attrs._dragStartY || e.target.y());
           
           // Update positions for all other selected shapes
-          selectedShapeIds.forEach(id => {
+          drawingSelectedShapeIds.forEach(id => {
             if (id !== shape.id) {
               const otherShape = shapes.find(s => s.id === id);
               const otherNode = selectedShapeRefs.current.get(id);
@@ -752,11 +788,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
   // Render arrow control points
   const renderArrowControlPoints = () => {
     
-    if (activeTool !== DrawingTool.SELECT || selectedShapeIds.length !== 1) {
+    if (activeTool !== DrawingTool.SELECT || drawingSelectedShapeIds.length !== 1) {
       return null;
     }
 
-    const selectedShape = shapes.find(s => s.id === selectedShapeIds[0]);
+    const selectedShape = shapes.find(s => s.id === drawingSelectedShapeIds[0]);
     if (!selectedShape || selectedShape.type !== DrawingTool.ARROW) {
       return null;
     }
@@ -932,9 +968,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       )}
       
       {/* Render transformer for selected shapes */}
-      {activeTool === DrawingTool.SELECT && selectedShapeIds.length > 0 && (
+      {activeTool === DrawingTool.SELECT && drawingSelectedShapeIds.length > 0 && (
         <Transformer
-          key={selectedShapeIds.join(',')}
+          key={drawingSelectedShapeIds.join(',')}
           ref={transformerRef}
           borderEnabled={true}
           borderStroke="#4a90e2"
@@ -950,13 +986,13 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           keepRatio={false}
           boundBoxFunc={(oldBox, newBox) => {
             // Check if any selected shape is a circle
-            const hasCircle = selectedShapeIds.some(id => {
+            const hasCircle = drawingSelectedShapeIds.some(id => {
               const shape = shapes.find(s => s.id === id);
               return shape?.type === DrawingTool.CIRCLE;
             });
             
             // For circles, maintain aspect ratio
-            if (hasCircle && selectedShapeIds.length === 1) {
+            if (hasCircle && drawingSelectedShapeIds.length === 1) {
               const size = Math.max(newBox.width, newBox.height);
               return {
                 ...newBox,

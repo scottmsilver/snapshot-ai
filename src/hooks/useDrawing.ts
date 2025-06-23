@@ -191,6 +191,11 @@ export const useDrawing = () => {
     // Add shape if created
     if (newShape) {
       addShape(newShape);
+      
+      // Select the shape after a small delay to ensure it's been added to state
+      setTimeout(() => {
+        selectShape(newShape.id);
+      }, 10);
     }
 
     // Reset drawing state
@@ -211,6 +216,7 @@ export const useDrawing = () => {
     state.tempPoints,
     state.currentStyle,
     addShape,
+    selectShape,
     setDrawingState,
     setTempPoints,
     setActiveShape,
