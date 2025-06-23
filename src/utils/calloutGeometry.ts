@@ -134,23 +134,11 @@ export function getClosestPointOnPerimeter(textBox: TextBox, point: Point): Poin
 
 // Calculate initial perimeter offset based on arrow tip position
 export function calculateInitialPerimeterOffset(textBox: TextBox, arrowTip: Point): number {
-  // Find the angle from center to arrow tip
-  const centerX = textBox.x + textBox.width / 2;
-  const centerY = textBox.y + textBox.height / 2;
-  const angle = Math.atan2(arrowTip.y - centerY, arrowTip.x - centerX);
+  // Find the closest point on the perimeter to the arrow tip
+  const closestPoint = getClosestPointOnPerimeter(textBox, arrowTip);
   
-  // Convert angle to perimeter offset
-  // Map angle to 0-1 where 0 is top-left corner going clockwise
-  // -π to -π/2 (top-left quadrant) maps to 0.75 to 1
-  // -π/2 to 0 (top-right quadrant) maps to 0 to 0.25
-  // 0 to π/2 (bottom-right quadrant) maps to 0.25 to 0.5
-  // π/2 to π (bottom-left quadrant) maps to 0.5 to 0.75
-  
-  let normalizedAngle = (angle + Math.PI) / (2 * Math.PI); // 0 to 1
-  // Adjust to start from top-left corner
-  normalizedAngle = (normalizedAngle + 0.25) % 1;
-  
-  return normalizedAngle;
+  // Convert that point to a perimeter offset
+  return pointToPerimeterOffset(textBox, closestPoint);
 }
 
 // Check if a line segment intersects with a rectangle

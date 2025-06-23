@@ -534,7 +534,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       } else if (shape.type === DrawingTool.CALLOUT) {
         // For callout shapes, only update text position - arrow tip stays anchored
         const calloutShape = shape as CalloutShape;
-        console.log('First handleDragEnd for callout - skipping, will handle in commonProps');
         
         // This will be handled in the onDragEnd of commonProps
         // Don't reset position here - we need it in the second handler
@@ -618,8 +617,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         
         // Real-time update for callout dragging - arrow "stretches" like a rubber band
         if (shape.type === DrawingTool.CALLOUT && drawingSelectedShapeIds.length === 1) {
-          const pos = node.position();
-          console.log('Callout drag move:', { nodeId: node.id(), x: pos.x, y: pos.y });
           // Force a re-render to update the arrow path based on group position
           forceUpdate({});
         }
@@ -739,18 +736,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             
             // Get the group node position
             const groupNode = selectedShapeRefs.current.get(shape.id);
-            console.log('Callout drag end - groupNode:', groupNode?.id());
             if (!groupNode) return;
             
             const groupPos = groupNode.position();
             const dx = groupPos.x;
             const dy = groupPos.y;
-            console.log('Callout drag end - position:', { dx, dy });
             
             // Calculate new text box position
             const newTextX = calloutShape.textX + dx;
             const newTextY = calloutShape.textY + dy;
-            console.log('Callout drag end - new text position:', { newTextX, newTextY, oldX: calloutShape.textX, oldY: calloutShape.textY });
             
             // Recalculate optimal control points for the new text box position
             const newTextBox = {
@@ -768,14 +762,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             const newBasePoint = perimeterOffsetToPoint(newTextBox, newPerimeterOffset);
             const newControlPoints = getOptimalControlPoints(newBasePoint, arrowTip, newTextBox);
             
-            console.log('Callout drag end - updating shape with:', {
-              textX: newTextX,
-              textY: newTextY,
-              perimeterOffset: newPerimeterOffset,
-              control1: newControlPoints.control1,
-              control2: newControlPoints.control2
-            });
-            
             updateShape(shape.id, {
               textX: newTextX,
               textY: newTextY,
@@ -788,7 +774,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             });
             
             // Reset group node position since we've updated the shape data
-            console.log('Callout drag end - resetting group position to (0,0)');
             groupNode.position({ x: 0, y: 0 });
           } else {
             const node = e.target;
@@ -1030,9 +1015,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         const groupNode = selectedShapeRefs.current.get(shape.id);
         const groupPos = groupNode ? groupNode.position() : { x: 0, y: 0 };
         
-        if (groupPos.x !== 0 || groupPos.y !== 0) {
-          console.log('Callout render - group position:', groupPos, 'shape text pos:', { x: calloutShape.textX, y: calloutShape.textY });
-        }
         
         // Calculate arrow base point from perimeter offset
         // Account for group position during drag
