@@ -532,35 +532,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           node.position({ x: 0, y: 0 });
         }
       } else if (shape.type === DrawingTool.CALLOUT) {
-        // For callout shapes, update both text position and arrow endpoint
-        const dx = newPosition.x;
-        const dy = newPosition.y;
+        // For callout shapes, only update text position - arrow tip stays anchored
         const calloutShape = shape as CalloutShape;
+        console.log('First handleDragEnd for callout - skipping, will handle in commonProps');
         
-        // Update all positions
-        const updates: Partial<CalloutShape> = {
-          textX: calloutShape.textX + dx,
-          textY: calloutShape.textY + dy,
-          arrowX: calloutShape.arrowX + dx,
-          arrowY: calloutShape.arrowY + dy
-        };
-        
-        // Update control points if they exist
-        if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined) {
-          updates.curveControl1X = calloutShape.curveControl1X + dx;
-          updates.curveControl1Y = calloutShape.curveControl1Y + dy;
-        }
-        if (calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
-          updates.curveControl2X = calloutShape.curveControl2X + dx;
-          updates.curveControl2Y = calloutShape.curveControl2Y + dy;
-        }
-        
-        // Note: perimeterOffset remains the same as it's relative to the text box
-        
-        updateShape(shape.id, updates);
-        
-        // Reset the node position since we updated the coordinates
-        node.position({ x: 0, y: 0 });
+        // This will be handled in the onDragEnd of commonProps
+        // Don't reset position here - we need it in the second handler
       } else {
         // For other shapes, update x/y position
         updateShape(shape.id, { 
@@ -639,6 +616,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => {
         const node = e.target;
         
+        // Real-time update for callout dragging - arrow "stretches" like a rubber band
+        if (shape.type === DrawingTool.CALLOUT && drawingSelectedShapeIds.length === 1) {
+          const pos = node.position();
+          console.log('Callout drag move:', { nodeId: node.id(), x: pos.x, y: pos.y });
+          // Force a re-render to update the arrow path based on group position
+          forceUpdate({});
+        }
+        
         // Force update for arrow dragging
         if (shape.type === DrawingTool.ARROW) {
           // The animation frame in useEffect will handle updates
@@ -715,7 +700,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                     otherNode.position({ x: 0, y: 0 });
                   }
                 } else if (otherShape.type === DrawingTool.CALLOUT) {
-                  // For callout shapes, update all positions
+                  // For callout shapes in multi-selection, move everything including arrow tip
                   const calloutShape = otherShape as CalloutShape;
                   const updates: Partial<CalloutShape> = {
                     textX: calloutShape.textX + dx,
@@ -744,6 +729,88 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               }
             }
           });
+        }
+        
+        // Handle single shape drag for special shape types
+        if (drawingSelectedShapeIds.length === 1 && shape.id === drawingSelectedShapeIds[0]) {
+          if (shape.type === DrawingTool.CALLOUT) {
+            // For callouts, only move the text box - arrow tip stays anchored
+            const calloutShape = shape as CalloutShape;
+            
+            // Get the group node position
+            const groupNode = selectedShapeRefs.current.get(shape.id);
+            console.log('Callout drag end - groupNode:', groupNode?.id());
+            if (!groupNode) return;
+            
+            const groupPos = groupNode.position();
+            const dx = groupPos.x;
+            const dy = groupPos.y;
+            console.log('Callout drag end - position:', { dx, dy });
+            
+            // Calculate new text box position
+            const newTextX = calloutShape.textX + dx;
+            const newTextY = calloutShape.textY + dy;
+            console.log('Callout drag end - new text position:', { newTextX, newTextY, oldX: calloutShape.textX, oldY: calloutShape.textY });
+            
+            // Recalculate optimal control points for the new text box position
+            const newTextBox = {
+              x: newTextX,
+              y: newTextY,
+              width: calloutShape.textWidth || 120,
+              height: calloutShape.textHeight || 40
+            };
+            
+            const arrowTip = { x: calloutShape.arrowX, y: calloutShape.arrowY };
+            
+            // Recalculate the optimal perimeter offset for the new text box position
+            // This makes the arrow "string" connect to the best point on the text box
+            const newPerimeterOffset = calculateInitialPerimeterOffset(newTextBox, arrowTip);
+            const newBasePoint = perimeterOffsetToPoint(newTextBox, newPerimeterOffset);
+            const newControlPoints = getOptimalControlPoints(newBasePoint, arrowTip, newTextBox);
+            
+            console.log('Callout drag end - updating shape with:', {
+              textX: newTextX,
+              textY: newTextY,
+              perimeterOffset: newPerimeterOffset,
+              control1: newControlPoints.control1,
+              control2: newControlPoints.control2
+            });
+            
+            updateShape(shape.id, {
+              textX: newTextX,
+              textY: newTextY,
+              // Arrow tip stays the same - only the "string" stretches and adjusts
+              perimeterOffset: newPerimeterOffset,
+              curveControl1X: newControlPoints.control1.x,
+              curveControl1Y: newControlPoints.control1.y,
+              curveControl2X: newControlPoints.control2.x,
+              curveControl2Y: newControlPoints.control2.y
+            });
+            
+            // Reset group node position since we've updated the shape data
+            console.log('Callout drag end - resetting group position to (0,0)');
+            groupNode.position({ x: 0, y: 0 });
+          } else {
+            const node = e.target;
+            const newPos = node.position();
+            
+            if (shape.type === DrawingTool.PEN || shape.type === DrawingTool.ARROW) {
+              // For pen and arrow shapes, update points
+              if ('points' in shape && Array.isArray(shape.points)) {
+                const newPoints = [...shape.points];
+                for (let i = 0; i < newPoints.length; i += 2) {
+                  newPoints[i] += newPos.x;
+                  newPoints[i + 1] += newPos.y;
+                }
+                updateShape(shape.id, { points: newPoints });
+                node.position({ x: 0, y: 0 });
+              }
+            } else {
+              // For other shapes (rect, circle, text), just update position
+              updateShape(shape.id, { x: newPos.x, y: newPos.y });
+              node.position({ x: 0, y: 0 });
+            }
+          }
         }
         
         if (isDraggingShape) {
@@ -959,32 +1026,36 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         const bgWidth = calloutShape.textWidth || 120;
         const bgHeight = calloutShape.textHeight || 40;
         
+        // Get the current group position (for drag preview)
+        const groupNode = selectedShapeRefs.current.get(shape.id);
+        const groupPos = groupNode ? groupNode.position() : { x: 0, y: 0 };
+        
+        if (groupPos.x !== 0 || groupPos.y !== 0) {
+          console.log('Callout render - group position:', groupPos, 'shape text pos:', { x: calloutShape.textX, y: calloutShape.textY });
+        }
+        
         // Calculate arrow base point from perimeter offset
+        // Account for group position during drag
         const textBox = {
-          x: calloutShape.textX,
-          y: calloutShape.textY,
+          x: calloutShape.textX + groupPos.x,
+          y: calloutShape.textY + groupPos.y,
           width: bgWidth,
           height: bgHeight
         };
         
-        const basePoint = perimeterOffsetToPoint(textBox, calloutShape.perimeterOffset);
+        // Recalculate perimeter offset for current position
         const arrowTip = {
           x: calloutShape.arrowX,
           y: calloutShape.arrowY
         };
         
-        // Use stored control points or calculate optimal ones
-        let control1: Point, control2: Point;
+        const currentPerimeterOffset = calculateInitialPerimeterOffset(textBox, arrowTip);
+        const basePoint = perimeterOffsetToPoint(textBox, currentPerimeterOffset);
         
-        if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined &&
-            calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
-          control1 = { x: calloutShape.curveControl1X, y: calloutShape.curveControl1Y };
-          control2 = { x: calloutShape.curveControl2X, y: calloutShape.curveControl2Y };
-        } else {
-          const optimalPoints = getOptimalControlPoints(basePoint, arrowTip, textBox);
-          control1 = optimalPoints.control1;
-          control2 = optimalPoints.control2;
-        }
+        // Calculate optimal control points for current positions
+        const optimalPoints = getOptimalControlPoints(basePoint, arrowTip, textBox);
+        const control1 = optimalPoints.control1;
+        const control2 = optimalPoints.control2;
         
         return (
           <Group
@@ -1012,7 +1083,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               shadowColor="rgba(0, 0, 0, 0.1)"
               shadowBlur={3}
               shadowOffset={{ x: 1, y: 1 }}
-              listening={false}
               ref={(node) => {
                 if (node) {
                   selectedShapeRefs.current.set(shape.id + '_textbox', node);
@@ -1065,20 +1135,26 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             />
             
             {/* Curved arrow using Path with cubic Bezier */}
+            {/* Subtract group position to keep arrow tip anchored */}
             <Path
-              data={getArrowPathString(basePoint, control1, control2, arrowTip)}
+              data={getArrowPathString(
+                { x: basePoint.x - groupPos.x, y: basePoint.y - groupPos.y },
+                { x: control1.x - groupPos.x, y: control1.y - groupPos.y },
+                { x: control2.x - groupPos.x, y: control2.y - groupPos.y },
+                { x: arrowTip.x - groupPos.x, y: arrowTip.y - groupPos.y }
+              )}
               stroke={calloutShape.style.stroke}
               strokeWidth={calloutShape.style.strokeWidth}
               opacity={calloutShape.style.opacity}
               listening={false}
             />
             
-            {/* Arrow head */}
+            {/* Arrow head - also subtract group position */}
             <RegularPolygon
               sides={3}
               radius={5}
-              x={arrowTip.x}
-              y={arrowTip.y}
+              x={arrowTip.x - groupPos.x}
+              y={arrowTip.y - groupPos.y}
               rotation={calculateArrowHeadRotation(control2, arrowTip)}
               fill={calloutShape.style.stroke}
               listening={false}

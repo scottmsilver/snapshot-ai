@@ -203,16 +203,21 @@ export const useDrawing = () => {
         const arrowTipY = startPoint.y;
         
         // Calculate text box position based on drag direction
-        // Ensure minimum distance from arrow tip
-        const minDistance = 50;
+        // Ensure reasonable distance from arrow tip
+        const minDistance = 100; // Increased minimum distance
         const calloutDx = endPoint.x - startPoint.x;
         const calloutDy = endPoint.y - startPoint.y;
         const distance = Math.sqrt(calloutDx * calloutDx + calloutDy * calloutDy);
         
         let textX: number, textY: number;
         
-        if (distance < minDistance) {
-          // If drag was too short, position text box with minimum distance
+        if (distance < 10) {
+          // If it's essentially a click (no drag), position text box to the upper-right by default
+          // This is a common annotation pattern
+          textX = arrowTipX + minDistance * 0.7 - textBoxWidth / 2;
+          textY = arrowTipY - minDistance * 0.7 - textBoxHeight / 2;
+        } else if (distance < minDistance) {
+          // If drag was too short, extend in the same direction
           const angle = Math.atan2(calloutDy, calloutDx);
           textX = arrowTipX + Math.cos(angle) * minDistance - textBoxWidth / 2;
           textY = arrowTipY + Math.sin(angle) * minDistance - textBoxHeight / 2;
