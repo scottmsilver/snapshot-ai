@@ -200,7 +200,7 @@ function App() {
         justifyContent: 'space-between',
         boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
       }}>
-        {/* Left: Logo and App Name */}
+        {/* Left: Logo and File Name */}
         <div style={{ 
           display: 'flex', 
           alignItems: 'center',
@@ -213,19 +213,8 @@ function App() {
             fontWeight: '600',
             color: '#333'
           }}>
-            Markup
+            {imageData ? imageData.name : 'No image loaded'}
           </h1>
-        </div>
-
-        {/* Center: File name */}
-        <div style={{
-          position: 'absolute',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          color: '#666',
-          fontSize: '0.875rem'
-        }}>
-          {imageData ? imageData.name : 'No image loaded'}
         </div>
 
         {/* Right: Quick Actions */}
