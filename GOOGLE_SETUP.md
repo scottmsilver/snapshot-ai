@@ -8,47 +8,73 @@
 ## Step 1: Create a Google Cloud Project
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Click "Select a project" → "New Project"
-3. Name your project (e.g., "Image Markup App")
-4. Click "Create"
+2. Click the project dropdown (next to "Google Cloud" logo)
+3. Click "NEW PROJECT" in the modal that appears
+4. Enter project details:
+   - Project name: "Image Markup App"
+   - Leave organization as is (or select if you have one)
+5. Click "CREATE"
+6. Wait for project creation (notification will appear)
 
 ## Step 2: Enable Required APIs
 
-1. In your project, go to "APIs & Services" → "Library"
-2. Search for and enable these APIs:
-   - Google Drive API
-   - Google Identity and Access Management (IAM) API
+1. Make sure your new project is selected in the dropdown
+2. Click the hamburger menu (☰) → "APIs & Services" → "Enabled APIs"
+3. Click "+ ENABLE APIS AND SERVICES" at the top
+4. Search for "Google Drive API"
+5. Click on it and press "ENABLE"
+6. Wait for it to enable (may take a few seconds)
 
 ## Step 3: Configure OAuth Consent Screen
 
-1. Go to "APIs & Services" → "OAuth consent screen"
-2. Choose "External" user type (unless you have a Google Workspace account)
-3. Fill in the required fields:
+1. Go to hamburger menu (☰) → "APIs & Services" → "OAuth consent screen"
+2. If you see user type options:
+   - For personal Google accounts: You might not see any options and go directly to configuration
+   - For Google Workspace: You might see "Internal" and "External" options
+   - If no options appear, just proceed to the next step
+3. Fill in "App information":
    - App name: "Image Markup App"
-   - User support email: Your email
-   - Developer contact information: Your email
-4. Add scopes:
-   - `openid`
-   - `email`
-   - `profile`
-   - `https://www.googleapis.com/auth/drive.file`
-5. Add test users (your email and any others you want to test with)
-6. Save and continue
+   - User support email: Select your email from dropdown
+   - App logo: (optional, skip this)
+4. App domain fields (all optional for testing):
+   - Application home page: (leave blank)
+   - Application privacy policy link: (leave blank)
+   - Application terms of service link: (leave blank)
+5. Under "Developer contact information", add your email
+6. Click "SAVE AND CONTINUE"
+7. On "Scopes" page:
+   - Click "ADD OR REMOVE SCOPES"
+   - In the panel that opens on the right:
+     - You can manually add scope: `https://www.googleapis.com/auth/drive.file`
+     - Or filter/search for "drive" and select the scope that says "See, create, and delete only the specific Google Drive files you use with this app"
+   - Click "UPDATE" at the bottom of the panel
+   - Click "SAVE AND CONTINUE"
+8. On "Test users" page (if it appears):
+   - Click "+ ADD USERS"
+   - Enter your email address
+   - Click "ADD"
+   - Click "SAVE AND CONTINUE"
+9. Review the summary and click "BACK TO DASHBOARD" or "BACK TO CREDENTIALS"
 
 ## Step 4: Create OAuth 2.0 Credentials
 
-1. Go to "APIs & Services" → "Credentials"
-2. Click "Create Credentials" → "OAuth client ID"
-3. Application type: "Web application"
-4. Name: "Image Markup Web Client"
-5. Authorized JavaScript origins:
-   - `http://localhost:5173` (for development)
-   - Your production URL (when you deploy)
-6. Authorized redirect URIs:
-   - `http://localhost:5173`
-   - Your production URL
-7. Click "Create"
-8. Copy the Client ID
+1. Go to hamburger menu (☰) → "APIs & Services" → "Credentials"
+2. Click "+ CREATE CREDENTIALS" at the top
+3. Select "OAuth client ID"
+4. If prompted about consent screen, make sure it's configured
+5. Application type: Select "Web application"
+6. Name: "Image Markup Web Client"
+7. Under "Authorized JavaScript origins":
+   - Click "+ ADD URI"
+   - Add: `http://localhost:5173`
+   - Add: `http://localhost` (sometimes needed)
+8. Under "Authorized redirect URIs":
+   - Click "+ ADD URI"
+   - Add: `http://localhost:5173`
+9. Click "CREATE"
+10. A modal will show your credentials:
+    - Copy the "Client ID" (looks like: xxx.apps.googleusercontent.com)
+    - You can ignore the Client Secret for this app
 
 ## Step 5: Create API Key (Optional)
 

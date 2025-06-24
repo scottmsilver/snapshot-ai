@@ -1,4 +1,4 @@
-import { Shape } from '@/types/drawing';
+import type { Shape } from '@/types/drawing';
 
 declare const gapi: any;
 
@@ -53,17 +53,39 @@ class GoogleDriveService {
     }
 
     this.initPromise = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://apis.google.com/js/api.js';
-      script.onload = () => {
-        gapi.load('client', async () => {
+      // Check if gapi is already loaded
+      if (window.gapi) {
+        gapi.load('client:auth2', async () => {
           try {
             await gapi.client.init({
               apiKey: import.meta.env.VITE_GOOGLE_API_KEY,
               discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
             });
             
-            gapi.client.setToken({
+            gapi.auth.setToken({
+              access_token: accessToken,
+            });
+            
+            this.isInitialized = true;
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        });
+        return;
+      }
+      
+      const script = document.createElement('script');
+      script.src = 'https://apis.google.com/js/api.js';
+      script.onload = () => {
+        gapi.load('client:auth2', async () => {
+          try {
+            await gapi.client.init({
+              apiKey: import.meta.env.VITE_GOOGLE_API_KEY,
+              discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+            });
+            
+            gapi.auth.setToken({
               access_token: accessToken,
             });
             
@@ -82,48 +104,77 @@ class GoogleDriveService {
   }
 
   async saveProject(data: ProjectData, fileId?: string): Promise<{ fileId: string }> {
-    const boundary = '-------314159265358979323846';
-    const delimiter = "\r\n--" + boundary + "\r\n";
-    const close_delim = "\r\n--" + boundary + "--";
+    try {
+      const fileContent = JSON.stringify(data, null, 2);
+      const file = new Blob([fileContent], { type: 'application/json' });
+      
+      const metadata = {
+        name: `Markup - ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+        mimeType: 'application/json'
+      };
 
-    const metadata = {
-      name: data.metadata.author ? `Markup - ${new Date().toLocaleDateString()}` : 'Untitled Markup',
-      mimeType: 'application/json',
-      parents: ['root'],
-    };
+      // For creating a new file
+      if (!fileId) {
+        const formData = new FormData();
+        formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+        formData.append('file', file);
 
-    const multipartRequestBody =
-      delimiter +
-      'Content-Type: application/json\r\n\r\n' +
-      JSON.stringify(metadata) +
-      delimiter +
-      'Content-Type: application/json\r\n\r\n' +
-      JSON.stringify(data) +
-      close_delim;
+        const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${gapi.auth.getToken().access_token}`
+          },
+          body: formData
+        });
 
-    const request = gapi.client.request({
-      path: fileId ? `/drive/v3/files/${fileId}` : '/drive/v3/files',
-      method: fileId ? 'PATCH' : 'POST',
-      params: {
-        uploadType: 'multipart',
-      },
-      headers: {
-        'Content-Type': 'multipart/related; boundary="' + boundary + '"',
-      },
-      body: multipartRequestBody,
-    });
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to save: ${errorText}`);
+        }
 
-    const response = await request;
-    return { fileId: response.result.id };
+        const result = await response.json();
+        return { fileId: result.id };
+      } else {
+        // For updating an existing file
+        const response = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${gapi.auth.getToken().access_token}`,
+            'Content-Type': 'application/json'
+          },
+          body: fileContent
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to update: ${errorText}`);
+        }
+
+        return { fileId };
+      }
+    } catch (error) {
+      console.error('Save error:', error);
+      throw error;
+    }
   }
 
   async loadProject(fileId: string): Promise<ProjectData> {
-    const response = await gapi.client.drive.files.get({
-      fileId: fileId,
-      alt: 'media',
-    });
-
-    return response.result as ProjectData;
+    try {
+      const response = await gapi.client.drive.files.get({
+        fileId: fileId,
+        alt: 'media',
+      });
+      
+      // The response.result might be a string that needs to be parsed
+      const data = typeof response.result === 'string' 
+        ? JSON.parse(response.result) 
+        : response.result;
+      
+      return data as ProjectData;
+    } catch (error) {
+      console.error('Error loading project:', error);
+      throw error;
+    }
   }
 
   async listProjects(): Promise<ProjectFile[]> {

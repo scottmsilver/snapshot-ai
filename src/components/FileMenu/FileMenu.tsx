@@ -1,22 +1,50 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { googleDriveService, ProjectData } from '@/services/googleDrive';
+import { googleDriveService, type ProjectData } from '@/services/googleDrive';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import { useImage } from '@/hooks/useImage';
+import { FilePicker } from './FilePicker';
 import Konva from 'konva';
 
 interface FileMenuProps {
   stageRef: React.RefObject<Konva.Stage | null>;
+  imageData: any | null;
   onProjectLoad?: (data: ProjectData) => void;
 }
 
-export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, onProjectLoad }) => {
-  const { isAuthenticated, user, getAccessToken } = useAuth();
-  const { state: drawingState } = useDrawingContext();
-  const { imageData } = useImage();
+export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad }) => {
+  // Try to use auth context, but handle case where it's not available
+  let authContext;
+  try {
+    authContext = useAuth();
+  } catch (error) {
+    return null;
+  }
+  
+  const { isAuthenticated, user, getAccessToken } = authContext;
+  const { state: drawingState, setShapes } = useDrawingContext();
+  const { loadImageFromData } = useImage();
   const [showDropdown, setShowDropdown] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+
+  // Initialize Google Drive API when authenticated
+  React.useEffect(() => {
+    if (isAuthenticated && !isInitialized) {
+      const token = getAccessToken();
+      if (token) {
+        googleDriveService.initialize(token)
+          .then(() => {
+            setIsInitialized(true);
+          })
+          .catch((error) => {
+            console.error('Failed to initialize Google Drive API:', error);
+          });
+      }
+    }
+  }, [isAuthenticated, getAccessToken, isInitialized]);
 
   const handleSave = async () => {
     if (!isAuthenticated || !stageRef.current || !imageData) return;
@@ -49,10 +77,13 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, onProjectLoad }) =
       const result = await googleDriveService.saveProject(projectData, currentFileId || undefined);
       setCurrentFileId(result.fileId);
       
-      // Show success notification (you could use a toast library here)
-      console.log('Project saved successfully!');
-    } catch (error) {
+      // Show success notification
+      alert('Project saved successfully!');
+    } catch (error: any) {
       console.error('Failed to save project:', error);
+      if (error.body) {
+        console.error('Error details:', error.body);
+      }
       alert('Failed to save project. Please try again.');
     } finally {
       setIsSaving(false);
@@ -71,9 +102,39 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, onProjectLoad }) =
   };
 
   const handleOpen = () => {
-    // For now, we'll just log this
-    // In a real implementation, you'd open a file picker dialog
-    console.log('Open from Drive - not implemented yet');
+    setShowFilePicker(true);
+  };
+
+  const handleFileSelect = async (fileId: string) => {
+    try {
+      const token = getAccessToken();
+      if (!token) throw new Error('No access token');
+
+      const projectData = await googleDriveService.loadProject(fileId);
+      
+      // Load the image
+      if (projectData.image && projectData.image.data) {
+        await loadImageFromData(projectData.image.data, projectData.image.name);
+      }
+      
+      // Load the shapes
+      if (projectData.shapes) {
+        setShapes(projectData.shapes);
+      }
+      
+      // Update current file ID
+      setCurrentFileId(fileId);
+      
+      // Call the optional callback
+      if (onProjectLoad) {
+        onProjectLoad(projectData);
+      }
+      
+      alert('Project loaded successfully!');
+    } catch (error) {
+      console.error('Failed to load project:', error);
+      alert('Failed to load project. Please try again.');
+    }
   };
 
   const handleShare = async () => {
@@ -103,8 +164,9 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, onProjectLoad }) =
   }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <button
+    <>
+      <div style={{ position: 'relative' }}>
+        <button
         onClick={() => setShowDropdown(!showDropdown)}
         style={{
           padding: '0.25rem 0.75rem',
@@ -162,22 +224,23 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, onProjectLoad }) =
               handleSave();
               setShowDropdown(false);
             }}
-            disabled={!imageData || isSaving}
+            disabled={!imageData || isSaving || !isInitialized}
             style={{
               width: '100%',
               padding: '0.5rem 0.75rem',
               backgroundColor: 'transparent',
               border: 'none',
               textAlign: 'left',
-              cursor: imageData && !isSaving ? 'pointer' : 'not-allowed',
+              cursor: imageData && !isSaving && isInitialized ? 'pointer' : 'not-allowed',
               fontSize: '0.75rem',
-              color: imageData && !isSaving ? '#333' : '#999',
+              color: imageData && !isSaving && isInitialized ? '#333' : '#999',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center'
             }}
+            title={!isInitialized ? 'Initializing Google Drive...' : !imageData ? 'No image loaded' : ''}
             onMouseEnter={(e) => {
-              if (imageData && !isSaving) {
+              if (imageData && !isSaving && isInitialized) {
                 e.currentTarget.style.backgroundColor = '#f5f5f5';
               }
             }}
@@ -206,7 +269,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, onProjectLoad }) =
               color: imageData && !isSaving ? '#333' : '#999'
             }}
             onMouseEnter={(e) => {
-              if (imageData && !isSaving) {
+              if (imageData && !isSaving && isInitialized) {
                 e.currentTarget.style.backgroundColor = '#f5f5f5';
               }
             }}
@@ -280,5 +343,12 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, onProjectLoad }) =
         </div>
       )}
     </div>
+    
+    <FilePicker
+      isOpen={showFilePicker}
+      onClose={() => setShowFilePicker(false)}
+      onSelect={handleFileSelect}
+    />
+    </>
   );
 };

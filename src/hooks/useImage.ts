@@ -6,6 +6,7 @@ interface UseImageReturn {
   isLoading: boolean;
   error: string | null;
   loadImage: (file: File) => Promise<void>;
+  loadImageFromData: (dataUrl: string, name: string) => Promise<void>;
   clearImage: () => void;
 }
 
@@ -64,11 +65,41 @@ export const useImage = (): UseImageReturn => {
     setError(null);
   }, []);
 
+  const loadImageFromData = useCallback(async (dataUrl: string, name: string) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Load image to get dimensions
+      const img = new Image();
+      
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = dataUrl;
+      });
+
+      // Set image data
+      setImageData({
+        src: dataUrl,
+        width: img.width,
+        height: img.height,
+        name: name,
+        type: 'upload'
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load image');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   return {
     imageData,
     isLoading,
     error,
     loadImage,
+    loadImageFromData,
     clearImage
   };
 };

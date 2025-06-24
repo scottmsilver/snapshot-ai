@@ -234,9 +234,9 @@ function App() {
           gap: '0.5rem',
           alignItems: 'center'
         }}>
+          <FileMenu stageRef={stageRef} imageData={imageData} />
           {imageData && (
             <>
-              <FileMenu stageRef={stageRef} />
               <button
                 onClick={() => {
                   clearImage();

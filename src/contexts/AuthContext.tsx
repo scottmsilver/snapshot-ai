@@ -157,10 +157,13 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   
-  if (!clientId) {
+  if (!clientId || clientId === 'your-client-id-here') {
     console.error('Google Client ID is not configured. Please set VITE_GOOGLE_CLIENT_ID in your .env file.');
+    console.error('Follow the instructions in GOOGLE_SETUP.md to create a Google Cloud project and get credentials.');
     return <>{children}</>;
   }
+  
+  // Google OAuth initialized
   
   return (
     <GoogleOAuthProvider clientId={clientId}>

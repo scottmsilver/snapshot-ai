@@ -11,6 +11,9 @@ export default defineConfig({
   server: {
     watch: {
       ignored: ['**/vite-debug.log', '**/vite-output.log', '**/vite.log', '**/*.log']
+    },
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
     }
   },
   resolve: {
