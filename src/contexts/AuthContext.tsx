@@ -38,16 +38,24 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
 
   // Check for existing session on mount
   useEffect(() => {
+    console.log('[AuthContext] Checking for existing session...');
     const storedToken = localStorage.getItem('google_access_token');
     const storedUser = localStorage.getItem('google_user');
+    
+    console.log('[AuthContext] Found stored session:', {
+      hasToken: !!storedToken,
+      hasUser: !!storedUser
+    });
     
     if (storedToken && storedUser) {
       setAccessToken(storedToken);
       setUser(JSON.parse(storedUser));
+      console.log('[AuthContext] Restored user session:', JSON.parse(storedUser).email);
       
       // Validate token is still valid
       validateToken(storedToken).catch(() => {
         // Token is invalid, clear session
+        console.log('[AuthContext] Token validation failed, clearing session');
         logout();
       });
     }
@@ -101,24 +109,28 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
 
   const googleLogin = useGoogleLogin({
     onSuccess: async (response) => {
+      console.log('[AuthContext] Login successful');
       const token = response.access_token;
       setAccessToken(token);
       localStorage.setItem('google_access_token', token);
       
       // Fetch user info
-      await fetchUserInfo(token);
+      const userInfo = await fetchUserInfo(token);
+      console.log('[AuthContext] User info fetched:', userInfo.email);
     },
     onError: (error) => {
-      console.error('Login failed:', error);
+      console.error('[AuthContext] Login failed:', error);
     },
     scope: 'openid email profile https://www.googleapis.com/auth/drive.file',
   });
 
   const login = () => {
+    console.log('[AuthContext] Login initiated');
     googleLogin();
   };
 
   const logout = () => {
+    console.log('[AuthContext] Logout initiated');
     setUser(null);
     setAccessToken(null);
     localStorage.removeItem('google_access_token');
@@ -164,6 +176,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }
   
   // Google OAuth initialized
+  console.log('[AuthContext] Google OAuth Provider initialized with clientId:', clientId.substring(0, 10) + '...');
   
   return (
     <GoogleOAuthProvider clientId={clientId}>

@@ -1,0 +1,202 @@
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { googleDriveService, type ProjectData } from '@/services/googleDrive';
+import { useAuth } from '@/contexts/AuthContext';
+import { useDrawingContext } from '@/contexts/DrawingContext';
+import type { ImageData } from '@/types/canvas';
+
+interface UseAutoSaveOptions {
+  fileId: string | null;
+  imageData: ImageData | null;
+  hasWritePermission: boolean | null;
+  debounceMs?: number;
+  onFileIdChange?: (fileId: string) => void;
+}
+
+type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
+
+interface UseAutoSaveReturn {
+  saveStatus: SaveStatus;
+  lastSaved: Date | null;
+  save: () => Promise<void>;
+  markAsUnsaved: () => void;
+}
+
+export const useAutoSave = ({
+  fileId,
+  imageData,
+  hasWritePermission,
+  debounceMs = 2000, // 2 seconds default
+  onFileIdChange
+}: UseAutoSaveOptions): UseAutoSaveReturn => {
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedDataRef = useRef<string>('');
+  
+  // Get auth context - try/catch in case it's not available
+  let authContext: ReturnType<typeof useAuth> | null = null;
+  try {
+    authContext = useAuth();
+  } catch (error) {
+    // Auth context not available
+  }
+  
+  const { state: drawingState } = useDrawingContext();
+
+  // Manual save function
+  const save = useCallback(async () => {
+    console.log('[AutoSave] Save function called:', {
+      isAuthenticated: authContext?.isAuthenticated,
+      hasImageData: !!imageData,
+      hasGetAccessToken: !!authContext?.getAccessToken,
+      fileId,
+      hasWritePermission
+    });
+    
+    if (!authContext?.isAuthenticated || !imageData || !authContext?.getAccessToken) {
+      console.log('[AutoSave] Save aborted: missing requirements', {
+        noAuth: !authContext?.isAuthenticated,
+        noImageData: !imageData,
+        noGetAccessToken: !authContext?.getAccessToken
+      });
+      return;
+    }
+
+    // Check if we have write permission or no fileId (new file)
+    if (fileId && hasWritePermission === false) {
+      // Can't auto-save to read-only files
+      console.log('[AutoSave] Save aborted: no write permission for fileId:', fileId);
+      return;
+    }
+
+    console.log('[AutoSave] Starting save...');
+    setSaveStatus('saving');
+
+    try {
+      const token = authContext.getAccessToken();
+      if (!token) throw new Error('No access token');
+
+      await googleDriveService.initialize(token);
+
+      // Create project data
+      const projectData: ProjectData = {
+        version: '1.0',
+        image: {
+          data: imageData.src,
+          name: imageData.name,
+          width: imageData.width,
+          height: imageData.height,
+        },
+        shapes: drawingState.shapes,
+        metadata: {
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          author: authContext.user?.email || 'unknown',
+          version: '1.0',
+        },
+      };
+
+      // Save project - create new if no fileId
+      console.log('[AutoSave] Calling saveProject with fileId:', fileId || 'NEW FILE');
+      const result = await googleDriveService.saveProject(projectData, fileId || undefined);
+      console.log('[AutoSave] Save successful, result:', result);
+      
+      setSaveStatus('saved');
+      setLastSaved(new Date());
+      lastSavedDataRef.current = JSON.stringify({ shapes: drawingState.shapes, imageData });
+      
+      // If this was a new file, notify parent of the new fileId
+      if (!fileId && result.fileId && onFileIdChange) {
+        console.log('[AutoSave] New file created, notifying parent with fileId:', result.fileId);
+        onFileIdChange(result.fileId);
+      }
+    } catch (error) {
+      console.error('Auto-save failed:', error);
+      setSaveStatus('error');
+    }
+  }, [authContext, drawingState.shapes, fileId, hasWritePermission, imageData, onFileIdChange]);
+
+  // Mark as unsaved
+  const markAsUnsaved = useCallback(() => {
+    setSaveStatus('unsaved');
+  }, []);
+
+  // Auto-save on changes
+  useEffect(() => {
+    console.log('[AutoSave] Auto-save effect triggered:', {
+      fileId,
+      hasWritePermission,
+      hasImageData: !!imageData,
+      shapesCount: drawingState.shapes.length,
+      isAuthenticated: authContext?.isAuthenticated
+    });
+    
+    // Skip if not authenticated
+    if (!authContext?.isAuthenticated) {
+      console.log('[AutoSave] Auto-save skipped: not authenticated');
+      return;
+    }
+    
+    // Only auto-save if we have a fileId and permission
+    if (!fileId || hasWritePermission === false || !imageData) {
+      console.log('[AutoSave] Auto-save skipped:', {
+        noFileId: !fileId,
+        noWritePermission: hasWritePermission === false,
+        noImageData: !imageData
+      });
+      return;
+    }
+
+    const currentData = JSON.stringify({ shapes: drawingState.shapes, imageData });
+    
+    // Check if data has actually changed
+    if (currentData === lastSavedDataRef.current) {
+      console.log('[AutoSave] No changes detected, skipping save');
+      return;
+    }
+    
+    console.log('[AutoSave] Changes detected, will save in', debounceMs, 'ms');
+
+    // Mark as unsaved immediately
+    setSaveStatus('unsaved');
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set new timeout for auto-save
+    saveTimeoutRef.current = setTimeout(() => {
+      console.log('[AutoSave] Debounce timeout reached, triggering save');
+      save();
+    }, debounceMs);
+
+    // Cleanup
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [drawingState.shapes, imageData, fileId, hasWritePermission, save, debounceMs, authContext?.isAuthenticated]);
+
+  // Warn before leaving with unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (saveStatus === 'unsaved' || saveStatus === 'saving') {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [saveStatus]);
+
+  return {
+    saveStatus,
+    lastSaved,
+    save,
+    markAsUnsaved
+  };
+};

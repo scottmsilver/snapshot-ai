@@ -7,6 +7,7 @@ import { DrawingLayer } from '@/components/Canvas/DrawingLayer'
 import { TextInputDialog } from '@/components/TextInputDialog'
 import { UserMenu } from '@/components/Auth/UserMenu'
 import { FileMenu } from '@/components/FileMenu/FileMenu'
+import { SaveIndicator } from '@/components/SaveIndicator'
 import { useImage } from '@/hooks/useImage'
 import { useHistory } from '@/hooks/useHistory'
 import { useDrawing } from '@/hooks/useDrawing'
@@ -29,6 +30,8 @@ function App() {
   const [isLoadingSharedFile, setIsLoadingSharedFile] = useState(false)
   const [sharedFileError, setSharedFileError] = useState<string | null>(null)
   const [loadedFileId, setLoadedFileId] = useState<string | null>(null)
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved')
+  const [lastSaved, setLastSaved] = useState<Date | null>(null)
   
   // Get selected shapes
   const selectedShapes = shapes.filter(shape => selectedShapeIds.includes(shape.id))
@@ -52,7 +55,13 @@ function App() {
   let authContext: ReturnType<typeof useAuth> | null = null;
   try {
     authContext = useAuth();
+    console.log('[App] Auth context loaded:', {
+      isAuthenticated: authContext?.isAuthenticated,
+      hasUser: !!authContext?.user,
+      hasGetAccessToken: !!authContext?.getAccessToken
+    });
   } catch (error) {
+    console.log('[App] Auth context not available');
     // Auth context not available
   }
 
@@ -61,10 +70,8 @@ function App() {
     const urlParams = new URLSearchParams(window.location.search);
     const fileId = urlParams.get('file');
     
-    console.log('URL params:', { fileId, isAuthenticated: authContext?.isAuthenticated });
     
     if (fileId && authContext?.isAuthenticated && authContext?.getAccessToken) {
-      console.log('Loading shared file:', fileId);
       setIsLoadingSharedFile(true);
       setSharedFileError(null);
       
@@ -72,13 +79,9 @@ function App() {
       if (token) {
         googleDriveService.initialize(token)
           .then(() => {
-            console.log('Google Drive initialized, loading project...');
             return googleDriveService.loadProject(fileId);
           })
           .then((projectData: ProjectData) => {
-            console.log('Project data loaded:', projectData);
-            console.log('Image data preview:', projectData.image.data.substring(0, 100));
-            console.log('Number of shapes:', projectData.shapes?.length || 0);
             
             // Load the image
             const imageToLoad = {
@@ -87,7 +90,6 @@ function App() {
               width: projectData.image.width || 0,
               height: projectData.image.height || 0
             };
-            console.log('Loading image with data:', imageToLoad);
             loadImageFromData(projectData.image.data, projectData.image.name || 'Shared Image');
             
             // Load the shapes
@@ -115,22 +117,24 @@ function App() {
 
   // Load image when imageData changes
   useEffect(() => {
-    console.log('imageData changed:', imageData);
+    console.log('[App] imageData changed:', {
+      hasImageData: !!imageData,
+      imageName: imageData?.name
+    });
     if (imageData) {
       const img = new window.Image()
       img.src = imageData.src
       img.onload = () => {
-        console.log('Image loaded successfully');
+        console.log('[App] Konva image loaded successfully');
         setKonvaImage(img)
-      }
-      img.onerror = (error) => {
-        console.error('Image failed to load:', error);
       }
     }
   }, [imageData])
 
   const handleImageUpload = async (file: File) => {
+    console.log('[App] Image upload started:', file.name);
     await loadImage(file)
+    console.log('[App] Image upload completed');
   }
 
   // Track if we're in the middle of history navigation
@@ -256,6 +260,36 @@ function App() {
   }, [currentIndex, getCurrentState, setShapes, drawingState.shapes])
   
 
+  // Show login screen if not authenticated or auth context not available
+  if (!authContext || !authContext.isAuthenticated) {
+    console.log('[App] Showing login screen - user not authenticated or auth not available');
+    return (
+      <div style={{
+        minHeight: '100vh',
+        backgroundColor: '#f5f5f5',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <div style={{
+          backgroundColor: 'white',
+          padding: '3rem',
+          borderRadius: '8px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          textAlign: 'center',
+          maxWidth: '400px'
+        }}>
+          <span style={{ fontSize: '3rem', display: 'block', marginBottom: '1rem' }}>🎨</span>
+          <h1 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Image Markup App</h1>
+          <p style={{ marginBottom: '2rem', color: '#666' }}>
+            Sign in with Google to start creating and saving your image annotations
+          </p>
+          <UserMenu />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ 
       minHeight: '100vh', 
@@ -278,7 +312,8 @@ function App() {
         <div style={{ 
           display: 'flex', 
           alignItems: 'center',
-          gap: '0.5rem'
+          gap: '0.5rem',
+          position: 'relative'
         }}>
           <span style={{ fontSize: '1.25rem' }}>🎨</span>
           <h1 style={{ 
@@ -289,6 +324,7 @@ function App() {
           }}>
             {imageData ? imageData.name : 'No image loaded'}
           </h1>
+          <SaveIndicator status={saveStatus} lastSaved={lastSaved} />
         </div>
 
         {/* Right: Quick Actions */}
@@ -297,7 +333,15 @@ function App() {
           gap: '0.5rem',
           alignItems: 'center'
         }}>
-          <FileMenu stageRef={stageRef} imageData={imageData} initialFileId={loadedFileId} />
+          <FileMenu 
+            stageRef={stageRef} 
+            imageData={imageData} 
+            initialFileId={loadedFileId}
+            onSaveStatusChange={(status, saved) => {
+              setSaveStatus(status);
+              setLastSaved(saved);
+            }}
+          />
           {imageData && (
             <>
               <button
@@ -306,6 +350,8 @@ function App() {
                   setKonvaImage(null);
                   clearSelection();
                   setShapes([]);
+                  setLoadedFileId(null);
+                  setSaveStatus('saved');
                 }}
                 title="New Image"
                 style={{
