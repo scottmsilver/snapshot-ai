@@ -10,6 +10,7 @@ import {
   type CircleShape,
   type ArrowShape,
   type CalloutShape,
+  type StarShape,
 } from '@/types/drawing';
 import { calculateInitialPerimeterOffset, perimeterOffsetToPoint, getOptimalControlPoints } from '@/utils/calloutGeometry';
 
@@ -59,6 +60,7 @@ export const useDrawing = () => {
       case DrawingTool.CIRCLE:
       case DrawingTool.ARROW:
       case DrawingTool.CALLOUT:
+      case DrawingTool.STAR:
         // These tools need start and end points
         break;
 
@@ -87,6 +89,7 @@ export const useDrawing = () => {
       case DrawingTool.CIRCLE:
       case DrawingTool.ARROW:
       case DrawingTool.CALLOUT:
+      case DrawingTool.STAR:
         // Update end point for preview
         setTempPoints([startPoint, point]);
         break;
@@ -273,6 +276,30 @@ export const useDrawing = () => {
           updatedAt: Date.now(),
         } as CalloutShape;
         break;
+
+      case DrawingTool.STAR:
+        // Calculate radius from center point (start) to edge (end)
+        const starDx = endPoint.x - startPoint.x;
+        const starDy = endPoint.y - startPoint.y;
+        const starRadius = Math.sqrt(starDx * starDx + starDy * starDy);
+        
+        newShape = {
+          id: generateId(),
+          type: DrawingTool.STAR,
+          x: startPoint.x,
+          y: startPoint.y,
+          radius: starRadius,
+          innerRadius: starRadius * 0.38, // Golden ratio for nice-looking stars
+          points: 5,
+          style: { ...state.currentStyle },
+          visible: true,
+          locked: false,
+          zIndex: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          rotation: -18, // Point upward by default
+        } as StarShape;
+        break;
     }
 
     // Add shape if created
@@ -346,6 +373,9 @@ export const useDrawing = () => {
         break;
       case 'l':
         setActiveTool(DrawingTool.CALLOUT);
+        break;
+      case 's':
+        setActiveTool(DrawingTool.STAR);
         break;
       case 'delete':
       case 'backspace':

@@ -6,7 +6,8 @@ export const DrawingTool = {
   CIRCLE: 'circle',
   ARROW: 'arrow',
   TEXT: 'text',
-  CALLOUT: 'callout'
+  CALLOUT: 'callout',
+  STAR: 'star'
 } as const;
 
 export type DrawingTool = typeof DrawingTool[keyof typeof DrawingTool];
@@ -138,9 +139,19 @@ export interface CalloutShape extends BaseShape {
   borderRadius?: number;
 }
 
+export interface StarShape extends BaseShape {
+  type: typeof DrawingTool.STAR;
+  x: number;
+  y: number;
+  radius: number;
+  innerRadius?: number; // If not specified, defaults to radius * 0.38
+  points?: number; // Number of points (default 5)
+  rotation?: number;
+}
+
 
 // Union type for all shapes
-export type Shape = PenShape | RectShape | CircleShape | ArrowShape | TextShape | CalloutShape;
+export type Shape = PenShape | RectShape | CircleShape | ArrowShape | TextShape | CalloutShape | StarShape;
 
 // Drawing state
 export interface DrawingState {

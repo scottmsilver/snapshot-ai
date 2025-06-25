@@ -45,31 +45,16 @@ export const useAutoSave = ({
 
   // Manual save function
   const save = useCallback(async () => {
-    console.log('[AutoSave] Save function called:', {
-      isAuthenticated: authContext?.isAuthenticated,
-      hasImageData: !!imageData,
-      hasGetAccessToken: !!authContext?.getAccessToken,
-      fileId,
-      hasWritePermission
-    });
-    
     if (!authContext?.isAuthenticated || !imageData || !authContext?.getAccessToken) {
-      console.log('[AutoSave] Save aborted: missing requirements', {
-        noAuth: !authContext?.isAuthenticated,
-        noImageData: !imageData,
-        noGetAccessToken: !authContext?.getAccessToken
-      });
       return;
     }
 
     // Check if we have write permission or no fileId (new file)
     if (fileId && hasWritePermission === false) {
       // Can't auto-save to read-only files
-      console.log('[AutoSave] Save aborted: no write permission for fileId:', fileId);
       return;
     }
 
-    console.log('[AutoSave] Starting save...');
     setSaveStatus('saving');
 
     try {
@@ -97,9 +82,7 @@ export const useAutoSave = ({
       };
 
       // Save project - create new if no fileId
-      console.log('[AutoSave] Calling saveProject with fileId:', fileId || 'NEW FILE');
       const result = await googleDriveService.saveProject(projectData, fileId || undefined);
-      console.log('[AutoSave] Save successful, result:', result);
       
       setSaveStatus('saved');
       setLastSaved(new Date());
@@ -107,7 +90,6 @@ export const useAutoSave = ({
       
       // If this was a new file, notify parent of the new fileId
       if (!fileId && result.fileId && onFileIdChange) {
-        console.log('[AutoSave] New file created, notifying parent with fileId:', result.fileId);
         onFileIdChange(result.fileId);
       }
     } catch (error) {
@@ -123,27 +105,13 @@ export const useAutoSave = ({
 
   // Auto-save on changes
   useEffect(() => {
-    console.log('[AutoSave] Auto-save effect triggered:', {
-      fileId,
-      hasWritePermission,
-      hasImageData: !!imageData,
-      shapesCount: drawingState.shapes.length,
-      isAuthenticated: authContext?.isAuthenticated
-    });
-    
     // Skip if not authenticated
     if (!authContext?.isAuthenticated) {
-      console.log('[AutoSave] Auto-save skipped: not authenticated');
       return;
     }
     
     // Only auto-save if we have a fileId and permission
     if (!fileId || hasWritePermission === false || !imageData) {
-      console.log('[AutoSave] Auto-save skipped:', {
-        noFileId: !fileId,
-        noWritePermission: hasWritePermission === false,
-        noImageData: !imageData
-      });
       return;
     }
 
@@ -151,11 +119,8 @@ export const useAutoSave = ({
     
     // Check if data has actually changed
     if (currentData === lastSavedDataRef.current) {
-      console.log('[AutoSave] No changes detected, skipping save');
       return;
     }
-    
-    console.log('[AutoSave] Changes detected, will save in', debounceMs, 'ms');
 
     // Mark as unsaved immediately
     setSaveStatus('unsaved');
@@ -167,7 +132,6 @@ export const useAutoSave = ({
 
     // Set new timeout for auto-save
     saveTimeoutRef.current = setTimeout(() => {
-      console.log('[AutoSave] Debounce timeout reached, triggering save');
       save();
     }, debounceMs);
 

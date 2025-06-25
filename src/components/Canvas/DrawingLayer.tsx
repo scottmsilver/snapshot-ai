@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, RegularPolygon } from 'react-konva';
+import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, Star } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
 import { useSelectionMachine } from '@/hooks/useSelectionMachine';
 import { DrawingTool } from '@/types/drawing';
-import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, Point } from '@/types/drawing';
+import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, StarShape, Point } from '@/types/drawing';
 import { 
   perimeterOffsetToPoint, 
   getArrowPathString, 
@@ -497,6 +497,31 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               listening={false}
             />
           </Group>
+        );
+
+      case DrawingTool.STAR:
+        if (tempPoints.length < 2) return null;
+        const starStart = tempPoints[0];
+        const starEnd = tempPoints[1];
+        // Calculate radius from center to cursor
+        const starDx = starEnd.x - starStart.x;
+        const starDy = starEnd.y - starStart.y;
+        const starRadius = Math.sqrt(starDx * starDx + starDy * starDy);
+        
+        return (
+          <Star
+            x={starStart.x}
+            y={starStart.y}
+            numPoints={5}
+            outerRadius={starRadius}
+            innerRadius={starRadius * 0.4}
+            stroke={currentStyle.stroke}
+            strokeWidth={currentStyle.strokeWidth}
+            fill={currentStyle.fill}
+            opacity={currentStyle.opacity}
+            rotation={-18} // Rotate to point upward
+            listening={false}
+          />
         );
 
       default:
@@ -1158,6 +1183,32 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             />
           </Group>
         );
+
+      case DrawingTool.STAR:
+        const starShape = shape as StarShape;
+        return (
+          <Star
+            key={shape.id}
+            {...commonProps}
+            x={starShape.x}
+            y={starShape.y}
+            numPoints={starShape.points || 5}
+            outerRadius={starShape.radius}
+            innerRadius={starShape.innerRadius || starShape.radius * 0.4}
+            stroke={starShape.style.stroke}
+            strokeWidth={starShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
+            fill={starShape.style.fill}
+            opacity={starShape.style.opacity}
+            rotation={starShape.rotation || -18}
+            ref={(node) => {
+              if (node) {
+                selectedShapeRefs.current.set(shape.id, node);
+              } else {
+                selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
+          />
+        );
         
       default:
         return null;
@@ -1749,14 +1800,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           ignoreStroke={false}
           keepRatio={false}
           boundBoxFunc={(oldBox, newBox) => {
-            // Check if any selected shape is a circle
-            const hasCircle = drawingSelectedShapeIds.some(id => {
+            // Check if any selected shape is a circle or star
+            const hasCircleOrStar = drawingSelectedShapeIds.some(id => {
               const shape = shapes.find(s => s.id === id);
-              return shape?.type === DrawingTool.CIRCLE;
+              return shape?.type === DrawingTool.CIRCLE || shape?.type === DrawingTool.STAR;
             });
             
-            // For circles, maintain aspect ratio
-            if (hasCircle && drawingSelectedShapeIds.length === 1) {
+            // For circles and stars, maintain aspect ratio
+            if (hasCircleOrStar && drawingSelectedShapeIds.length === 1) {
               const size = Math.max(newBox.width, newBox.height);
               return {
                 ...newBox,
@@ -1931,6 +1982,27 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                   node.y(0);
                   node.rotation(0);
                 }
+              } else if (shape.type === DrawingTool.STAR) {
+                const starShape = shape as StarShape;
+                // Keep it proportional by using the larger scale factor
+                const scale = Math.max(scaleX, scaleY);
+                const newRadius = Math.max(5, starShape.radius * scale);
+                const newInnerRadius = starShape.innerRadius ? starShape.innerRadius * scale : newRadius * 0.38;
+                
+                updateShape(shapeId, {
+                  x: x,
+                  y: y,
+                  radius: newRadius,
+                  innerRadius: newInnerRadius,
+                  rotation: rotation
+                });
+                
+                // Reset transform
+                node.scaleX(1);
+                node.scaleY(1);
+                node.x(x);
+                node.y(y);
+                node.rotation(rotation);
               }
             } catch (error) {
               console.error('Error updating shape after transform:', error);

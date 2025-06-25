@@ -70,7 +70,6 @@ class GoogleDriveService {
               access_token: accessToken,
             });
             
-            console.log('[GoogleDrive] Initialization complete');
             this.isInitialized = true;
             resolve();
           } catch (error) {
@@ -94,7 +93,6 @@ class GoogleDriveService {
               access_token: accessToken,
             });
             
-            console.log('[GoogleDrive] Initialization complete');
             this.isInitialized = true;
             resolve();
           } catch (error) {

@@ -55,13 +55,7 @@ function App() {
   let authContext: ReturnType<typeof useAuth> | null = null;
   try {
     authContext = useAuth();
-    console.log('[App] Auth context loaded:', {
-      isAuthenticated: authContext?.isAuthenticated,
-      hasUser: !!authContext?.user,
-      hasGetAccessToken: !!authContext?.getAccessToken
-    });
   } catch (error) {
-    console.log('[App] Auth context not available');
     // Auth context not available
   }
 
@@ -117,24 +111,17 @@ function App() {
 
   // Load image when imageData changes
   useEffect(() => {
-    console.log('[App] imageData changed:', {
-      hasImageData: !!imageData,
-      imageName: imageData?.name
-    });
     if (imageData) {
       const img = new window.Image()
       img.src = imageData.src
       img.onload = () => {
-        console.log('[App] Konva image loaded successfully');
         setKonvaImage(img)
       }
     }
   }, [imageData])
 
   const handleImageUpload = async (file: File) => {
-    console.log('[App] Image upload started:', file.name);
     await loadImage(file)
-    console.log('[App] Image upload completed');
   }
 
   // Track if we're in the middle of history navigation
@@ -262,7 +249,6 @@ function App() {
 
   // Show login screen if not authenticated or auth context not available
   if (!authContext || !authContext.isAuthenticated) {
-    console.log('[App] Showing login screen - user not authenticated or auth not available');
     return (
       <div style={{
         minHeight: '100vh',

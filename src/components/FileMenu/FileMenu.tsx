@@ -38,25 +38,15 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
 
   // Initialize Google Drive API when authenticated
   React.useEffect(() => {
-    console.log('[FileMenu] Auth/Init effect:', {
-      isAuthenticated,
-      isInitialized,
-      hasGetAccessToken: !!getAccessToken
-    });
-    
     if (isAuthenticated && !isInitialized) {
       const token = getAccessToken();
-      console.log('[FileMenu] Getting access token:', !!token);
-      
       if (token) {
-        console.log('[FileMenu] Initializing Google Drive service...');
         googleDriveService.initialize(token)
           .then(() => {
-            console.log('[FileMenu] Google Drive initialized successfully');
             setIsInitialized(true);
           })
           .catch((error) => {
-            console.error('[FileMenu] Failed to initialize Google Drive API:', error);
+            console.error('Failed to initialize Google Drive API:', error);
           });
       }
     }
@@ -64,7 +54,6 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
 
   // Update currentFileId when initialFileId changes
   React.useEffect(() => {
-    console.log('[FileMenu] InitialFileId changed:', initialFileId);
     if (initialFileId) {
       setCurrentFileId(initialFileId);
     }
@@ -105,26 +94,18 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
   }, [currentFileId, isInitialized, isAuthenticated, getAccessToken]);
 
   // Auto-save hook
-  console.log('[FileMenu] Auto-save hook params:', {
-    currentFileId,
-    hasWritePermission,
-    hasImageData: !!imageData
-  });
-  
   const { saveStatus, lastSaved, save: autoSave } = useAutoSave({
     fileId: currentFileId,
     imageData,
     hasWritePermission,
     debounceMs: 2000, // 2 seconds
     onFileIdChange: (newFileId) => {
-      console.log('[FileMenu] onFileIdChange called with:', newFileId);
       setCurrentFileId(newFileId);
     }
   });
 
   // Report save status changes to parent
   React.useEffect(() => {
-    console.log('[FileMenu] Save status changed:', saveStatus, lastSaved);
     if (onSaveStatusChange) {
       onSaveStatusChange(saveStatus, lastSaved);
     }
@@ -132,22 +113,13 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
 
   // Auto-save when image is loaded and no fileId exists
   React.useEffect(() => {
-    console.log('[FileMenu] Initial save effect:', {
-      hasImageData: !!imageData,
-      currentFileId,
-      isAuthenticated,
-      isInitialized
-    });
-    
     // Skip if not authenticated
     if (!isAuthenticated) {
-      console.log('[FileMenu] Skipping initial save - not authenticated');
       return;
     }
     
     const performInitialSave = async () => {
       if (imageData && !currentFileId && isAuthenticated && isInitialized) {
-        console.log('[FileMenu] Performing initial auto-save for new image');
         // Use the autoSave function which will handle onFileIdChange
         await autoSave();
       }

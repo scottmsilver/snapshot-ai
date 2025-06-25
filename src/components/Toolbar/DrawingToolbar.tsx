@@ -11,6 +11,11 @@ import {
   CalloutIcon
 } from '@/components/Icons/ToolIcons';
 
+// Star icon component
+const StarIcon: React.FC<{ size?: number }> = ({ size = 20 }) => (
+  <span style={{ fontSize: size + 'px', lineHeight: 1 }}>⭐</span>
+);
+
 const tools = [
   { tool: DrawingTool.SELECT, icon: SelectIcon, label: 'Select', shortcut: 'V' },
   { tool: DrawingTool.PEN, icon: PenIcon, label: 'Pen', shortcut: 'P' },
@@ -18,7 +23,8 @@ const tools = [
   { tool: DrawingTool.CIRCLE, icon: CircleIcon, label: 'Circle', shortcut: 'C' },
   { tool: DrawingTool.ARROW, icon: ArrowIcon, label: 'Arrow', shortcut: 'A' },
   { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' },
-  { tool: DrawingTool.CALLOUT, icon: CalloutIcon, label: 'Callout', shortcut: 'L' }
+  { tool: DrawingTool.CALLOUT, icon: CalloutIcon, label: 'Callout', shortcut: 'L' },
+  { tool: DrawingTool.STAR, icon: StarIcon, label: 'Star', shortcut: 'S' }
 ];
 
 interface DrawingToolbarProps {
@@ -49,7 +55,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
   
   // Determine which properties to show
   const toolOrShapeType = selectedShape ? selectedShape.type : activeTool;
-  const showFillOption = toolOrShapeType === DrawingTool.RECTANGLE || toolOrShapeType === DrawingTool.CIRCLE;
+  const showFillOption = toolOrShapeType === DrawingTool.RECTANGLE || toolOrShapeType === DrawingTool.CIRCLE || toolOrShapeType === DrawingTool.STAR;
   const showStrokeWidth = toolOrShapeType !== DrawingTool.TEXT && toolOrShapeType !== DrawingTool.CALLOUT;
   const showTextOptions = toolOrShapeType === DrawingTool.TEXT || toolOrShapeType === DrawingTool.CALLOUT;
 
