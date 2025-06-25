@@ -4,15 +4,17 @@ import { googleDriveService, type ProjectData } from '@/services/googleDrive';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import { useImage } from '@/hooks/useImage';
 import { FilePicker } from './FilePicker';
+import { ShareDialog } from './ShareDialog';
 import Konva from 'konva';
 
 interface FileMenuProps {
   stageRef: React.RefObject<Konva.Stage | null>;
   imageData: any | null;
   onProjectLoad?: (data: ProjectData) => void;
+  initialFileId?: string | null;
 }
 
-export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad }) => {
+export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId }) => {
   // Try to use auth context, but handle case where it's not available
   let authContext;
   try {
@@ -26,9 +28,11 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
   const { loadImageFromData } = useImage();
   const [showDropdown, setShowDropdown] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [currentFileId, setCurrentFileId] = useState<string | null>(null);
+  const [currentFileId, setCurrentFileId] = useState<string | null>(initialFileId || null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [showFilePicker, setShowFilePicker] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [hasWritePermission, setHasWritePermission] = useState<boolean | null>(null);
 
   // Initialize Google Drive API when authenticated
   React.useEffect(() => {
@@ -46,8 +50,55 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
     }
   }, [isAuthenticated, getAccessToken, isInitialized]);
 
+  // Update currentFileId when initialFileId changes
+  React.useEffect(() => {
+    if (initialFileId) {
+      setCurrentFileId(initialFileId);
+    }
+  }, [initialFileId]);
+
+  // Check write permissions when we have a file ID
+  React.useEffect(() => {
+    if (currentFileId && isInitialized && isAuthenticated) {
+      const checkPermissions = async () => {
+        try {
+          const token = getAccessToken();
+          if (!token) return;
+          
+          // Get file metadata to check permissions
+          const response = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${currentFileId}?fields=capabilities`,
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            }
+          );
+          
+          if (response.ok) {
+            const data = await response.json();
+            setHasWritePermission(data.capabilities?.canEdit || false);
+          } else {
+            setHasWritePermission(false);
+          }
+        } catch (error) {
+          console.error('Failed to check permissions:', error);
+          setHasWritePermission(false);
+        }
+      };
+      
+      checkPermissions();
+    }
+  }, [currentFileId, isInitialized, isAuthenticated, getAccessToken]);
+
   const handleSave = async () => {
     if (!isAuthenticated || !stageRef.current || !imageData) return;
+
+    // If we have a file ID but no write permission, do Save As instead
+    if (currentFileId && hasWritePermission === false) {
+      handleSaveAs();
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -78,7 +129,11 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
       setCurrentFileId(result.fileId);
       
       // Show success notification
-      alert('Project saved successfully!');
+      if (currentFileId && hasWritePermission) {
+        alert('Project updated successfully!');
+      } else {
+        alert('Project saved successfully!');
+      }
     } catch (error: any) {
       console.error('Failed to save project:', error);
       if (error.body) {
@@ -137,27 +192,6 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
     }
   };
 
-  const handleShare = async () => {
-    if (!currentFileId) {
-      alert('Please save the project first before sharing.');
-      return;
-    }
-
-    try {
-      const token = getAccessToken();
-      if (!token) throw new Error('No access token');
-
-      await googleDriveService.initialize(token);
-      const shareLink = await googleDriveService.createShareableLink(currentFileId);
-      
-      // Copy to clipboard
-      await navigator.clipboard.writeText(shareLink);
-      alert('Share link copied to clipboard!');
-    } catch (error) {
-      console.error('Failed to create share link:', error);
-      alert('Failed to create share link. Please try again.');
-    }
-  };
 
   if (!isAuthenticated) {
     return null;
@@ -238,7 +272,13 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
               justifyContent: 'space-between',
               alignItems: 'center'
             }}
-            title={!isInitialized ? 'Initializing Google Drive...' : !imageData ? 'No image loaded' : ''}
+            title={
+              !isInitialized ? 'Initializing Google Drive...' : 
+              !imageData ? 'No image loaded' : 
+              currentFileId && hasWritePermission === false ? 'You have view-only access. A copy will be saved.' :
+              currentFileId && hasWritePermission ? 'Save changes to the current file' :
+              'Save as a new file to Google Drive'
+            }
             onMouseEnter={(e) => {
               if (imageData && !isSaving && isInitialized) {
                 e.currentTarget.style.backgroundColor = '#f5f5f5';
@@ -248,7 +288,11 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
               e.currentTarget.style.backgroundColor = 'transparent';
             }}
           >
-            <span>{isSaving ? 'Saving...' : 'Save to Drive'}</span>
+            <span>
+              {isSaving ? 'Saving...' : 
+               currentFileId && hasWritePermission === false ? 'Save as Copy' :
+               currentFileId ? 'Save' : 'Save to Drive'}
+            </span>
             <span style={{ fontSize: '0.625rem', color: '#999' }}>Ctrl+S</span>
           </button>
 
@@ -315,7 +359,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
 
           <button
             onClick={() => {
-              handleShare();
+              setShowShareDialog(true);
               setShowDropdown(false);
             }}
             disabled={!currentFileId}
@@ -348,6 +392,12 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
       isOpen={showFilePicker}
       onClose={() => setShowFilePicker(false)}
       onSelect={handleFileSelect}
+    />
+    
+    <ShareDialog
+      isOpen={showShareDialog}
+      fileId={currentFileId}
+      onClose={() => setShowShareDialog(false)}
     />
     </>
   );

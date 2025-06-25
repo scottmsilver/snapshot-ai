@@ -15,16 +15,20 @@ import { useAuth } from '@/contexts/AuthContext'
 import { calculateImageFit } from '@/utils/imageHelpers'
 import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils'
 import { DrawingTool, type Point, type TextShape } from '@/types/drawing'
+import { googleDriveService, type ProjectData } from '@/services/googleDrive'
 
 function App() {
   const [stageSize] = useState({ width: 800, height: 600 })
   const stageRef = useRef<Konva.Stage | null>(null)
-  const { imageData, loadImage, clearImage } = useImage()
+  const { imageData, loadImage, clearImage, loadImageFromData } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
   const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool } = useDrawing()
   const { state: drawingState, setShapes } = useDrawingContext()
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true)
   const [zoomLevel, setZoomLevel] = useState(1) // 1 = 100%
+  const [isLoadingSharedFile, setIsLoadingSharedFile] = useState(false)
+  const [sharedFileError, setSharedFileError] = useState<string | null>(null)
+  const [loadedFileId, setLoadedFileId] = useState<string | null>(null)
   
   // Get selected shapes
   const selectedShapes = shapes.filter(shape => selectedShapeIds.includes(shape.id))
@@ -43,14 +47,84 @@ function App() {
     getCurrentState,
     currentIndex 
   } = useHistory()
+  
+  // Get auth context - try/catch in case it's not available
+  let authContext: ReturnType<typeof useAuth> | null = null;
+  try {
+    authContext = useAuth();
+  } catch (error) {
+    // Auth context not available
+  }
+
+  // Handle shared file loading from URL parameters
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const fileId = urlParams.get('file');
+    
+    console.log('URL params:', { fileId, isAuthenticated: authContext?.isAuthenticated });
+    
+    if (fileId && authContext?.isAuthenticated && authContext?.getAccessToken) {
+      console.log('Loading shared file:', fileId);
+      setIsLoadingSharedFile(true);
+      setSharedFileError(null);
+      
+      const token = authContext.getAccessToken();
+      if (token) {
+        googleDriveService.initialize(token)
+          .then(() => {
+            console.log('Google Drive initialized, loading project...');
+            return googleDriveService.loadProject(fileId);
+          })
+          .then((projectData: ProjectData) => {
+            console.log('Project data loaded:', projectData);
+            console.log('Image data preview:', projectData.image.data.substring(0, 100));
+            console.log('Number of shapes:', projectData.shapes?.length || 0);
+            
+            // Load the image
+            const imageToLoad = {
+              src: projectData.image.data,
+              name: projectData.image.name || 'Shared Image',
+              width: projectData.image.width || 0,
+              height: projectData.image.height || 0
+            };
+            console.log('Loading image with data:', imageToLoad);
+            loadImageFromData(projectData.image.data, projectData.image.name || 'Shared Image');
+            
+            // Load the shapes
+            setShapes(projectData.shapes || []);
+            
+            // Save the file ID for future saves
+            setLoadedFileId(fileId);
+            
+            // Clear the URL parameter after a short delay to ensure everything loads
+            setTimeout(() => {
+              const newUrl = window.location.pathname;
+              window.history.replaceState({}, document.title, newUrl);
+            }, 1000);
+          })
+          .catch((error) => {
+            console.error('Failed to load shared file:', error);
+            setSharedFileError(error.message || 'Failed to load shared file');
+          })
+          .finally(() => {
+            setIsLoadingSharedFile(false);
+          });
+      }
+    }
+  }, [authContext?.isAuthenticated, authContext?.getAccessToken, loadImageFromData, setShapes]);
 
   // Load image when imageData changes
   useEffect(() => {
+    console.log('imageData changed:', imageData);
     if (imageData) {
       const img = new window.Image()
       img.src = imageData.src
       img.onload = () => {
+        console.log('Image loaded successfully');
         setKonvaImage(img)
+      }
+      img.onerror = (error) => {
+        console.error('Image failed to load:', error);
       }
     }
   }, [imageData])
@@ -223,7 +297,7 @@ function App() {
           gap: '0.5rem',
           alignItems: 'center'
         }}>
-          <FileMenu stageRef={stageRef} imageData={imageData} />
+          <FileMenu stageRef={stageRef} imageData={imageData} initialFileId={loadedFileId} />
           {imageData && (
             <>
               <button
@@ -647,7 +721,65 @@ function App() {
           justifyContent: 'center',
           position: 'relative'
         }}>
-          {!imageData ? (
+          {isLoadingSharedFile ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              gap: '1rem'
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                border: '3px solid #e0e0e0',
+                borderTopColor: '#4285f4',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite'
+              }} />
+              <p style={{ color: '#666', fontSize: '0.875rem' }}>Loading shared project...</p>
+            </div>
+          ) : sharedFileError ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              gap: '1rem',
+              padding: '2rem'
+            }}>
+              <div style={{
+                padding: '1rem',
+                backgroundColor: '#ffebee',
+                color: '#c62828',
+                borderRadius: '8px',
+                maxWidth: '400px',
+                textAlign: 'center'
+              }}>
+                <h3 style={{ margin: '0 0 0.5rem 0' }}>Failed to load shared project</h3>
+                <p style={{ margin: '0 0 1rem 0', fontSize: '0.875rem' }}>{sharedFileError}</p>
+                <button
+                  onClick={() => {
+                    setSharedFileError(null);
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                  }}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: '#c62828',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          ) : !imageData ? (
             <ImageUploader onImageUpload={handleImageUpload} />
           ) : (
             <Stage
