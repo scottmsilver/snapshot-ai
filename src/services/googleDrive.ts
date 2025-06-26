@@ -46,11 +46,7 @@ class GoogleDriveService {
   private initPromise: Promise<void> | null = null;
 
   async initialize(accessToken: string): Promise<void> {
-    console.log('[GoogleDrive] Initialize called');
-    if (this.isInitialized) {
-      console.log('[GoogleDrive] Already initialized, skipping');
-      return;
-    }
+    if (this.isInitialized) return;
     
     if (this.initPromise) {
       return this.initPromise;
@@ -108,13 +104,6 @@ class GoogleDriveService {
   }
 
   async saveProject(data: ProjectData, fileId?: string): Promise<{ fileId: string }> {
-    console.log('[GoogleDrive] saveProject called:', {
-      hasFileId: !!fileId,
-      fileId,
-      shapesCount: data.shapes.length,
-      imageName: data.image.name
-    });
-    
     try {
       const fileContent = JSON.stringify(data, null, 2);
       const file = new Blob([fileContent], { type: 'application/json' });
@@ -126,7 +115,6 @@ class GoogleDriveService {
 
       // For creating a new file
       if (!fileId) {
-        console.log('[GoogleDrive] Creating new file with name:', metadata.name);
         const formData = new FormData();
         formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         formData.append('file', file);
@@ -145,11 +133,9 @@ class GoogleDriveService {
         }
 
         const result = await response.json();
-        console.log('[GoogleDrive] New file created successfully:', result.id);
         return { fileId: result.id };
       } else {
         // For updating an existing file
-        console.log('[GoogleDrive] Updating existing file:', fileId);
         const response = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
           method: 'PATCH',
           headers: {
@@ -164,7 +150,6 @@ class GoogleDriveService {
           throw new Error(`Failed to update: ${errorText}`);
         }
 
-        console.log('[GoogleDrive] File updated successfully:', fileId);
         return { fileId };
       }
     } catch (error) {

@@ -135,7 +135,6 @@ function App() {
     try {
       await copyCanvasToClipboard(stageRef.current);
       // You could add a toast notification here
-      console.log('Canvas copied to clipboard!');
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
       alert('Failed to copy to clipboard. Your browser may not support this feature.');
