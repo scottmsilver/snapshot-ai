@@ -7,7 +7,9 @@ export const DrawingTool = {
   ARROW: 'arrow',
   TEXT: 'text',
   CALLOUT: 'callout',
-  STAR: 'star'
+  STAR: 'star',
+  MEASURE: 'measure',
+  CALIBRATE: 'calibrate' // Internal tool for setting scale
 } as const;
 
 export type DrawingTool = typeof DrawingTool[keyof typeof DrawingTool];
@@ -149,9 +151,20 @@ export interface StarShape extends BaseShape {
   rotation?: number;
 }
 
+// Measurement shapes
+export interface MeasurementLineShape extends BaseShape {
+  type: typeof DrawingTool.MEASURE;
+  points: [number, number, number, number]; // [x1, y1, x2, y2]
+  isCalibration: boolean;
+  measurement?: {
+    value: number;
+    unit: string;
+    pixelDistance: number;
+  };
+}
 
 // Union type for all shapes
-export type Shape = PenShape | RectShape | CircleShape | ArrowShape | TextShape | CalloutShape | StarShape;
+export type Shape = PenShape | RectShape | CircleShape | ArrowShape | TextShape | CalloutShape | StarShape | MeasurementLineShape;
 
 // Drawing state
 export interface DrawingState {
@@ -179,6 +192,13 @@ export interface DrawingState {
   
   // Z-order management
   maxZIndex: number; // Track highest z-index for new shapes
+  
+  // Measurement state
+  measurementCalibration: {
+    pixelsPerUnit: number | null;
+    unit: string;
+    calibrationLineId: string | null;
+  };
 }
 
 // Helper functions for z-order management

@@ -11,6 +11,7 @@ import {
   type ArrowShape,
   type CalloutShape,
   type StarShape,
+  type MeasurementLineShape,
 } from '@/types/drawing';
 import { calculateInitialPerimeterOffset, perimeterOffsetToPoint, getOptimalControlPoints } from '@/utils/calloutGeometry';
 
@@ -61,6 +62,8 @@ export const useDrawing = () => {
       case DrawingTool.ARROW:
       case DrawingTool.CALLOUT:
       case DrawingTool.STAR:
+      case DrawingTool.MEASURE:
+      case DrawingTool.CALIBRATE:
         // These tools need start and end points
         break;
 
@@ -90,6 +93,8 @@ export const useDrawing = () => {
       case DrawingTool.ARROW:
       case DrawingTool.CALLOUT:
       case DrawingTool.STAR:
+      case DrawingTool.MEASURE:
+      case DrawingTool.CALIBRATE:
         // Update end point for preview
         setTempPoints([startPoint, point]);
         break;
@@ -300,6 +305,51 @@ export const useDrawing = () => {
           rotation: -18, // Point upward by default
         } as StarShape;
         break;
+
+      case DrawingTool.MEASURE:
+        if (state.tempPoints.length >= 2) {
+          const [p1, p2] = state.tempPoints;
+          
+          newShape = {
+            id: generateId(),
+            type: DrawingTool.MEASURE,
+            points: [p1.x, p1.y, p2.x, p2.y],
+            isCalibration: false, // Will be set to true by measurement logic if needed
+            style: { 
+              ...state.currentStyle,
+              stroke: '#333333', // Default color for measurement lines
+            },
+            visible: true,
+            locked: false,
+            zIndex: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          } as MeasurementLineShape;
+        }
+        break;
+
+      case DrawingTool.CALIBRATE:
+        if (state.tempPoints.length >= 2) {
+          const [p1, p2] = state.tempPoints;
+          
+          newShape = {
+            id: generateId(),
+            type: DrawingTool.MEASURE,
+            points: [p1.x, p1.y, p2.x, p2.y],
+            isCalibration: true, // This is a calibration line
+            style: { 
+              ...state.currentStyle,
+              stroke: '#4a90e2', // Blue for calibration
+              dash: [5, 5], // Dashed line
+            },
+            visible: true,
+            locked: false,
+            zIndex: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          } as MeasurementLineShape;
+        }
+        break;
     }
 
     // Add shape if created
@@ -376,6 +426,9 @@ export const useDrawing = () => {
         break;
       case 's':
         setActiveTool(DrawingTool.STAR);
+        break;
+      case 'm':
+        setActiveTool(DrawingTool.MEASURE);
         break;
       case 'delete':
       case 'backspace':

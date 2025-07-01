@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Measurement Tool Test</title>
+</head>
+<body>
+    <h1>Measurement Tool Test Instructions</h1>
+    
+    <h2>Testing the Measurement Tool:</h2>
+    <ol>
+        <li>Open the app at http://localhost:5174/</li>
+        <li>Upload an image</li>
+        <li>Press 'M' key or click the ruler icon (📏) in the toolbar</li>
+        <li>Click and drag to draw a measurement line</li>
+        <li>The calibration dialog should appear</li>
+        <li>Enter a known measurement (e.g., 10 cm)</li>
+        <li>Click "Set Reference"</li>
+        <li>Draw more measurement lines to see calibrated measurements</li>
+    </ol>
+    
+    <h2>What was fixed:</h2>
+    <ul>
+        <li>Added DrawingTool.MEASURE case to startDrawing function</li>
+        <li>The measurement tool case was already in continueDrawing and finishDrawing</li>
+        <li>The preview rendering was already implemented</li>
+        <li>All UI components were already integrated</li>
+    </ul>
+    
+    <h2>If it's still not working:</h2>
+    <ul>
+        <li>Check browser console for errors</li>
+        <li>Make sure the dev server restarted properly</li>
+        <li>Try refreshing the page with Ctrl+Shift+R (hard refresh)</li>
+    </ul>
+</body>
+</html>

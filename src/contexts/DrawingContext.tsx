@@ -28,6 +28,7 @@ export enum DrawingActionType {
   SET_TEMP_POINTS = 'SET_TEMP_POINTS',
   REORDER_SHAPE = 'REORDER_SHAPE',
   SET_ACTIVE_SHAPE = 'SET_ACTIVE_SHAPE',
+  SET_MEASUREMENT_CALIBRATION = 'SET_MEASUREMENT_CALIBRATION',
 }
 
 // Action definitions
@@ -50,7 +51,15 @@ type DrawingAction =
     }
   | { type: DrawingActionType.SET_TEMP_POINTS; points: Point[] }
   | { type: DrawingActionType.REORDER_SHAPE; id: string; operation: LayerOperation }
-  | { type: DrawingActionType.SET_ACTIVE_SHAPE; shape: Shape | null };
+  | { type: DrawingActionType.SET_ACTIVE_SHAPE; shape: Shape | null }
+  | { 
+      type: DrawingActionType.SET_MEASUREMENT_CALIBRATION;
+      calibration: {
+        pixelsPerUnit: number | null;
+        unit: string;
+        calibrationLineId: string | null;
+      };
+    };
 
 // Initial state
 const initialState: DrawingState = {
@@ -73,6 +82,11 @@ const initialState: DrawingState = {
   startPoint: null,
   lastPoint: null,
   maxZIndex: 0,
+  measurementCalibration: {
+    pixelsPerUnit: null,
+    unit: 'cm',
+    calibrationLineId: null,
+  },
 };
 
 // Reducer
@@ -188,6 +202,12 @@ const drawingReducer = (state: DrawingState, action: DrawingAction): DrawingStat
         activeShape: action.shape,
       };
 
+    case DrawingActionType.SET_MEASUREMENT_CALIBRATION:
+      return {
+        ...state,
+        measurementCalibration: action.calibration,
+      };
+
     default:
       return state;
   }
@@ -223,6 +243,13 @@ interface DrawingContextType {
   
   // Z-order
   reorderShape: (id: string, operation: LayerOperation) => void;
+  
+  // Measurement
+  setMeasurementCalibration: (calibration: {
+    pixelsPerUnit: number | null;
+    unit: string;
+    calibrationLineId: string | null;
+  }) => void;
   
   // Helpers
   getSortedShapes: () => Shape[];
@@ -312,6 +339,15 @@ export const DrawingProvider: React.FC<{ children: ReactNode }> = ({ children })
     dispatch({ type: DrawingActionType.REORDER_SHAPE, id, operation });
   }, []);
 
+  // Measurement
+  const setMeasurementCalibration = useCallback((calibration: {
+    pixelsPerUnit: number | null;
+    unit: string;
+    calibrationLineId: string | null;
+  }) => {
+    dispatch({ type: DrawingActionType.SET_MEASUREMENT_CALIBRATION, calibration });
+  }, []);
+
   // Helpers
   const getSortedShapes = useCallback(() => {
     return sortShapesByZIndex(state.shapes);
@@ -334,6 +370,7 @@ export const DrawingProvider: React.FC<{ children: ReactNode }> = ({ children })
     setTempPoints,
     setActiveShape,
     reorderShape,
+    setMeasurementCalibration,
     getSortedShapes,
   };
 

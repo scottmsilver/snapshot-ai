@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useDrawing } from '@/hooks/useDrawing';
+import { useDrawingContext } from '@/contexts/DrawingContext';
 import { DrawingTool, type Shape, type TextShape, type CalloutShape, type DrawingStyle } from '@/types/drawing';
 import {
   SelectIcon,
@@ -16,6 +17,11 @@ const StarIcon: React.FC<{ size?: number }> = ({ size = 20 }) => (
   <span style={{ fontSize: size + 'px', lineHeight: 1 }}>⭐</span>
 );
 
+// Ruler/Measure icon component
+const MeasureIcon: React.FC<{ size?: number }> = ({ size = 20 }) => (
+  <span style={{ fontSize: size + 'px', lineHeight: 1 }}>📏</span>
+);
+
 const tools = [
   { tool: DrawingTool.SELECT, icon: SelectIcon, label: 'Select', shortcut: 'V' },
   { tool: DrawingTool.PEN, icon: PenIcon, label: 'Pen', shortcut: 'P' },
@@ -24,7 +30,8 @@ const tools = [
   { tool: DrawingTool.ARROW, icon: ArrowIcon, label: 'Arrow', shortcut: 'A' },
   { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' },
   { tool: DrawingTool.CALLOUT, icon: CalloutIcon, label: 'Callout', shortcut: 'L' },
-  { tool: DrawingTool.STAR, icon: StarIcon, label: 'Star', shortcut: 'S' }
+  { tool: DrawingTool.STAR, icon: StarIcon, label: 'Star', shortcut: 'S' },
+  { tool: DrawingTool.MEASURE, icon: MeasureIcon, label: 'Measure', shortcut: 'M' }
 ];
 
 interface DrawingToolbarProps {
@@ -35,6 +42,8 @@ interface DrawingToolbarProps {
 
 export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizontal = false, selectedShapes = [] }) => {
   const { activeTool, setActiveTool, currentStyle, updateStyle, handleKeyPress, updateShape } = useDrawing();
+  const { state: drawingState } = useDrawingContext();
+  const isCalibrated = drawingState.measurementCalibration.pixelsPerUnit !== null;
   
   // Determine if we're showing properties for selected shapes or for the active tool
   const hasSelection = selectedShapes.length > 0;
@@ -137,40 +146,49 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
         alignItems: 'center',
         ...style
       }}>
-        {tools.map(({ tool, icon: Icon, label, shortcut }) => (
-          <button
-            key={tool}
-            title={`${label} (${shortcut})`}
-            onClick={() => setActiveTool(tool)}
-            style={{
-              padding: '0.375rem',
-              backgroundColor: activeTool === tool ? '#e3f2fd' : 'transparent',
-              border: activeTool === tool ? '1px solid #2196f3' : '1px solid transparent',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '0.875rem',
-              color: activeTool === tool ? '#1976d2' : '#666',
-              transition: 'all 0.2s',
-              width: '32px',
-              height: '32px'
-            }}
-            onMouseEnter={(e) => {
-              if (activeTool !== tool) {
-                e.currentTarget.style.backgroundColor = '#f5f5f5';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeTool !== tool) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }
-            }}
-          >
-            <Icon size={18} />
-          </button>
-        ))}
+        {tools.map(({ tool, icon: Icon, label, shortcut }) => {
+          const isDisabled = tool === DrawingTool.MEASURE && !isCalibrated;
+          const tooltipText = isDisabled 
+            ? 'Set scale first to use measurements' 
+            : `${label} (${shortcut})`;
+          
+          return (
+            <button
+              key={tool}
+              title={tooltipText}
+              onClick={() => !isDisabled && setActiveTool(tool)}
+              disabled={isDisabled}
+              style={{
+                padding: '0.375rem',
+                backgroundColor: activeTool === tool ? '#e3f2fd' : 'transparent',
+                border: activeTool === tool ? '1px solid #2196f3' : '1px solid transparent',
+                borderRadius: '4px',
+                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.875rem',
+                color: isDisabled ? '#ccc' : (activeTool === tool ? '#1976d2' : '#666'),
+                transition: 'all 0.2s',
+                width: '32px',
+                height: '32px',
+                opacity: isDisabled ? 0.5 : 1
+              }}
+              onMouseEnter={(e) => {
+                if (!isDisabled && activeTool !== tool) {
+                  e.currentTarget.style.backgroundColor = '#f5f5f5';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isDisabled && activeTool !== tool) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }
+              }}
+            >
+              <Icon size={18} />
+            </button>
+          );
+        })}
       </div>
     );
   }

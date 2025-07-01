@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, Star } from 'react-konva';
+import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, Star, RegularPolygon } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
+import { useDrawingContext } from '@/contexts/DrawingContext';
 import { useSelectionMachine } from '@/hooks/useSelectionMachine';
 import { DrawingTool } from '@/types/drawing';
-import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, StarShape, Point } from '@/types/drawing';
+import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, StarShape, MeasurementLineShape, Point } from '@/types/drawing';
 import { 
   perimeterOffsetToPoint, 
   getArrowPathString, 
@@ -39,6 +40,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     selectShape,
     clearSelection,
   } = useDrawing();
+  
+  const { state: drawingState } = useDrawingContext();
   
   const {
     context: selectionContext,
@@ -524,6 +527,76 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           />
         );
 
+      case DrawingTool.MEASURE:
+        if (tempPoints.length < 2) return null;
+        const measureStart = tempPoints[0];
+        const measureEnd = tempPoints[tempPoints.length - 1];
+        const measureDx = measureEnd.x - measureStart.x;
+        const measureDy = measureEnd.y - measureStart.y;
+        const measureDistance = Math.sqrt(measureDx * measureDx + measureDy * measureDy);
+        const measureAngle = Math.atan2(measureDy, measureDx) * (180 / Math.PI);
+        
+        return (
+          <Group>
+            <Line
+              points={[measureStart.x, measureStart.y, measureEnd.x, measureEnd.y]}
+              stroke={currentStyle.stroke}
+              strokeWidth={currentStyle.strokeWidth}
+              opacity={currentStyle.opacity}
+              dash={[5, 5]}
+              listening={false}
+            />
+            {/* Preview label */}
+            <Text
+              x={(measureStart.x + measureEnd.x) / 2}
+              y={(measureStart.y + measureEnd.y) / 2 - 15}
+              text={`${Math.round(measureDistance)}px`}
+              fontSize={12}
+              fontFamily="Arial"
+              fill="#666"
+              align="center"
+              rotation={(measureAngle > 90 || measureAngle < -90) ? measureAngle + 180 : measureAngle}
+              offsetX={20}
+              listening={false}
+            />
+          </Group>
+        );
+
+      case DrawingTool.CALIBRATE:
+        if (tempPoints.length < 2) return null;
+        const calibrateStart = tempPoints[0];
+        const calibrateEnd = tempPoints[tempPoints.length - 1];
+        const calibrateDx = calibrateEnd.x - calibrateStart.x;
+        const calibrateDy = calibrateEnd.y - calibrateStart.y;
+        const calibrateDistance = Math.sqrt(calibrateDx * calibrateDx + calibrateDy * calibrateDy);
+        const calibrateAngle = Math.atan2(calibrateDy, calibrateDx) * (180 / Math.PI);
+        
+        return (
+          <Group>
+            <Line
+              points={[calibrateStart.x, calibrateStart.y, calibrateEnd.x, calibrateEnd.y]}
+              stroke="#4a90e2"
+              strokeWidth={2}
+              opacity={0.8}
+              dash={[5, 5]}
+              listening={false}
+            />
+            {/* Preview label */}
+            <Text
+              x={(calibrateStart.x + calibrateEnd.x) / 2}
+              y={(calibrateStart.y + calibrateEnd.y) / 2 - 15}
+              text={`${Math.round(calibrateDistance)}px - Set Reference`}
+              fontSize={12}
+              fontFamily="Arial"
+              fill="#4a90e2"
+              align="center"
+              rotation={(calibrateAngle > 90 || calibrateAngle < -90) ? calibrateAngle + 180 : calibrateAngle}
+              offsetX={60}
+              listening={false}
+            />
+          </Group>
+        );
+
       default:
         return null;
     }
@@ -807,15 +880,35 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             const node = e.target;
             const newPos = node.position();
             
-            if (shape.type === DrawingTool.PEN || shape.type === DrawingTool.ARROW) {
-              // For pen and arrow shapes, update points
+            if (shape.type === DrawingTool.PEN || shape.type === DrawingTool.ARROW || shape.type === DrawingTool.MEASURE) {
+              // For pen, arrow, and measurement shapes, update points
               if ('points' in shape && Array.isArray(shape.points)) {
                 const newPoints = [...shape.points];
                 for (let i = 0; i < newPoints.length; i += 2) {
                   newPoints[i] += newPos.x;
                   newPoints[i + 1] += newPos.y;
                 }
-                updateShape(shape.id, { points: newPoints });
+                
+                // For measurement lines, also update the measurement value if calibrated
+                if (shape.type === DrawingTool.MEASURE && drawingState.measurementCalibration.pixelsPerUnit) {
+                  const measureShape = shape as MeasurementLineShape;
+                  const pixelDistance = Math.sqrt(
+                    Math.pow(newPoints[2] - newPoints[0], 2) + 
+                    Math.pow(newPoints[3] - newPoints[1], 2)
+                  );
+                  const value = pixelDistance / drawingState.measurementCalibration.pixelsPerUnit;
+                  
+                  updateShape(shape.id, {
+                    points: newPoints,
+                    measurement: {
+                      value,
+                      unit: drawingState.measurementCalibration.unit,
+                      pixelDistance
+                    }
+                  });
+                } else {
+                  updateShape(shape.id, { points: newPoints });
+                }
                 node.position({ x: 0, y: 0 });
               }
             } else {
@@ -1209,10 +1302,246 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             }}
           />
         );
+
+      case DrawingTool.MEASURE:
+        const measureShape = shape as MeasurementLineShape;
+        const [x1, y1, x2, y2] = measureShape.points;
+        
+        // Calculate midpoint for label
+        const midX = (x1 + x2) / 2;
+        const midY = (y1 + y2) / 2;
+        
+        // Calculate angle for text rotation
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+        
+        // Flip text if it would be upside down
+        const textAngle = (angle > 90 || angle < -90) ? angle + 180 : angle;
+        
+        // Get measurement label
+        const measurementLabel = measureShape.measurement 
+          ? `${measureShape.measurement.value.toFixed(2)} ${measureShape.measurement.unit}`
+          : `${Math.round(Math.sqrt(dx * dx + dy * dy))}px`;
+        
+        return (
+          <Group
+            key={shape.id}
+            {...commonProps}
+            ref={(node) => {
+              if (node) {
+                selectedShapeRefs.current.set(shape.id, node);
+              } else {
+                selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
+          >
+            <Line
+              points={measureShape.points}
+              stroke={measureShape.isCalibration ? '#4a90e2' : measureShape.style.stroke}
+              strokeWidth={measureShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
+              lineCap="round"
+              lineJoin="round"
+              opacity={measureShape.style.opacity}
+              dash={measureShape.isCalibration ? [5, 5] : undefined}
+            />
+            
+            {/* End caps */}
+            <Line
+              points={[x1 - 5 * Math.sin(angle * Math.PI / 180), y1 + 5 * Math.cos(angle * Math.PI / 180),
+                      x1 + 5 * Math.sin(angle * Math.PI / 180), y1 - 5 * Math.cos(angle * Math.PI / 180)]}
+              stroke={measureShape.isCalibration ? '#4a90e2' : measureShape.style.stroke}
+              strokeWidth={measureShape.style.strokeWidth}
+              opacity={measureShape.style.opacity}
+            />
+            <Line
+              points={[x2 - 5 * Math.sin(angle * Math.PI / 180), y2 + 5 * Math.cos(angle * Math.PI / 180),
+                      x2 + 5 * Math.sin(angle * Math.PI / 180), y2 - 5 * Math.cos(angle * Math.PI / 180)]}
+              stroke={measureShape.isCalibration ? '#4a90e2' : measureShape.style.stroke}
+              strokeWidth={measureShape.style.strokeWidth}
+              opacity={measureShape.style.opacity}
+            />
+            
+            {/* Measurement label */}
+            <Text
+              x={midX}
+              y={midY - 15}
+              text={measurementLabel}
+              fontSize={12}
+              fontFamily="Arial"
+              fill={measureShape.isCalibration ? '#4a90e2' : '#333333'}
+              align="center"
+              rotation={textAngle}
+              offsetX={measurementLabel.length * 3} // Rough centering
+            />
+            
+            {/* Calibration icon */}
+            {measureShape.isCalibration && (
+              <Text
+                x={x1 - 15}
+                y={y1 - 15}
+                text="📐"
+                fontSize={16}
+              />
+            )}
+          </Group>
+        );
         
       default:
         return null;
     }
+  };
+
+  // Render measurement control points
+  const renderMeasurementControlPoints = () => {
+    if (activeTool !== DrawingTool.SELECT || drawingSelectedShapeIds.length !== 1) {
+      return null;
+    }
+
+    const selectedShape = shapes.find(s => s.id === drawingSelectedShapeIds[0]);
+    if (!selectedShape || selectedShape.type !== DrawingTool.MEASURE) {
+      return null;
+    }
+    
+    // Don't show control points if we're transforming
+    if (isTransforming) {
+      return null;
+    }
+    
+    const measureShape = selectedShape as MeasurementLineShape;
+    const measureNode = selectedShapeRefs.current.get(measureShape.id);
+    if (!measureNode) return null;
+    
+    // Get the measurement line's current position (changes during drag)
+    const nodePos = measureNode.position();
+    const [x1, y1, x2, y2] = measureShape.points;
+    
+    // Add the node's current position to get actual control point positions
+    const actualX1 = x1 + nodePos.x;
+    const actualY1 = y1 + nodePos.y;
+    const actualX2 = x2 + nodePos.x;
+    const actualY2 = y2 + nodePos.y;
+
+    const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>) => {
+      const pos = e.target.position();
+      const newPoints: [number, number, number, number] = [...measureShape.points];
+      
+      // Subtract the measurement node's position to get relative coordinates
+      const relativeX = pos.x - nodePos.x;
+      const relativeY = pos.y - nodePos.y;
+      
+      if (index === 0) {
+        // Update start point
+        newPoints[0] = relativeX;
+        newPoints[1] = relativeY;
+      } else {
+        // Update end point
+        newPoints[2] = relativeX;
+        newPoints[3] = relativeY;
+      }
+      
+      // If calibrated, update the measurement value
+      if (drawingState.measurementCalibration.pixelsPerUnit) {
+        const pixelDistance = Math.sqrt(
+          Math.pow(newPoints[2] - newPoints[0], 2) + 
+          Math.pow(newPoints[3] - newPoints[1], 2)
+        );
+        const value = pixelDistance / drawingState.measurementCalibration.pixelsPerUnit;
+        
+        updateShape(measureShape.id, {
+          points: newPoints,
+          measurement: {
+            value,
+            unit: drawingState.measurementCalibration.unit,
+            pixelDistance
+          }
+        });
+      } else {
+        // Just update points if not calibrated
+        updateShape(measureShape.id, { points: newPoints });
+      }
+    };
+    
+    const handleControlPointDragEnd = (_index: number, _e: Konva.KonvaEventObject<DragEvent>) => {
+      setTimeout(() => {
+        isDraggingControlPointRef.current = false;
+        endControlPointDrag();
+      }, 50);
+    };
+
+    return (
+      <>
+        {/* Visual guide line */}
+        <Line
+          points={[actualX1, actualY1, actualX2, actualY2]}
+          stroke="#4a90e2"
+          strokeWidth={1}
+          dash={[5, 5]}
+          opacity={0.5}
+          listening={false}
+        />
+        
+        {/* Start point control (blue) */}
+        <Circle
+          x={actualX1}
+          y={actualY1}
+          radius={6}
+          fill="#4a90e2"
+          stroke="#fff"
+          strokeWidth={2}
+          draggable={true}
+          onDragStart={() => {
+            startControlPointDrag();
+            isDraggingControlPointRef.current = true;
+            setDraggingControlPointIndex(0);
+          }}
+          onDragMove={(e) => handleControlPointDragMove(0, e)}
+          onDragEnd={(e) => handleControlPointDragEnd(0, e)}
+          onMouseEnter={(e) => {
+            const container = e.target.getStage()?.container();
+            if (container) {
+              container.style.cursor = 'move';
+            }
+          }}
+          onMouseLeave={(e) => {
+            const container = e.target.getStage()?.container();
+            if (container) {
+              container.style.cursor = 'default';
+            }
+          }}
+        />
+        
+        {/* End point control (red) */}
+        <Circle
+          x={actualX2}
+          y={actualY2}
+          radius={6}
+          fill="#e24a4a"
+          stroke="#fff"
+          strokeWidth={2}
+          draggable={true}
+          onDragStart={() => {
+            startControlPointDrag();
+            isDraggingControlPointRef.current = true;
+            setDraggingControlPointIndex(1);
+          }}
+          onDragMove={(e) => handleControlPointDragMove(1, e)}
+          onDragEnd={(e) => handleControlPointDragEnd(1, e)}
+          onMouseEnter={(e) => {
+            const container = e.target.getStage()?.container();
+            if (container) {
+              container.style.cursor = 'move';
+            }
+          }}
+          onMouseLeave={(e) => {
+            const container = e.target.getStage()?.container();
+            if (container) {
+              container.style.cursor = 'default';
+            }
+          }}
+        />
+      </>
+    );
   };
 
   // Render arrow control points
@@ -2018,6 +2347,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         
       {/* Render arrow control points */}
       {renderArrowControlPoints()}
+      
+      {/* Render measurement control points */}
+      {renderMeasurementControlPoints()}
       
       {/* Render callout control points */}
       {renderCalloutControlPoints()}

@@ -13,10 +13,15 @@ import { useHistory } from '@/hooks/useHistory'
 import { useDrawing } from '@/hooks/useDrawing'
 import { useDrawingContext } from '@/contexts/DrawingContext'
 import { useAuth } from '@/contexts/AuthContext'
+import { useMeasurement } from '@/hooks/useMeasurement'
 import { calculateImageFit } from '@/utils/imageHelpers'
 import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils'
-import { DrawingTool, type Point, type TextShape } from '@/types/drawing'
+import { DrawingTool, type Point, type TextShape, type MeasurementLineShape } from '@/types/drawing'
 import { googleDriveService, type ProjectData } from '@/services/googleDrive'
+import { CalibrationDialog } from '@/components/Tools/CalibrationDialog'
+import { ScaleLegend } from '@/components/Tools/ScaleLegend'
+import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurementUtils'
+import type { MeasurementUnit } from '@/utils/measurementUtils'
 
 function App() {
   const [stageSize] = useState({ width: 800, height: 600 })
@@ -24,7 +29,7 @@ function App() {
   const { imageData, loadImage, clearImage, loadImageFromData } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
   const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool } = useDrawing()
-  const { state: drawingState, setShapes } = useDrawingContext()
+  const { state: drawingState, setShapes, setMeasurementCalibration } = useDrawingContext()
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true)
   const [zoomLevel, setZoomLevel] = useState(1) // 1 = 100%
   const [isLoadingSharedFile, setIsLoadingSharedFile] = useState(false)
@@ -40,6 +45,15 @@ function App() {
   const [textDialogOpen, setTextDialogOpen] = useState(false)
   const [textPosition, setTextPosition] = useState<Point | null>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  
+  // Measurement state
+  const measurement = useMeasurement(shapes, setShapes, {
+    pixelsPerUnit: drawingState.measurementCalibration.pixelsPerUnit,
+    unit: drawingState.measurementCalibration.unit,
+    calibrationLineId: drawingState.measurementCalibration.calibrationLineId
+  })
+  const [calibrationDialogOpen, setCalibrationDialogOpen] = useState(false)
+  const [pendingCalibrationLine, setPendingCalibrationLine] = useState<MeasurementLineShape | null>(null)
   
   const { 
     canUndo, 
@@ -148,6 +162,47 @@ function App() {
     downloadCanvasAsImage(stageRef.current, `markup-${timestamp}.png`);
   };
 
+  const handleCalibrationConfirm = (value: number, unit: MeasurementUnit) => {
+    if (pendingCalibrationLine) {
+      const [x1, y1, x2, y2] = pendingCalibrationLine.points;
+      const pixelDistance = calculatePixelDistance(x1, y1, x2, y2);
+      
+      // Set calibration without keeping the line
+      const pixelsPerUnit = calculatePixelsPerUnit(pixelDistance, value, unit);
+      
+      // Update global measurement calibration
+      setMeasurementCalibration({
+        pixelsPerUnit,
+        unit,
+        calibrationLineId: null // No calibration line to keep
+      });
+      
+      // Set calibration in measurement hook
+      measurement.setCalibration(pixelDistance, value, unit, '');
+      
+      // Remove the calibration line from shapes
+      const filteredShapes = shapes.filter(s => s.id !== pendingCalibrationLine.id);
+      
+      // Update all existing measurement lines with new calibration
+      const updatedShapes = measurement.updateMeasurementLabels(filteredShapes);
+      setShapes(updatedShapes);
+    }
+    
+    setCalibrationDialogOpen(false);
+    setPendingCalibrationLine(null);
+  };
+
+  const handleCalibrationCancel = () => {
+    // Delete the pending calibration line
+    if (pendingCalibrationLine) {
+      const updatedShapes = shapes.filter(s => s.id !== pendingCalibrationLine.id);
+      setShapes(updatedShapes);
+    }
+    
+    setCalibrationDialogOpen(false);
+    setPendingCalibrationLine(null);
+  };
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -245,6 +300,51 @@ function App() {
     }
   }, [currentIndex, getCurrentState, setShapes, drawingState.shapes])
   
+  // Handle new measurement and calibration lines
+  useEffect(() => {
+    const measurementLines = shapes.filter(s => s.type === DrawingTool.MEASURE) as MeasurementLineShape[]
+    
+    // Check for new calibration line (created by CALIBRATE tool)
+    const newCalibrationLine = measurementLines.find(line => 
+      line.isCalibration && 
+      !line.measurement && 
+      Date.now() - line.createdAt < 1000 // Created in the last second
+    )
+    
+    if (newCalibrationLine) {
+      // Open calibration dialog for this line
+      setPendingCalibrationLine(newCalibrationLine)
+      setCalibrationDialogOpen(true)
+      measurement.cancelCalibration()
+      // Switch back to select tool
+      setActiveTool(DrawingTool.SELECT)
+    }
+    
+    // Check for new measurement line (created by MEASURE tool)
+    const newMeasurementLine = measurementLines.find(line => 
+      !line.isCalibration && 
+      !line.measurement && 
+      Date.now() - line.createdAt < 1000 // Created in the last second
+    )
+    
+    if (newMeasurementLine && measurement.isCalibrated) {
+      // Update with calculated measurement
+      const updatedShapes = measurement.updateMeasurementLabels(shapes)
+      setShapes(updatedShapes)
+    }
+  }, [shapes, measurement, updateShape, setShapes, setActiveTool])
+  
+  // Update measurement lines when calibration or unit changes
+  useEffect(() => {
+    // Only run if we have calibration and measurement lines
+    if (measurement.isCalibrated && shapes.some(s => s.type === DrawingTool.MEASURE && !s.isCalibration)) {
+      const updatedShapes = measurement.updateMeasurementLabels(shapes);
+      // Only update if shapes actually changed
+      if (JSON.stringify(updatedShapes) !== JSON.stringify(shapes)) {
+        setShapes(updatedShapes);
+      }
+    }
+  }, [measurement.calibration.pixelsPerUnit, measurement.calibration.unit, measurement.isCalibrated])
 
   // Show login screen if not authenticated or auth context not available
   if (!authContext || !authContext.isAuthenticated) {
@@ -813,51 +913,74 @@ function App() {
           ) : !imageData ? (
             <ImageUploader onImageUpload={handleImageUpload} />
           ) : (
-            <Stage
-              width={stageSize.width}
-              height={stageSize.height}
-              ref={stageRef}
-              scaleX={zoomLevel}
-              scaleY={zoomLevel}
-              style={{
-                border: '1px solid #ddd',
-                backgroundColor: '#fafafa',
-                cursor: activeTool === 'select' ? 'default' : 'crosshair'
-              }}
-              onMouseDown={(e) => {
-                // Check if we clicked on empty space (the stage itself)
-                if (e.target === e.target.getStage()) {
-                  if (activeTool === DrawingTool.SELECT) {
-                    clearSelection();
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <Stage
+                width={stageSize.width}
+                height={stageSize.height}
+                ref={stageRef}
+                scaleX={zoomLevel}
+                scaleY={zoomLevel}
+                style={{
+                  border: '1px solid #ddd',
+                  backgroundColor: '#fafafa',
+                  cursor: activeTool === 'select' ? 'default' : 'crosshair'
+                }}
+                onMouseDown={(e) => {
+                  // Check if we clicked on empty space (the stage itself)
+                  if (e.target === e.target.getStage()) {
+                    if (activeTool === DrawingTool.SELECT) {
+                      clearSelection();
+                    }
                   }
-                }
-              }}
-            >
-              <Layer>
-                {konvaImage && imageData && (() => {
-                  const fit = calculateImageFit(imageData, stageSize);
-                  return (
-                    <KonvaImage
-                      image={konvaImage}
-                      x={fit.x}
-                      y={fit.y}
-                      width={fit.width}
-                      height={fit.height}
-                    />
-                  );
-                })()}
-              </Layer>
+                }}
+              >
+                <Layer>
+                  {konvaImage && imageData && (() => {
+                    const fit = calculateImageFit(imageData, stageSize);
+                    return (
+                      <KonvaImage
+                        image={konvaImage}
+                        x={fit.x}
+                        y={fit.y}
+                        width={fit.width}
+                        height={fit.height}
+                      />
+                    );
+                  })()}
+                </Layer>
+                
+                {/* Drawing Layer for annotations */}
+                <DrawingLayer 
+                  stageRef={stageRef} 
+                  onTextClick={(pos) => {
+                    setTextPosition(pos);
+                    setEditingTextId(null);
+                    setTextDialogOpen(true);
+                  }}
+                />
+              </Stage>
               
-              {/* Drawing Layer for annotations */}
-              <DrawingLayer 
-                stageRef={stageRef} 
-                onTextClick={(pos) => {
-                  setTextPosition(pos);
-                  setEditingTextId(null);
-                  setTextDialogOpen(true);
+              {/* Scale Legend */}
+              <ScaleLegend
+                isCalibrated={measurement.isCalibrated}
+                pixelsPerUnit={measurement.calibration.pixelsPerUnit}
+                unit={measurement.calibration.unit}
+                onSetScale={() => {
+                  setActiveTool(DrawingTool.CALIBRATE);
+                  measurement.startCalibration();
+                }}
+                onChangeUnit={(unit) => {
+                  measurement.changeUnit(unit);
+                  // Also update global state
+                  if (drawingState.measurementCalibration.pixelsPerUnit !== null) {
+                    setMeasurementCalibration({
+                      ...drawingState.measurementCalibration,
+                      unit
+                    });
+                  }
                 }}
               />
-            </Stage>
+            </div>
           )}
         </section>
       </main>
@@ -909,6 +1032,14 @@ function App() {
           setTextPosition(null);
           setEditingTextId(null);
         }}
+      />
+      
+      {/* Calibration Dialog */}
+      <CalibrationDialog
+        isOpen={calibrationDialogOpen}
+        pixelDistance={pendingCalibrationLine ? calculatePixelDistance(...pendingCalibrationLine.points) : 0}
+        onConfirm={handleCalibrationConfirm}
+        onCancel={handleCalibrationCancel}
       />
       
     </div>
