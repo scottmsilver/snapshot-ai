@@ -1,4 +1,4 @@
-# Image Markup App
+# Snapshot AI
 
 A powerful web-based image annotation and markup tool built with React, TypeScript, and Konva.js.
 
@@ -55,8 +55,8 @@ A powerful web-based image annotation and markup tool built with React, TypeScri
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/image-markup-app.git
-cd image-markup-app
+git clone https://github.com/scottmsilver/snapshot-ai.git
+cd snapshot-ai
 
 # Install dependencies
 npm install
@@ -144,4 +144,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-Made with ❤️ by [Your Name]
+Made with ❤️ by Scott Silver
