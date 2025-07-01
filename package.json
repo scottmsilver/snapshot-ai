@@ -17,6 +17,7 @@
     "gapi-script": "^1.2.0",
     "html2canvas": "^1.4.1",
     "konva": "^9.3.20",
+    "pdfjs-dist": "^4.10.38",
     "quill": "^2.0.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

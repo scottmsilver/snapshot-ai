@@ -8,6 +8,7 @@ import { TextInputDialog } from '@/components/TextInputDialog'
 import { UserMenu } from '@/components/Auth/UserMenu'
 import { FileMenu } from '@/components/FileMenu/FileMenu'
 import { SaveIndicator } from '@/components/SaveIndicator'
+import { PDFViewer } from '@/components/PDFViewer/PDFViewer'
 import { useImage } from '@/hooks/useImage'
 import { useHistory } from '@/hooks/useHistory'
 import { useDrawing } from '@/hooks/useDrawing'
@@ -54,6 +55,10 @@ function App() {
   })
   const [calibrationDialogOpen, setCalibrationDialogOpen] = useState(false)
   const [pendingCalibrationLine, setPendingCalibrationLine] = useState<MeasurementLineShape | null>(null)
+  
+  // PDF state
+  const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [pdfPageInfo, setPdfPageInfo] = useState<{ current: number; total: number } | null>(null)
   
   const { 
     canUndo, 
@@ -136,6 +141,39 @@ function App() {
 
   const handleImageUpload = async (file: File) => {
     await loadImage(file)
+    setPdfFile(null) // Clear any PDF state
+    setPdfPageInfo(null)
+  }
+  
+  const handlePDFUpload = (file: File) => {
+    console.log('PDF Upload:', file.name, file.type, file.size)
+    console.log('Setting pdfFile state...')
+    setPdfFile(file)
+    clearImage() // Clear any existing image
+    setKonvaImage(null) // Also clear konva image
+    console.log('PDF state updated')
+  }
+  
+  const handlePDFPageLoad = (image: HTMLImageElement, pageInfo: { current: number; total: number }) => {
+    console.log('PDF page loaded:', pageInfo)
+    
+    // Convert the selected page to an image file and load it
+    fetch(image.src)
+      .then(res => res.blob())
+      .then(blob => {
+        const fileName = pdfFile ? `${pdfFile.name} - Page ${pageInfo.current}` : `pdf-page-${pageInfo.current}.png`
+        const file = new File([blob], fileName, { type: 'image/png' })
+        
+        // Load the page as a regular image
+        loadImage(file)
+        
+        // Clear PDF state so it works like a normal image
+        setPdfFile(null)
+        setPdfPageInfo(null)
+      })
+      .catch(err => {
+        console.error('Error converting PDF page to file:', err)
+      })
   }
 
   // Track if we're in the middle of history navigation
@@ -407,7 +445,11 @@ function App() {
             fontWeight: '600',
             color: '#333'
           }}>
-            {imageData ? imageData.name : 'No image loaded'}
+            {imageData ? (
+              pdfPageInfo 
+                ? `${(imageData.name || 'PDF').replace(/\.pdf$/i, '')} - Page ${pdfPageInfo.current} of ${pdfPageInfo.total}`
+                : imageData.name || 'Untitled'
+            ) : 'No image loaded'}
           </h1>
           <SaveIndicator status={saveStatus} lastSaved={lastSaved} />
         </div>
@@ -911,7 +953,7 @@ function App() {
               </div>
             </div>
           ) : !imageData ? (
-            <ImageUploader onImageUpload={handleImageUpload} />
+            <ImageUploader onImageUpload={handleImageUpload} onPDFUpload={handlePDFUpload} />
           ) : (
             <div style={{ position: 'relative', display: 'inline-block' }}>
               <Stage
@@ -981,6 +1023,19 @@ function App() {
                 }}
               />
             </div>
+          )}
+          
+          {/* PDF Viewer - shows when PDF is loaded */}
+          {pdfFile && (
+            <PDFViewer
+              file={pdfFile}
+              onPageLoad={handlePDFPageLoad}
+              onError={(error) => {
+                console.error('PDF Error:', error)
+                setPdfFile(null)
+                setPdfPageInfo(null)
+              }}
+            />
           )}
         </section>
       </main>

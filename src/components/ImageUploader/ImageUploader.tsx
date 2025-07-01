@@ -3,13 +3,17 @@ import type { FileType, UploadError } from '@/types/canvas';
 
 interface ImageUploaderProps {
   onImageUpload: (file: File) => void;
+  onPDFUpload?: (file: File) => void;
   maxSizeMB?: number;
 }
 
-const ACCEPTED_TYPES: FileType[] = ['image/jpeg', 'image/png', 'image/jpg'];
+const ACCEPTED_IMAGE_TYPES: FileType[] = ['image/jpeg', 'image/png', 'image/jpg'];
+const ACCEPTED_PDF_TYPES = ['application/pdf'];
+const ACCEPTED_TYPES = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_PDF_TYPES];
 
 export const ImageUploader: React.FC<ImageUploaderProps> = ({ 
   onImageUpload, 
+  onPDFUpload,
   maxSizeMB = 10 
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -18,9 +22,12 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
 
   const validateFile = (file: File): UploadError | null => {
     // Check file type
-    if (!ACCEPTED_TYPES.includes(file.type as FileType)) {
+    const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type as FileType);
+    const isPDF = ACCEPTED_PDF_TYPES.includes(file.type);
+    
+    if (!isImage && !isPDF) {
       return { 
-        message: 'Please upload only JPG or PNG images', 
+        message: 'Please upload only JPG, PNG images or PDF files', 
         type: 'type' 
       };
     }
@@ -45,7 +52,20 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     }
 
     setError(null);
-    onImageUpload(file);
+    
+    // Check if it's a PDF
+    if (file.type === 'application/pdf') {
+      if (onPDFUpload) {
+        onPDFUpload(file);
+      } else {
+        setError({ 
+          message: 'PDF support is not enabled', 
+          type: 'type' 
+        });
+      }
+    } else {
+      onImageUpload(file);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,7 +190,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
           color: '#999',
           fontSize: '0.875rem'
         }}>
-          JPG or PNG • Max {maxSizeMB}MB
+          JPG, PNG or PDF • Max {maxSizeMB}MB
         </p>
 
         <p style={{
