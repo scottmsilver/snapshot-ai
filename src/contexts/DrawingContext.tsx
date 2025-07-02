@@ -84,7 +84,7 @@ const initialState: DrawingState = {
   maxZIndex: 0,
   measurementCalibration: {
     pixelsPerUnit: null,
-    unit: 'cm',
+    unit: 'ft',
     calibrationLineId: null,
   },
 };

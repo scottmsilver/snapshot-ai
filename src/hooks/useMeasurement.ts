@@ -41,7 +41,7 @@ export function useMeasurement(
   const [calibration, setCalibrationState] = useState<MeasurementCalibration>(
     initialCalibration || {
       pixelsPerUnit: null,
-      unit: 'cm' as MeasurementUnit,
+      unit: 'ft' as MeasurementUnit,
       calibrationLineId: null,
     }
   );
@@ -96,7 +96,7 @@ export function useMeasurement(
   const clearCalibration = useCallback(() => {
     setCalibrationState({
       pixelsPerUnit: null,
-      unit: 'cm' as MeasurementUnit,
+      unit: 'ft' as MeasurementUnit,
       calibrationLineId: null,
     });
     

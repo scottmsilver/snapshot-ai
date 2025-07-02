@@ -16,7 +16,7 @@ import {
   isValidControlPoint,
   getOptimalControlPoints
 } from '@/utils/calloutGeometry';
-import { pixelsToMeasurement, type MeasurementUnit } from '@/utils/measurementUtils';
+import { pixelsToMeasurement, formatMeasurement, type MeasurementUnit } from '@/utils/measurementUtils';
 
 interface DrawingLayerProps {
   stageRef: React.RefObject<Konva.Stage | null>;
@@ -551,13 +551,23 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             <Text
               x={(measureStart.x + measureEnd.x) / 2}
               y={(measureStart.y + measureEnd.y) / 2 - 15}
-              text={`${Math.round(measureDistance)}px`}
+              text={(() => {
+                if (drawingState.measurementCalibration.pixelsPerUnit) {
+                  const value = pixelsToMeasurement(
+                    measureDistance,
+                    drawingState.measurementCalibration.pixelsPerUnit,
+                    drawingState.measurementCalibration.unit as MeasurementUnit
+                  );
+                  return formatMeasurement(value, drawingState.measurementCalibration.unit as MeasurementUnit);
+                }
+                return `${Math.round(measureDistance)}px`;
+              })()}
               fontSize={12}
               fontFamily="Arial"
               fill="#666"
               align="center"
               rotation={(measureAngle > 90 || measureAngle < -90) ? measureAngle + 180 : measureAngle}
-              offsetX={20}
+              offsetX={30}
               listening={false}
             />
           </Group>
@@ -1326,7 +1336,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         
         // Get measurement label
         const measurementLabel = measureShape.measurement 
-          ? `${measureShape.measurement.value.toFixed(2)} ${measureShape.measurement.unit}`
+          ? formatMeasurement(measureShape.measurement.value, measureShape.measurement.unit as MeasurementUnit)
           : `${Math.round(Math.sqrt(dx * dx + dy * dy))}px`;
         
         return (

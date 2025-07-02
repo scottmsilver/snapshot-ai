@@ -1011,8 +1011,8 @@ function App() {
           borderRadius: '8px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          alignItems: 'flex-start',
+          justifyContent: 'flex-start',
           position: 'relative',
           overflow: 'auto'
         }}>
@@ -1023,6 +1023,7 @@ function App() {
               alignItems: 'center',
               justifyContent: 'center',
               height: '100%',
+              width: '100%',
               gap: '1rem'
             }}>
               <div style={{
@@ -1042,6 +1043,7 @@ function App() {
               alignItems: 'center',
               justifyContent: 'center',
               height: '100%',
+              width: '100%',
               gap: '1rem',
               padding: '2rem'
             }}>
@@ -1075,14 +1077,16 @@ function App() {
               </div>
             </div>
           ) : !imageData ? (
-            <ImageUploader onImageUpload={handleImageUpload} onPDFUpload={handlePDFUpload} />
+            <div style={{ width: '100%', height: '100%' }}>
+              <ImageUploader onImageUpload={handleImageUpload} onPDFUpload={handlePDFUpload} />
+            </div>
           ) : (
             <div style={{ 
               position: 'relative', 
               display: 'inline-block',
-              margin: '20px',
-              minWidth: stageSize.width * zoomLevel,
-              minHeight: stageSize.height * zoomLevel
+              padding: '20px',
+              width: stageSize.width * zoomLevel,
+              height: stageSize.height * zoomLevel
             }}>
               {/* Show calibration instructions when CALIBRATE tool is active */}
               {activeTool === DrawingTool.CALIBRATE && (
