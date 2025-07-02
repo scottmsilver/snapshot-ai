@@ -160,13 +160,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                                 targetName.includes('rotater');
       
       
+      // Handle deselection on empty click for any tool
+      if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint) {
+        const shouldMultiSelect = e.evt.shiftKey || e.evt.ctrlKey || e.evt.metaKey;
+        if (!shouldMultiSelect && drawingSelectedShapeIds.length > 0) {
+          clearSelection();
+        }
+      }
+
       if (activeTool === DrawingTool.SELECT) {
         if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint) {
-          // Clear selection on empty space click (unless multi-selecting)
-          const shouldMultiSelect = e.evt.shiftKey || e.evt.ctrlKey || e.evt.metaKey;
-          if (!shouldMultiSelect) {
-            handleEmptyClick();
-          }
           // Check if we should start drag selection
           if (e.evt.button === 0) { // Left mouse button
             startDragSelection(pos);
