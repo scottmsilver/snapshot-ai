@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import { Stage, Layer, Image as KonvaImage } from 'react-konva'
 import Konva from 'konva'
+import { motion, AnimatePresence } from 'framer-motion'
+import { 
+  Undo2, Redo2, Copy, Download, FileText, 
+  Palette, Ruler, ZoomIn, ZoomOut, RefreshCw,
+  AlertTriangle
+} from 'lucide-react'
 import { ImageUploader } from '@/components/ImageUploader'
+import { ColorPicker } from '@/components/ColorPicker'
 import { DrawingToolbar } from '@/components/Toolbar'
 import { DrawingLayer } from '@/components/Canvas/DrawingLayer'
 import { TextInputDialog } from '@/components/TextInputDialog'
@@ -423,7 +430,13 @@ function App() {
           textAlign: 'center',
           maxWidth: '400px'
         }}>
-          <span style={{ fontSize: '3rem', display: 'block', marginBottom: '1rem' }}>🎨</span>
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+          >
+            <Palette size={48} color="#4a90e2" style={{ marginBottom: '1rem' }} />
+          </motion.div>
           <h1 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Image Markup App</h1>
           <p style={{ marginBottom: '2rem', color: '#666' }}>
             Sign in with Google to start creating and saving your image annotations
@@ -435,13 +448,17 @@ function App() {
   }
 
   return (
-    <div style={{ 
-      height: '100vh', 
-      backgroundColor: '#f5f5f5',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden'
-    }}>
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      style={{ 
+        height: '100vh', 
+        backgroundColor: '#f5f5f5',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}>
       {/* Header */}
       <header style={{
         backgroundColor: '#ffffff',
@@ -460,7 +477,7 @@ function App() {
           gap: '0.5rem',
           position: 'relative'
         }}>
-          <span style={{ fontSize: '1.25rem' }}>🎨</span>
+          <Palette size={20} color="#4a90e2" />
           <h1 style={{ 
             margin: 0, 
             fontSize: '1rem',
@@ -522,7 +539,8 @@ function App() {
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                📄 New
+                <FileText size={14} />
+                <span>New</span>
               </button>
               <button
                 onClick={handleCopyToClipboard}
@@ -546,7 +564,8 @@ function App() {
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                📋 Copy
+                <Copy size={14} />
+                <span>Copy</span>
               </button>
               <button
                 onClick={handleDownloadImage}
@@ -570,7 +589,8 @@ function App() {
                   e.currentTarget.style.backgroundColor = '#4a90e2';
                 }}
               >
-                💾 Export
+                <Download size={14} />
+                <span>Export</span>
               </button>
             </>
           )}
@@ -619,7 +639,7 @@ function App() {
                 e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              ↶
+              <Undo2 size={16} />
             </button>
             <button
               onClick={redo}
@@ -644,7 +664,7 @@ function App() {
                 e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              ↷
+              <Redo2 size={16} />
             </button>
           </div>
 
@@ -657,6 +677,22 @@ function App() {
             {/* Tools will be rendered here */}
             <DrawingToolbar horizontal={true} selectedShapes={selectedShapes} />
           </div>
+
+          {/* Color Picker */}
+          {imageData && (
+            <div style={{
+              paddingLeft: '0.5rem',
+              borderLeft: '1px solid #e0e0e0'
+            }}>
+              <ColorPicker
+                strokeColor={currentStyle.stroke}
+                fillColor={currentStyle.fill}
+                onStrokeChange={(color) => updateStyle({ stroke: color })}
+                onFillChange={(color) => updateStyle({ fill: color })}
+                showFill={[DrawingTool.RECTANGLE, DrawingTool.CIRCLE, DrawingTool.STAR].includes(activeTool)}
+              />
+            </div>
+          )}
 
           {/* Measurement Calibration */}
           <div style={{
@@ -695,7 +731,8 @@ function App() {
                     e.currentTarget.style.backgroundColor = '#ff9800';
                   }}
                 >
-                  ⚠️ Set Scale
+                  <AlertTriangle size={14} />
+                  <span>Set Scale</span>
                 </button>
               ) : (
                 <>
@@ -706,7 +743,7 @@ function App() {
                     fontSize: '0.75rem',
                     color: '#666'
                   }}>
-                    <span>📏</span>
+                    <Ruler size={14} />
                     <span>{measurement.calibration.pixelsPerUnit?.toFixed(2)} px/{measurement.calibration.unit}</span>
                   </div>
                   <select
@@ -762,7 +799,7 @@ function App() {
                       e.currentTarget.style.backgroundColor = 'transparent';
                     }}
                   >
-                    🔄
+                    <RefreshCw size={14} />
                   </button>
                 </>
               )}
@@ -843,7 +880,7 @@ function App() {
                 e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              －
+              <ZoomOut size={16} />
             </button>
             
             <select
@@ -903,7 +940,7 @@ function App() {
                 e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              ＋
+              <ZoomIn size={16} />
             </button>
           </div>
         </div>
@@ -1232,7 +1269,7 @@ function App() {
         onCancel={handleCalibrationCancel}
       />
       
-    </div>
+    </motion.div>
   )
 }
 

@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { useDrawing } from '@/hooks/useDrawing';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import { DrawingTool, type Shape, type TextShape, type CalloutShape, type DrawingStyle } from '@/types/drawing';
@@ -9,18 +10,12 @@ import {
   CircleIcon,
   ArrowIcon,
   TextIcon,
-  CalloutIcon
+  CalloutIcon,
+  StarIcon,
+  MeasureIcon
 } from '@/components/Icons/ToolIcons';
+import { ColorPicker } from '@/components/ColorPicker';
 
-// Star icon component
-const StarIcon: React.FC<{ size?: number }> = ({ size = 20 }) => (
-  <span style={{ fontSize: size + 'px', lineHeight: 1 }}>⭐</span>
-);
-
-// Ruler/Measure icon component
-const MeasureIcon: React.FC<{ size?: number }> = ({ size = 20 }) => (
-  <span style={{ fontSize: size + 'px', lineHeight: 1 }}>📏</span>
-);
 
 const tools = [
   { tool: DrawingTool.SELECT, icon: SelectIcon, label: 'Select', shortcut: 'V' },
@@ -231,42 +226,14 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
         {/* Color Picker - Show for selected shapes or when drawing */}
         {(hasSelection || activeTool !== DrawingTool.SELECT) && (
           <div style={{ marginBottom: '1rem' }}>
-          <label style={{ 
-            display: 'block', 
-            fontSize: '0.75rem', 
-            color: '#666',
-            marginBottom: '0.25rem'
-          }}>
-            Stroke Color
-          </label>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <input
-              type="color"
-              value={displayStroke}
-              onChange={(e) => handlePropertyChange({ stroke: e.target.value })}
-              style={{
-                width: '50px',
-                height: '32px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                cursor: 'pointer'
-              }}
-            />
-            <input
-              type="text"
-              value={displayStroke}
-              onChange={(e) => handlePropertyChange({ stroke: e.target.value })}
-              style={{
-                flex: 1,
-                padding: '0.25rem 0.5rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '0.75rem',
-                fontFamily: 'monospace'
-              }}
+            <ColorPicker
+              strokeColor={displayStroke}
+              fillColor={displayFill}
+              onStrokeChange={(color) => handlePropertyChange({ stroke: color })}
+              onFillChange={(color) => handlePropertyChange({ fill: color })}
+              showFill={showFillOption}
             />
           </div>
-        </div>
         )}
 
         {/* Stroke Width - Hide for text tool */}
@@ -350,46 +317,6 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
           />
         </div>
 
-        {/* Fill Color (for shapes) - Only show for rectangle and circle */}
-        {showFillOption && (
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ 
-              display: 'block', 
-              fontSize: '0.75rem', 
-              color: '#666',
-              marginBottom: '0.25rem'
-            }}>
-              Fill Color
-            </label>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                checked={displayFill !== undefined}
-                onChange={(e) => handlePropertyChange({ 
-                  fill: e.target.checked ? displayStroke : undefined 
-                })}
-                style={{ marginRight: '4px' }}
-              />
-              {displayFill !== undefined && (
-                <input
-                  type="color"
-                  value={displayFill || displayStroke}
-                  onChange={(e) => handlePropertyChange({ fill: e.target.value })}
-                  style={{
-                    width: '50px',
-                    height: '32px',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px',
-                    cursor: 'pointer'
-                  }}
-                />
-              )}
-              <span style={{ fontSize: '0.75rem', color: '#666' }}>
-                {displayFill !== undefined ? 'Filled' : 'No fill'}
-              </span>
-            </div>
-          </div>
-        )}
 
         {/* Text Controls - Show when using text tool or when text shape is selected */}
         {showTextOptions && (

@@ -1,4 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { Upload } from 'lucide-react';
 import type { FileType, UploadError } from '@/types/canvas';
 
 interface ImageUploaderProps {
@@ -142,39 +144,38 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
       justifyContent: 'center',
       padding: '2rem'
     }}>
-      <div
+      <motion.div
         onClick={handleClick}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        animate={{
+          borderColor: isDragging ? '#4a90e2' : '#ccc',
+          backgroundColor: isDragging ? '#f0f8ff' : '#fafafa'
+        }}
+        transition={{ duration: 0.2 }}
         style={{
           width: '100%',
           maxWidth: '400px',
           height: '250px',
-          border: `2px dashed ${isDragging ? '#4a90e2' : '#ccc'}`,
+          border: '2px dashed',
           borderRadius: '8px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          cursor: 'pointer',
-          backgroundColor: isDragging ? '#f0f8ff' : '#fafafa',
-          transition: 'all 0.3s ease'
+          cursor: 'pointer'
         }}
       >
-        <svg
-          width="64"
-          height="64"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={isDragging ? '#4a90e2' : '#999'}
-          strokeWidth="2"
+        <motion.div
+          animate={{ y: isDragging ? -5 : 0 }}
+          transition={{ type: 'spring', stiffness: 300 }}
         >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="7 10 12 15 17 10" />
-          <line x1="12" y1="15" x2="12" y2="3" />
-        </svg>
+          <Upload size={64} color={isDragging ? '#4a90e2' : '#999'} />
+        </motion.div>
         
         <p style={{ 
           marginTop: '1rem', 
@@ -200,7 +201,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         }}>
           or paste an image (Ctrl+V)
         </p>
-      </div>
+      </motion.div>
 
       {error && (
         <div style={{
