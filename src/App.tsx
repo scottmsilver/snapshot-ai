@@ -956,6 +956,24 @@ function App() {
             <ImageUploader onImageUpload={handleImageUpload} onPDFUpload={handlePDFUpload} />
           ) : (
             <div style={{ position: 'relative', display: 'inline-block' }}>
+              {/* Show calibration instructions when CALIBRATE tool is active */}
+              {activeTool === DrawingTool.CALIBRATE && (
+                <div style={{
+                  position: 'absolute',
+                  top: '10px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: 'rgba(74, 144, 226, 0.95)',
+                  color: 'white',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  zIndex: 100,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                }}>
+                  Click and drag to draw a reference line for calibration
+                </div>
+              )}
               <Stage
                 width={stageSize.width}
                 height={stageSize.height}
@@ -965,7 +983,7 @@ function App() {
                 style={{
                   border: '1px solid #ddd',
                   backgroundColor: '#fafafa',
-                  cursor: activeTool === 'select' ? 'default' : 'crosshair'
+                  cursor: activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'
                 }}
                 onMouseDown={(e) => {
                   // Check if we clicked on empty space (the stage itself)
@@ -1008,6 +1026,10 @@ function App() {
                 pixelsPerUnit={measurement.calibration.pixelsPerUnit}
                 unit={measurement.calibration.unit}
                 onSetScale={() => {
+                  // Reset zoom to 1 when calibrating to avoid coordinate issues
+                  if (zoomLevel !== 1) {
+                    setZoomLevel(1);
+                  }
                   setActiveTool(DrawingTool.CALIBRATE);
                   measurement.startCalibration();
                 }}

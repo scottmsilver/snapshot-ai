@@ -35,7 +35,9 @@ export const ScaleLegend: React.FC<ScaleLegendProps> = ({
           transition: 'all 0.2s',
           display: 'flex',
           alignItems: 'center',
-          gap: '8px'
+          gap: '8px',
+          pointerEvents: 'auto',
+          zIndex: 10
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 1)';

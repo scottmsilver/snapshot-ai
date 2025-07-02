@@ -16,6 +16,7 @@ import {
   isValidControlPoint,
   getOptimalControlPoints
 } from '@/utils/calloutGeometry';
+import { pixelsToMeasurement, type MeasurementUnit } from '@/utils/measurementUtils';
 
 interface DrawingLayerProps {
   stageRef: React.RefObject<Konva.Stage | null>;
@@ -896,7 +897,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                     Math.pow(newPoints[2] - newPoints[0], 2) + 
                     Math.pow(newPoints[3] - newPoints[1], 2)
                   );
-                  const value = pixelDistance / drawingState.measurementCalibration.pixelsPerUnit;
+                  const value = pixelsToMeasurement(
+                    pixelDistance,
+                    drawingState.measurementCalibration.pixelsPerUnit,
+                    drawingState.measurementCalibration.unit as MeasurementUnit
+                  );
                   
                   updateShape(shape.id, {
                     points: newPoints,
@@ -1446,7 +1451,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           Math.pow(newPoints[2] - newPoints[0], 2) + 
           Math.pow(newPoints[3] - newPoints[1], 2)
         );
-        const value = pixelDistance / drawingState.measurementCalibration.pixelsPerUnit;
+        const value = pixelsToMeasurement(
+          pixelDistance,
+          drawingState.measurementCalibration.pixelsPerUnit,
+          drawingState.measurementCalibration.unit as MeasurementUnit
+        );
         
         updateShape(measureShape.id, {
           points: newPoints,
