@@ -20,12 +20,11 @@ import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtil
 import { DrawingTool, type Point, type TextShape, type MeasurementLineShape } from '@/types/drawing'
 import { googleDriveService, type ProjectData } from '@/services/googleDrive'
 import { CalibrationDialog } from '@/components/Tools/CalibrationDialog'
-import { ScaleLegend } from '@/components/Tools/ScaleLegend'
 import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurementUtils'
 import type { MeasurementUnit } from '@/utils/measurementUtils'
 
 function App() {
-  const [stageSize] = useState({ width: 800, height: 600 })
+  const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
   const stageRef = useRef<Konva.Stage | null>(null)
   const { imageData, loadImage, clearImage, loadImageFromData } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
@@ -128,14 +127,22 @@ function App() {
     }
   }, [authContext?.isAuthenticated, authContext?.getAccessToken, loadImageFromData, setShapes]);
 
-  // Load image when imageData changes
+  // Load image when imageData changes and update stage size
   useEffect(() => {
     if (imageData) {
       const img = new window.Image()
       img.src = imageData.src
       img.onload = () => {
         setKonvaImage(img)
+        // Update stage size to match image
+        setStageSize({
+          width: Math.max(800, img.width),
+          height: Math.max(600, img.height)
+        })
       }
+    } else {
+      setKonvaImage(null)
+      setStageSize({ width: 800, height: 600 })
     }
   }, [imageData])
 
@@ -415,10 +422,11 @@ function App() {
 
   return (
     <div style={{ 
-      minHeight: '100vh', 
+      height: '100vh', 
       backgroundColor: '#f5f5f5',
       display: 'flex',
-      flexDirection: 'column'
+      flexDirection: 'column',
+      overflow: 'hidden'
     }}>
       {/* Header */}
       <header style={{
@@ -633,8 +641,118 @@ function App() {
             flex: 1
           }}>
             {/* Tools will be rendered here */}
-            <DrawingToolbar horizontal={true} />
+            <DrawingToolbar horizontal={true} selectedShapes={selectedShapes} />
           </div>
+
+          {/* Measurement Calibration */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            paddingLeft: '0.5rem',
+            borderLeft: '1px solid #e0e0e0'
+          }}>
+            {!measurement.isCalibrated ? (
+                <button
+                  onClick={() => {
+                    // Reset zoom to 1 when calibrating to avoid coordinate issues
+                    if (zoomLevel !== 1) {
+                      setZoomLevel(1);
+                    }
+                    setActiveTool(DrawingTool.CALIBRATE);
+                    measurement.startCalibration();
+                  }}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    backgroundColor: '#ff9800',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#f57c00';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#ff9800';
+                  }}
+                >
+                  ⚠️ Set Scale
+                </button>
+              ) : (
+                <>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    fontSize: '0.75rem',
+                    color: '#666'
+                  }}>
+                    <span>📏</span>
+                    <span>{measurement.calibration.pixelsPerUnit?.toFixed(2)} px/{measurement.calibration.unit}</span>
+                  </div>
+                  <select
+                    value={measurement.calibration.unit}
+                    onChange={(e) => {
+                      measurement.changeUnit(e.target.value as MeasurementUnit);
+                      // Also update global state
+                      if (drawingState.measurementCalibration.pixelsPerUnit !== null) {
+                        setMeasurementCalibration({
+                          ...drawingState.measurementCalibration,
+                          unit: e.target.value
+                        });
+                      }
+                    }}
+                    style={{
+                      padding: '0.125rem 0.25rem',
+                      fontSize: '0.75rem',
+                      backgroundColor: 'white',
+                      border: '1px solid #ddd',
+                      borderRadius: '3px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="mm">mm</option>
+                    <option value="cm">cm</option>
+                    <option value="m">m</option>
+                    <option value="in">in</option>
+                    <option value="ft">ft</option>
+                  </select>
+                  <button
+                    onClick={() => {
+                      // Reset zoom to 1 when calibrating to avoid coordinate issues
+                      if (zoomLevel !== 1) {
+                        setZoomLevel(1);
+                      }
+                      setActiveTool(DrawingTool.CALIBRATE);
+                      measurement.startCalibration();
+                    }}
+                    title="Recalibrate"
+                    style={{
+                      padding: '0.25rem',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #ddd',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                      fontSize: '0.75rem',
+                      color: '#666'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#f5f5f5';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    🔄
+                  </button>
+                </>
+              )}
+            </div>
 
           {/* Select Last Shape Button */}
           <div style={{
@@ -782,7 +900,9 @@ function App() {
         flex: 1,
         display: 'flex',
         gap: '1rem',
-        padding: '1rem'
+        padding: '1rem',
+        overflow: 'hidden',
+        minHeight: 0
       }}>
         {/* Properties Panel */}
         {imageData && (
@@ -790,6 +910,7 @@ function App() {
             position: 'relative',
             transition: 'width 0.3s ease',
             width: propertiesPanelOpen ? '200px' : '40px',
+            flexShrink: 0
           }}>
             {/* Toggle Button */}
             <button
@@ -892,7 +1013,8 @@ function App() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          position: 'relative'
+          position: 'relative',
+          overflow: 'auto'
         }}>
           {isLoadingSharedFile ? (
             <div style={{
@@ -955,12 +1077,18 @@ function App() {
           ) : !imageData ? (
             <ImageUploader onImageUpload={handleImageUpload} onPDFUpload={handlePDFUpload} />
           ) : (
-            <div style={{ position: 'relative', display: 'inline-block' }}>
+            <div style={{ 
+              position: 'relative', 
+              display: 'inline-block',
+              margin: '20px',
+              minWidth: stageSize.width * zoomLevel,
+              minHeight: stageSize.height * zoomLevel
+            }}>
               {/* Show calibration instructions when CALIBRATE tool is active */}
               {activeTool === DrawingTool.CALIBRATE && (
                 <div style={{
-                  position: 'absolute',
-                  top: '10px',
+                  position: 'fixed',
+                  top: '120px',
                   left: '50%',
                   transform: 'translateX(-50%)',
                   backgroundColor: 'rgba(74, 144, 226, 0.95)',
@@ -1019,31 +1147,6 @@ function App() {
                   }}
                 />
               </Stage>
-              
-              {/* Scale Legend */}
-              <ScaleLegend
-                isCalibrated={measurement.isCalibrated}
-                pixelsPerUnit={measurement.calibration.pixelsPerUnit}
-                unit={measurement.calibration.unit}
-                onSetScale={() => {
-                  // Reset zoom to 1 when calibrating to avoid coordinate issues
-                  if (zoomLevel !== 1) {
-                    setZoomLevel(1);
-                  }
-                  setActiveTool(DrawingTool.CALIBRATE);
-                  measurement.startCalibration();
-                }}
-                onChangeUnit={(unit) => {
-                  measurement.changeUnit(unit);
-                  // Also update global state
-                  if (drawingState.measurementCalibration.pixelsPerUnit !== null) {
-                    setMeasurementCalibration({
-                      ...drawingState.measurementCalibration,
-                      unit
-                    });
-                  }
-                }}
-              />
             </div>
           )}
           
