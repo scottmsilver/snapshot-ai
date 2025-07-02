@@ -47,6 +47,7 @@ export const useDrawing = () => {
       return;
     }
 
+
     isDrawingRef.current = true;
     setDrawingState(true, point, point);
     setTempPoints([point]);

@@ -132,7 +132,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     if (!stage) return;
 
     const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-      const pos = stage.getPointerPosition();
+      // Fix: Calculate position correctly accounting for scale
+      const container = stage.container();
+      const rect = container.getBoundingClientRect();
+      const scaleX = stage.scaleX();
+      const scaleY = stage.scaleY();
+      
+      const pos = {
+        x: (e.evt.clientX - rect.left) / scaleX,
+        y: (e.evt.clientY - rect.top) / scaleY
+      };
+      
       if (!pos) return;
 
       // Check if clicking on empty space (no shape)
@@ -182,7 +192,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     };
 
     const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
-      const pos = stage.getPointerPosition();
+      // Fix: Calculate position correctly accounting for scale
+      const container = stage.container();
+      const rect = container.getBoundingClientRect();
+      const scaleX = stage.scaleX();
+      const scaleY = stage.scaleY();
+      
+      const pos = {
+        x: (e.evt.clientX - rect.left) / scaleX,
+        y: (e.evt.clientY - rect.top) / scaleY
+      };
+      
       if (!pos) return;
 
       if (activeTool === DrawingTool.SELECT) {
@@ -241,7 +261,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           return;
         }
       } else if (isDrawing) {
-        const pos = stage.getPointerPosition();
+        // Fix: Calculate position correctly accounting for scale
+        const container = stage.container();
+        const rect = container.getBoundingClientRect();
+        const scaleX = stage.scaleX();
+        const scaleY = stage.scaleY();
+        
+        const pos = {
+          x: (e.evt.clientX - rect.left) / scaleX,
+          y: (e.evt.clientY - rect.top) / scaleY
+        };
+        
         finishDrawing(pos || undefined, e.evt as any);
       }
       
