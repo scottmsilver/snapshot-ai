@@ -138,7 +138,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       // Check if clicking on empty space (no shape)
       const clickedOnEmpty = e.target === stage || 
                            e.target.getLayer() === stage.findOne('Layer') ||
-                           e.target.getClassName() === 'Layer';
+                           e.target.getClassName() === 'Layer' ||
+                           e.target.getClassName() === 'Image' ||
+                           (!e.target.id() && e.target.getClassName() !== 'Transformer');
       
       // Check if clicking on transformer or its anchors
       const targetName = e.target.name?.() || '';
@@ -150,6 +152,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       
       if (activeTool === DrawingTool.SELECT) {
         if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint) {
+          // Clear selection on empty space click (unless multi-selecting)
+          const shouldMultiSelect = e.evt.shiftKey || e.evt.ctrlKey || e.evt.metaKey;
+          if (!shouldMultiSelect) {
+            handleEmptyClick();
+          }
           // Check if we should start drag selection
           if (e.evt.button === 0) { // Left mouse button
             startDragSelection(pos);
@@ -232,12 +239,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         } else if (isDraggingControlPoint || isDraggingControlPointRef.current) {
           // Don't deselect when finishing control point drag
           return;
-        } else if (e.target === stage || (e.target.getLayer() && e.target.getClassName() === 'Layer')) {
-          // Click on empty space (not drag)
-          // Don't clear selection if we just finished dragging
-          if (!justFinishedDraggingRef.current) {
-            clearSelection();
-          }
         }
       } else if (isDrawing) {
         const pos = stage.getPointerPosition();

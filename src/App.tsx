@@ -134,15 +134,29 @@ function App() {
       img.src = imageData.src
       img.onload = () => {
         setKonvaImage(img)
-        // Update stage size to match image
-        setStageSize({
-          width: Math.max(800, img.width),
-          height: Math.max(600, img.height)
-        })
+        // Calculate appropriate stage size - don't make it too large for big images
+        const maxStageWidth = 2000;
+        const maxStageHeight = 2000;
+        const minStageWidth = 800;
+        const minStageHeight = 600;
+        
+        // Use image dimensions but cap at max values
+        const width = Math.min(maxStageWidth, Math.max(minStageWidth, img.width));
+        const height = Math.min(maxStageHeight, Math.max(minStageHeight, img.height));
+        
+        setStageSize({ width, height })
+        
+        // Reset zoom if image is very large
+        if (img.width > maxStageWidth || img.height > maxStageHeight) {
+          setZoomLevel(0.75);
+        } else {
+          setZoomLevel(1);
+        }
       }
     } else {
       setKonvaImage(null)
       setStageSize({ width: 800, height: 600 })
+      setZoomLevel(1)
     }
   }, [imageData])
 
@@ -1116,14 +1130,6 @@ function App() {
                   border: '1px solid #ddd',
                   backgroundColor: '#fafafa',
                   cursor: activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'
-                }}
-                onMouseDown={(e) => {
-                  // Check if we clicked on empty space (the stage itself)
-                  if (e.target === e.target.getStage()) {
-                    if (activeTool === DrawingTool.SELECT) {
-                      clearSelection();
-                    }
-                  }
                 }}
               >
                 <Layer>
