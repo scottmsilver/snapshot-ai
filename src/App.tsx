@@ -8,8 +8,8 @@ import {
   AlertTriangle
 } from 'lucide-react'
 import { ImageUploader } from '@/components/ImageUploader'
-import { ColorPicker } from '@/components/ColorPicker'
 import { DrawingToolbar } from '@/components/Toolbar'
+import { PropertiesSection } from '@/components/Toolbar/PropertiesSection'
 import { DrawingLayer } from '@/components/Canvas/DrawingLayer'
 import { TextInputDialog } from '@/components/TextInputDialog'
 import { UserMenu } from '@/components/Auth/UserMenu'
@@ -39,7 +39,6 @@ function App() {
   const stageRef = useRef<Konva.Stage | null>(null)
   const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool, deleteSelected, updateStyle } = useDrawing()
   const { state: drawingState, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes } = useDrawingContext()
-  const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true)
   const [zoomLevel, setZoomLevel] = useState(1) // 1 = 100%
   const [isLoadingSharedFile, setIsLoadingSharedFile] = useState(false)
   const [sharedFileError, setSharedFileError] = useState<string | null>(null)
@@ -1020,17 +1019,29 @@ function App() {
           <div style={{ 
             display: 'flex', 
             gap: '0.25rem',
-            flex: 1
+            paddingRight: '0.5rem',
+            borderRight: '1px solid #e0e0e0'
           }}>
-            {/* Tools will be rendered here */}
             <DrawingToolbar horizontal={true} selectedShapes={selectedShapes} />
           </div>
 
-          {/* Add Image Button */}
+          {/* Properties Section - Dynamic based on tool/selection */}
+          <PropertiesSection
+            activeTool={activeTool}
+            currentStyle={currentStyle}
+            selectedShapes={selectedShapes}
+            onStyleChange={updateStyle}
+            updateShape={updateShape}
+          />
+
+          {/* Right-side controls */}
           <div style={{
-            paddingLeft: '0.5rem',
-            borderLeft: '1px solid #e0e0e0'
+            display: 'flex',
+            gap: '0.5rem',
+            alignItems: 'center',
+            marginLeft: 'auto'
           }}>
+            {/* Add Image Button */}
             <button
               onClick={() => {
                 const input = document.createElement('input');
@@ -1046,7 +1057,7 @@ function App() {
               }}
               title="Add Image"
               style={{
-                padding: '0.375rem 0.75rem',
+                padding: '0.25rem 0.5rem',
                 backgroundColor: 'transparent',
                 border: '1px solid #ddd',
                 borderRadius: '4px',
@@ -1056,7 +1067,7 @@ function App() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.25rem',
-                height: '32px'
+                height: '28px'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = '#f5f5f5';
@@ -1066,36 +1077,12 @@ function App() {
               }}
             >
               <FileText size={14} />
-              Add Image
+              <span>Add Image</span>
             </button>
-          </div>
 
-          {/* Color Picker */}
-          {isCanvasInitialized && (
-            <div style={{
-              paddingLeft: '0.5rem',
-              borderLeft: '1px solid #e0e0e0'
-            }}>
-              <ColorPicker
-                strokeColor={currentStyle.stroke}
-                fillColor={currentStyle.fill}
-                onStrokeChange={(color) => updateStyle({ stroke: color })}
-                onFillChange={(color) => updateStyle({ fill: color })}
-                showFill={[DrawingTool.RECTANGLE, DrawingTool.CIRCLE, DrawingTool.STAR].includes(activeTool as any)}
-              />
-            </div>
-          )}
-
-          {/* Measurement Calibration */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            paddingLeft: '0.5rem',
-            borderLeft: '1px solid #e0e0e0'
-          }}>
+            {/* Measurement Calibration */}
             {!measurement.isCalibrated ? (
-                <button
+              <button
                   onClick={() => {
                     // Reset zoom to 1 when calibrating to avoid coordinate issues
                     if (zoomLevel !== 1) {
@@ -1195,58 +1182,15 @@ function App() {
                   </button>
                 </>
               )}
-            </div>
 
-          {/* Select Last Shape Button */}
-          <div style={{
-            paddingLeft: '0.5rem',
-            borderLeft: '1px solid #e0e0e0'
-          }}>
-            <button
-              onClick={() => {
-                if (shapes.length > 0) {
-                  const lastShape = shapes[shapes.length - 1];
-                  selectShape(lastShape.id);
-                  // Also switch to select tool to see the selection
-                  if (activeTool !== DrawingTool.SELECT) {
-                    setActiveTool(DrawingTool.SELECT);
-                  }
-                }
-              }}
-              disabled={shapes.length === 0}
-              title="Select Last Drawn Shape"
-              style={{
-                padding: '0.25rem 0.75rem',
-                backgroundColor: 'transparent',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                cursor: shapes.length > 0 ? 'pointer' : 'not-allowed',
-                opacity: shapes.length > 0 ? 1 : 0.3,
-                fontSize: '0.75rem',
-                color: '#666',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem'
-              }}
-              onMouseEnter={(e) => {
-                if (shapes.length > 0) e.currentTarget.style.backgroundColor = '#f5f5f5';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
-            >
-              Select Last
-            </button>
-          </div>
-
-          {/* Zoom Controls */}
-          <div style={{
-            display: 'flex',
-            gap: '0.125rem',
-            alignItems: 'center',
-            paddingLeft: '0.5rem',
-            borderLeft: '1px solid #e0e0e0'
-          }}>
+            {/* Zoom Controls */}
+            <div style={{
+              display: 'flex',
+              gap: '0.125rem',
+              alignItems: 'center',
+              paddingLeft: '0.5rem',
+              borderLeft: '1px solid #e0e0e0'
+            }}>
             <button
               onClick={() => setZoomLevel(Math.max(0.1, zoomLevel - 0.25))}
               disabled={zoomLevel <= 0.1}
@@ -1391,6 +1335,7 @@ function App() {
                 }}
               />
             </div>
+            </div>
           </div>
         </div>
       )}
@@ -1404,106 +1349,6 @@ function App() {
         overflow: 'hidden',
         minHeight: 0
       }}>
-        {/* Properties Panel */}
-        {isCanvasInitialized && (
-          <aside style={{
-            position: 'relative',
-            transition: 'width 0.3s ease',
-            width: propertiesPanelOpen ? '200px' : '40px',
-            flexShrink: 0
-          }}>
-            {/* Toggle Button */}
-            <button
-              onClick={() => setPropertiesPanelOpen(!propertiesPanelOpen)}
-              style={{
-                position: 'absolute',
-                left: propertiesPanelOpen ? '200px' : '40px',
-                top: '1rem',
-                transform: 'translateX(-50%)',
-                width: '24px',
-                height: '48px',
-                backgroundColor: 'white',
-                border: '1px solid #e0e0e0',
-                borderRadius: '0 4px 4px 0',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.75rem',
-                color: '#666',
-                boxShadow: '1px 0 2px rgba(0,0,0,0.05)',
-                zIndex: 10,
-                padding: 0,
-                transition: 'left 0.3s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#f5f5f5';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'white';
-              }}
-            >
-              {propertiesPanelOpen ? '◀' : '▶'}
-            </button>
-            
-            {/* Panel Content */}
-            <div style={{
-              width: propertiesPanelOpen ? '200px' : '40px',
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              padding: propertiesPanelOpen ? '1rem' : '0.5rem',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              maxHeight: 'calc(100vh - 96px)', // Adjusted for header + toolbar
-              transition: 'all 0.3s ease'
-            }}>
-              {propertiesPanelOpen ? (
-                <DrawingToolbar selectedShapes={selectedShapes} />
-              ) : (
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  marginTop: '3rem'
-                }}>
-                  {/* Minimized indicators */}
-                  {selectedShapes.length > 0 && (
-                    <div style={{
-                      fontSize: '0.625rem',
-                      color: '#666',
-                      textAlign: 'center'
-                    }}>
-                      {selectedShapes.length}<br/>selected
-                    </div>
-                  )}
-                  <div 
-                    title={`Stroke: ${currentStyle.stroke}`}
-                    style={{
-                      width: '24px',
-                      height: '24px',
-                      backgroundColor: currentStyle.stroke,
-                      borderRadius: '4px',
-                      border: '1px solid #ddd'
-                    }} 
-                  />
-                  <div 
-                    title={`Width: ${currentStyle.strokeWidth}px`}
-                    style={{
-                      fontSize: '0.75rem',
-                      fontWeight: 'bold',
-                      color: '#666'
-                    }}
-                  >
-                    {currentStyle.strokeWidth}
-                  </div>
-                </div>
-              )}
-            </div>
-          </aside>
-        )}
-
         {/* Canvas Area */}
         <section style={{
           flex: 1,
