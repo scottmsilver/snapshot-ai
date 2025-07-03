@@ -357,14 +357,6 @@ export const useDrawing = () => {
       case DrawingTool.SCREENSHOT:
         // For screenshot, we don't create a shape immediately
         // Instead, we'll capture the area and create an IMAGE shape
-        // The capture logic will be handled in the component
-        setDrawingState({
-          ...state,
-          isDrawing: false,
-          tempPoints: [],
-          startPoint: null,
-          lastPoint: null,
-        });
         
         // Return the selected area bounds for the parent to handle
         const screenshotBounds = {
@@ -374,23 +366,36 @@ export const useDrawing = () => {
           height: Math.abs(endPoint.y - startPoint.y)
         };
         
-        // Trigger a custom event with the bounds
+        // Clear drawing state
+        setDrawingState({
+          ...state,
+          isDrawing: false,
+          tempPoints: [],
+          startPoint: null,
+          lastPoint: null,
+        });
+        
+        // Trigger a custom event with the bounds after a small delay
+        // This ensures the drawing state is cleared and mouse events are done
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('screenshot-area-selected', {
-            detail: screenshotBounds
-          }));
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('screenshot-area-selected', {
+              detail: screenshotBounds
+            }));
+          }, 100);
         }
         return;
     }
 
     // Add shape if created
     if (newShape) {
+      // Add shape - this will automatically select it due to ADD_SHAPE action
       addShape(newShape);
       
-      // Select the shape after a small delay to ensure it's been added to state
-      setTimeout(() => {
-        selectShape(newShape.id);
-      }, 10);
+      // Switch to select tool (except for pen tool which allows continuous drawing)
+      if (state.activeTool !== DrawingTool.PEN) {
+        setActiveTool(DrawingTool.SELECT);
+      }
     }
 
     // Reset drawing state
@@ -398,11 +403,6 @@ export const useDrawing = () => {
     setDrawingState(false, null, null);
     setTempPoints([]);
     setActiveShape(null);
-    
-    // Switch to select tool after creating a shape (except for pen tool which allows continuous drawing)
-    if (newShape && state.activeTool !== DrawingTool.PEN) {
-      setActiveTool(DrawingTool.SELECT);
-    }
   }, [
     state.activeTool,
     state.isDrawing,
@@ -411,7 +411,6 @@ export const useDrawing = () => {
     state.tempPoints,
     state.currentStyle,
     addShape,
-    selectShape,
     setDrawingState,
     setTempPoints,
     setActiveShape,

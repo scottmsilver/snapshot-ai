@@ -53,6 +53,8 @@ const ImageShapeComponent: React.FC<{
       width={shape.width}
       height={shape.height}
       rotation={shape.rotation || 0}
+      stroke={shape.style.stroke}
+      strokeWidth={shape.style.strokeWidth}
       ref={onRef}
     />
   );

@@ -27,6 +27,7 @@ import { googleDriveService, type ProjectData } from '@/services/googleDrive'
 import { CalibrationDialog } from '@/components/Tools/CalibrationDialog'
 import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurementUtils'
 import type { MeasurementUnit } from '@/utils/measurementUtils'
+import { renderShapeOffscreen } from '@/utils/offscreenRenderer'
 
 function App() {
   const CANVAS_PADDING = 100
@@ -116,7 +117,7 @@ function App() {
       height: img.height,
       imageData: dataURL,
       style: {
-        stroke: '#ddd',
+        stroke: 'transparent',
         strokeWidth: 0,
         opacity: 1
       },
@@ -204,14 +205,12 @@ function App() {
   const handleImageUpload = async (file: File) => {
     try {
       const imageShape = await createImageShapeFromFile(file)
-      addShape(imageShape)
       setPdfFile(null) // Clear any PDF state
       setPdfPageInfo(null)
-      // Switch to select tool to allow immediate manipulation
-      if (activeTool !== DrawingTool.SELECT) {
-        setActiveTool(DrawingTool.SELECT)
-      }
-      selectShape(imageShape.id)
+      // Switch to select tool first
+      setActiveTool(DrawingTool.SELECT)
+      // Add shape - this will automatically select it
+      addShape(imageShape)
     } catch (error) {
       console.error('Failed to load image:', error)
     }
@@ -236,13 +235,16 @@ function App() {
       
       // Create image shape from the PDF page
       const imageShape = await createImageShapeFromFile(file)
-      addShape(imageShape)
       
-      // Clear PDF state and select the new image
+      // Clear PDF state
       setPdfFile(null)
       setPdfPageInfo(null)
+      
+      // Switch to select tool first
       setActiveTool(DrawingTool.SELECT)
-      selectShape(imageShape.id)
+      
+      // Add shape - this will automatically select it
+      addShape(imageShape)
     } catch (err) {
       console.error('Error converting PDF page to shape:', err)
     }
@@ -320,21 +322,95 @@ function App() {
   useEffect(() => {
     const handleScreenshotAreaSelected = async (event: Event) => {
       const bounds = (event as CustomEvent).detail;
-      if (!stageRef.current || bounds.width < 10 || bounds.height < 10) return;
+      if (!stageRef.current || bounds.width < 10 || bounds.height < 10 || !canvasSize) return;
 
       try {
-        // Get the stage and create a temporary layer
-        const stage = stageRef.current;
-        const scale = stage.scaleX();
+        const scale = stageRef.current.scaleX();
         
-        // Convert to data URL of the selected area
-        const dataURL = await stage.toDataURL({
-          x: bounds.x * scale,
-          y: bounds.y * scale,
-          width: bounds.width * scale,
-          height: bounds.height * scale,
-          pixelRatio: 1 / scale
+        // Create offscreen canvas and stage for clean capture
+        const offscreenContainer = document.createElement('div');
+        offscreenContainer.style.position = 'absolute';
+        offscreenContainer.style.left = '-9999px';
+        offscreenContainer.style.top = '-9999px';
+        document.body.appendChild(offscreenContainer);
+        
+        // Create temporary stage with same dimensions as the screenshot area
+        const tempStage = new Konva.Stage({
+          container: offscreenContainer,
+          width: bounds.width,
+          height: bounds.height,
         });
+        
+        // Create layers matching the main stage structure
+        const bgLayer = new Konva.Layer();
+        const shapesLayer = new Konva.Layer();
+        tempStage.add(bgLayer);
+        tempStage.add(shapesLayer);
+        
+        // Render background
+        const bgRect = new Konva.Rect({
+          x: 0,
+          y: 0,
+          width: bounds.width,
+          height: bounds.height,
+          fill: canvasBackground,
+        });
+        bgLayer.add(bgRect);
+        
+        // Render grid if enabled
+        if (showGrid) {
+          const gridSize = 20;
+          // Adjust grid offset based on screenshot position
+          const offsetX = bounds.x % gridSize;
+          const offsetY = bounds.y % gridSize;
+          
+          // Vertical lines
+          for (let x = -offsetX; x <= bounds.width; x += gridSize) {
+            const line = new Konva.Line({
+              points: [x, 0, x, bounds.height],
+              stroke: '#e0e0e0',
+              strokeWidth: 1,
+            });
+            bgLayer.add(line);
+          }
+          
+          // Horizontal lines
+          for (let y = -offsetY; y <= bounds.height; y += gridSize) {
+            const line = new Konva.Line({
+              points: [0, y, bounds.width, y],
+              stroke: '#e0e0e0',
+              strokeWidth: 1,
+            });
+            bgLayer.add(line);
+          }
+        }
+        
+        // Clone and render only visible shapes that intersect with bounds
+        const sortedShapes = [...shapes].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
+        
+        for (const shape of sortedShapes) {
+          if (!shape.visible) continue;
+          
+          // Check if shape intersects with screenshot bounds
+          // This is a simplified check - you might need more sophisticated intersection logic
+          const shapeNode = await renderShapeOffscreen(shape, bounds);
+          if (shapeNode) {
+            shapesLayer.add(shapeNode);
+          }
+        }
+        
+        // Draw layers
+        bgLayer.draw();
+        shapesLayer.draw();
+        
+        // Capture the offscreen stage
+        const dataURL = tempStage.toDataURL({
+          pixelRatio: 1
+        });
+        
+        // Clean up
+        tempStage.destroy();
+        document.body.removeChild(offscreenContainer);
 
         // Create an IMAGE shape with the captured data
         const imageShape = {
@@ -346,8 +422,8 @@ function App() {
           height: bounds.height,
           imageData: dataURL,
           style: {
-            stroke: '#ddd',
-            strokeWidth: 1,
+            stroke: 'transparent',  // No border by default
+            strokeWidth: 0,
             opacity: 1
           },
           visible: true,
@@ -357,14 +433,16 @@ function App() {
           updatedAt: Date.now(),
         };
 
-        // Add the image shape
+        // Add the shape first
         addShape(imageShape);
         
-        // Switch back to select tool
+        // Switch to select tool immediately
         setActiveTool(DrawingTool.SELECT);
         
-        // Select the new image
-        selectShape(imageShape.id);
+        // Force selection after a delay for screenshots
+        setTimeout(() => {
+          selectShape(imageShape.id);
+        }, 150);
       } catch (error) {
         console.error('Failed to capture screenshot:', error);
       }
@@ -374,7 +452,7 @@ function App() {
     return () => {
       window.removeEventListener('screenshot-area-selected', handleScreenshotAreaSelected as EventListener);
     };
-  }, [shapes, addShape, setActiveTool, selectShape]);
+  }, [shapes, addShape, setActiveTool, selectShape, canvasSize, canvasBackground, showGrid]);
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -547,9 +625,10 @@ function App() {
               imageShape.y = CANVAS_PADDING + offsetY;
             }
             
-            addShape(imageShape);
+            // Switch to select tool first
             setActiveTool(DrawingTool.SELECT);
-            selectShape(imageShape.id);
+            // Add shape - this will automatically select it
+            addShape(imageShape);
           } catch (error) {
             console.error('Failed to paste image:', error);
           }
@@ -564,7 +643,7 @@ function App() {
     return () => {
       window.removeEventListener('paste', handlePaste);
     };
-  }, [isCanvasInitialized, shapes, addShape, setActiveTool, selectShape]);
+  }, [isCanvasInitialized, shapes, addShape, setActiveTool]);
   
   // Handle new measurement and calibration lines
   useEffect(() => {
@@ -1582,6 +1661,8 @@ function App() {
               updatedAt: Date.now(),
             };
             addShape(textShape);
+            // Switch to select tool after creating text
+            setActiveTool(DrawingTool.SELECT);
           }
           
           setTextDialogOpen(false);
