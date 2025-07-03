@@ -28,6 +28,7 @@ import { CalibrationDialog } from '@/components/Tools/CalibrationDialog'
 import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurementUtils'
 import type { MeasurementUnit } from '@/utils/measurementUtils'
 import { renderShapeOffscreen } from '@/utils/offscreenRenderer'
+import { calculateScaledDimensions, ImageSource, isPDFSourcedImage, isLikelyScreenshot } from '@/utils/imageScaling'
 
 function App() {
   const CANVAS_PADDING = 100
@@ -86,7 +87,7 @@ function App() {
   }
 
   // Helper function to create IMAGE shape from file
-  const createImageShapeFromFile = async (file: File): Promise<ImageShape> => {
+  const createImageShapeFromFile = async (file: File, source?: ImageSource): Promise<ImageShape> => {
     const dataURL = await new Promise<string>((resolve) => {
       const reader = new FileReader()
       reader.onload = (e) => resolve(e.target?.result as string)
@@ -99,22 +100,88 @@ function App() {
       image.src = dataURL
     })
     
-    // If canvas not initialized, set canvas size based on image
+    // Determine source if not provided
+    let imageSource = source;
+    if (!imageSource) {
+      if (isPDFSourcedImage(file.name)) {
+        imageSource = ImageSource.PDF;
+      } else if (isLikelyScreenshot({ width: img.width, height: img.height })) {
+        imageSource = ImageSource.SCREENSHOT;
+      } else {
+        imageSource = ImageSource.UPLOAD;
+      }
+    }
+    
+    // Define canvas constraints
+    const MAX_INITIAL_CANVAS_WIDTH = 1400;
+    const MAX_INITIAL_CANVAS_HEIGHT = 900;
+    const MIN_CANVAS_WIDTH = 800;
+    const MIN_CANVAS_HEIGHT = 600;
+    
+    // Determine the effective canvas size for scaling
+    let effectiveCanvasSize = canvasSize;
+    if (!effectiveCanvasSize) {
+      // Use the maximum canvas size for scaling calculations
+      effectiveCanvasSize = {
+        width: MAX_INITIAL_CANVAS_WIDTH,
+        height: MAX_INITIAL_CANVAS_HEIGHT
+      };
+    }
+    
+    // Calculate scaled dimensions based on source
+    const scaledDimensions = calculateScaledDimensions(
+      { width: img.width, height: img.height },
+      effectiveCanvasSize,
+      imageSource,
+      CANVAS_PADDING
+    );
+    
+    // If canvas not initialized, set canvas size based on scaled image
     if (!isCanvasInitialized) {
+      // Calculate canvas size based on scaled image
+      let canvasWidth = scaledDimensions.width + (CANVAS_PADDING * 2);
+      let canvasHeight = scaledDimensions.height + (CANVAS_PADDING * 2);
+      
+      // Apply maximum limits
+      canvasWidth = Math.min(canvasWidth, MAX_INITIAL_CANVAS_WIDTH);
+      canvasHeight = Math.min(canvasHeight, MAX_INITIAL_CANVAS_HEIGHT);
+      
+      // Apply minimum limits
+      canvasWidth = Math.max(canvasWidth, MIN_CANVAS_WIDTH);
+      canvasHeight = Math.max(canvasHeight, MIN_CANVAS_HEIGHT);
+      
       setCanvasSize({
-        width: img.width + (CANVAS_PADDING * 2),
-        height: img.height + (CANVAS_PADDING * 2)
+        width: canvasWidth,
+        height: canvasHeight
       })
       setIsCanvasInitialized(true)
+    }
+    
+    // Center the image if canvas was capped
+    let imageX = CANVAS_PADDING;
+    let imageY = CANVAS_PADDING;
+    
+    if (canvasSize) {
+      // Center horizontally if image is smaller than available space
+      const availableWidth = canvasSize.width - (CANVAS_PADDING * 2);
+      if (scaledDimensions.width < availableWidth) {
+        imageX = CANVAS_PADDING + (availableWidth - scaledDimensions.width) / 2;
+      }
+      
+      // Center vertically if image is smaller than available space
+      const availableHeight = canvasSize.height - (CANVAS_PADDING * 2);
+      if (scaledDimensions.height < availableHeight) {
+        imageY = CANVAS_PADDING + (availableHeight - scaledDimensions.height) / 2;
+      }
     }
     
     const imageShape: ImageShape = {
       id: `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       type: DrawingTool.IMAGE,
-      x: CANVAS_PADDING,
-      y: CANVAS_PADDING,
-      width: img.width,
-      height: img.height,
+      x: imageX,
+      y: imageY,
+      width: scaledDimensions.width,
+      height: scaledDimensions.height,
       imageData: dataURL,
       style: {
         stroke: 'transparent',
@@ -234,7 +301,7 @@ function App() {
       const file = new File([blob], fileName, { type: 'image/png' })
       
       // Create image shape from the PDF page
-      const imageShape = await createImageShapeFromFile(file)
+      const imageShape = await createImageShapeFromFile(file, ImageSource.PDF)
       
       // Clear PDF state
       setPdfFile(null)
@@ -599,7 +666,7 @@ function App() {
             const file = new File([blob], 'pasted-image.png', { type: blob.type });
             
             // Create image shape from pasted file
-            const imageShape = await createImageShapeFromFile(file);
+            const imageShape = await createImageShapeFromFile(file, ImageSource.PASTE);
             
             // If pasting into existing canvas, offset the position
             if (isCanvasInitialized && shapes.length > 0) {
