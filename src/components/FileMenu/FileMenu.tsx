@@ -15,11 +15,14 @@ interface FileMenuProps {
   initialFileId?: string | null;
   onSaveStatusChange?: (status: 'saved' | 'saving' | 'unsaved' | 'error', lastSaved: Date | null) => void;
   onNew?: () => void;
-  onAddImage?: () => void;
   onExport?: () => void;
+  showGrid?: boolean;
+  onToggleGrid?: () => void;
+  canvasBackground?: string;
+  onChangeBackground?: (color: string) => void;
 }
 
-export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId, onSaveStatusChange, onNew, onAddImage, onExport }) => {
+export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId, onSaveStatusChange, onNew, onExport, showGrid, onToggleGrid, canvasBackground, onChangeBackground }) => {
   // Try to use auth context, but handle case where it's not available
   let authContext;
   try {
@@ -258,39 +261,23 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
         <button
         onClick={() => setShowDropdown(!showDropdown)}
         style={{
-          padding: '0.25rem 0.75rem',
+          padding: '0.25rem 0.5rem',
           backgroundColor: 'transparent',
-          border: '1px solid #ddd',
-          borderRadius: '4px',
+          border: '1px solid transparent',
           cursor: 'pointer',
-          fontSize: '0.75rem',
-          color: '#666',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.25rem'
+          fontSize: '0.8125rem',
+          color: '#202124',
+          fontWeight: '400',
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = '#f5f5f5';
+          e.currentTarget.style.backgroundColor = '#f1f3f4';
+          e.currentTarget.style.borderRadius = '4px';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.backgroundColor = 'transparent';
         }}
       >
-        📁 File
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          style={{
-            transform: showDropdown ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 0.2s'
-          }}
-        >
-          <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
+        File
       </button>
 
       {showDropdown && (
@@ -441,34 +428,6 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
             <span style={{ fontSize: '0.625rem', color: '#999' }}>Ctrl+O</span>
           </button>
 
-          {onAddImage && (
-            <>
-              <button
-                onClick={() => {
-                  onAddImage();
-                  setShowDropdown(false);
-                }}
-                style={{
-                  width: '100%',
-                  padding: '0.5rem 0.75rem',
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  fontSize: '0.75rem',
-                  color: '#333'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#f5f5f5';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                Add Image...
-              </button>
-            </>
-          )}
 
           {onExport && (
             <>
@@ -532,6 +491,84 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
           >
             Share...
           </button>
+          
+          {(onToggleGrid || onChangeBackground) && (
+            <>
+              <div style={{ height: '1px', backgroundColor: '#eee', margin: '0.25rem 0' }} />
+              
+              <div style={{ padding: '0.25rem 0.5rem', fontSize: '0.625rem', color: '#999', textTransform: 'uppercase' }}>
+                Settings
+              </div>
+              
+              {onToggleGrid && (
+                <button
+                  onClick={() => {
+                    onToggleGrid();
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem 0.75rem',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    fontSize: '0.75rem',
+                    color: '#333',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#f5f5f5';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <span>Show Grid</span>
+                  <input
+                    type="checkbox"
+                    checked={showGrid}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      onToggleGrid();
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  />
+                </button>
+              )}
+              
+              {onChangeBackground && (
+                <div
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '0.75rem',
+                    color: '#333',
+                  }}
+                >
+                  <span>Background</span>
+                  <input
+                    type="color"
+                    value={canvasBackground || '#ffffff'}
+                    onChange={(e) => onChangeBackground(e.target.value)}
+                    title="Canvas Background Color"
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      padding: '2px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      backgroundColor: canvasBackground || '#ffffff',
+                    }}
+                  />
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

@@ -304,7 +304,7 @@ export function useSelectionMachine() {
       if (shape) {
         // Store full shape data for complex shapes
         if ('points' in shape) {
-          shapeData.set(id, { points: [...shape.points] });
+          shapeData.set(id, { points: Array.isArray(shape.points) ? [...shape.points] : [] });
         }
         
         if ('x' in shape && 'y' in shape) {

@@ -2,6 +2,12 @@ import type { Shape } from '@/types/drawing';
 
 declare const gapi: any;
 
+declare global {
+  interface Window {
+    gapi: any;
+  }
+}
+
 interface ProjectMetadata {
   createdAt: string;
   updatedAt: string;

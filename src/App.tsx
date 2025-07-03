@@ -10,11 +10,11 @@ import {
 import { ImageUploader } from '@/components/ImageUploader'
 import { DrawingToolbar } from '@/components/Toolbar'
 import { PropertiesSection } from '@/components/Toolbar/PropertiesSection'
-import { SettingsMenu } from '@/components/Toolbar/SettingsMenu'
 import { DrawingLayer } from '@/components/Canvas/DrawingLayer'
 import { TextInputDialog } from '@/components/TextInputDialog'
 import { UserMenu } from '@/components/Auth/UserMenu'
 import { FileMenu } from '@/components/FileMenu/FileMenu'
+import { EditMenu } from '@/components/EditMenu'
 import { SaveIndicator } from '@/components/SaveIndicator'
 import { PDFViewer } from '@/components/PDFViewer/PDFViewer'
 import { useHistory } from '@/hooks/useHistory'
@@ -38,7 +38,7 @@ function App() {
   const [showGrid, setShowGrid] = useState(true)
   const [canvasBackground, setCanvasBackground] = useState('#ffffff')
   const stageRef = useRef<Konva.Stage | null>(null)
-  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool, deleteSelected, updateStyle } = useDrawing()
+  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, selectMultiple, setActiveTool, deleteSelected, updateStyle } = useDrawing()
   const { state: drawingState, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes } = useDrawingContext()
   const [zoomLevel, setZoomLevel] = useState(1) // 1 = 100%
   const [isLoadingSharedFile, setIsLoadingSharedFile] = useState(false)
@@ -805,110 +805,137 @@ function App() {
         flexDirection: 'column',
         overflow: 'hidden'
       }}>
-      {/* Header */}
-      <header style={{
-        backgroundColor: '#ffffff',
-        borderBottom: '1px solid #e0e0e0',
-        padding: '0 1rem',
-        height: '40px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-      }}>
-        {/* Left: Logo and File Name */}
-        <div style={{ 
-          display: 'flex', 
+      {/* Header - Google Docs Style */}
+      <div style={{ backgroundColor: '#ffffff', borderBottom: '1px solid #e0e0e0', display: 'flex' }}>
+        {/* Logo spanning both rows */}
+        <div style={{
+          display: 'flex',
           alignItems: 'center',
-          gap: '0.5rem',
-          position: 'relative'
+          padding: '0 0.5rem',
         }}>
-          <Palette size={20} color="#4a90e2" />
-          <h1 style={{ 
-            margin: 0, 
-            fontSize: '1rem',
-            fontWeight: '600',
-            color: '#333'
-          }}>
-            {loadedFileId ? 'Saved Project' : 'New Project'}
-          </h1>
-          <SaveIndicator status={saveStatus} lastSaved={lastSaved} />
+          <Palette size={32} color="#4a90e2" />
         </div>
+        
+        {/* Center section with two rows */}
+        <div style={{ flex: 1 }}>
+          {/* Top Row: Filename and actions */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            height: '24px',
+            padding: '0.375rem 0.5rem 0'
+          }}>
+            {/* File Name and save indicator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+              <h1 style={{ 
+                margin: 0, 
+                fontSize: '1rem',
+                fontWeight: '400',
+                color: '#202124',
+                lineHeight: '1'
+              }}>
+                {loadedFileId ? 'Saved Project' : 'Untitled'}
+              </h1>
+              <SaveIndicator status={saveStatus} lastSaved={lastSaved} />
+            </div>
+          </div>
 
-        {/* Right: Quick Actions */}
-        <div style={{ 
-          display: 'flex', 
-          gap: '0.5rem',
-          alignItems: 'center'
-        }}>
-          <FileMenu 
-            stageRef={stageRef} 
-            imageData={null} 
-            initialFileId={loadedFileId}
-            onSaveStatusChange={(status, saved) => {
-              setSaveStatus(status);
-              setLastSaved(saved);
-            }}
-            onNew={() => {
-              clearSelection();
-              setShapes([]);
-              setLoadedFileId(null);
-              setSaveStatus('saved');
-              setCanvasSize(null);
-              setIsCanvasInitialized(false);
-            }}
-            onAddImage={() => {
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.accept = 'image/*';
-              input.onchange = async (e) => {
-                const file = (e.target as HTMLInputElement).files?.[0];
-                if (file) {
-                  await handleImageUpload(file);
-                }
-              };
-              input.click();
-            }}
-            onExport={handleDownloadImage}
-          />
-          {isCanvasInitialized && (
-            <>
-              <button
-                onClick={() => {
+          {/* Menu Bar Row */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            height: '28px',
+            padding: '0 0 0.125rem',
+          }}>
+            <FileMenu 
+              stageRef={stageRef} 
+              imageData={null} 
+              initialFileId={loadedFileId}
+              onSaveStatusChange={(status, saved) => {
+                setSaveStatus(status);
+                setLastSaved(saved);
+              }}
+              onNew={() => {
+                clearSelection();
+                setShapes([]);
+                setLoadedFileId(null);
+                setSaveStatus('saved');
+                setCanvasSize(null);
+                setIsCanvasInitialized(false);
+              }}
+              onExport={handleDownloadImage}
+              showGrid={showGrid}
+              onToggleGrid={() => setShowGrid(!showGrid)}
+              canvasBackground={canvasBackground}
+              onChangeBackground={setCanvasBackground}
+            />
+            
+            {isCanvasInitialized && (
+              <EditMenu
+                canUndo={canUndo}
+                canRedo={canRedo}
+                onUndo={undo}
+                onRedo={redo}
+                canCopy={selectedShapeIds.length > 0 || isCanvasInitialized}
+                onCopy={() => {
                   if (selectedShapeIds.length > 0) {
                     copySelectedShapes();
                   } else {
                     handleCopyToClipboard();
                   }
                 }}
-                title={selectedShapeIds.length > 0 ? "Copy Shapes (Ctrl+C)" : "Copy Canvas (Ctrl+C)"}
-                style={{
-                  padding: '0.25rem 0.75rem',
-                  backgroundColor: 'transparent',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '0.75rem',
-                  color: '#666',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.25rem'
+                hasSelection={selectedShapeIds.length > 0}
+                onDelete={deleteSelected}
+                onSelectAll={() => {
+                  const allShapeIds = shapes.map(s => s.id);
+                  selectMultiple(allShapeIds);
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#f5f5f5';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                <Copy size={14} />
-                <span>Copy</span>
-              </button>
-            </>
+              />
+            )}
+          </div>
+        </div>
+        
+        {/* User profile spanning both rows */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 0.5rem',
+          gap: '0.5rem'
+        }}>
+          {isCanvasInitialized && (
+            <button
+              onClick={() => {
+                if (selectedShapeIds.length > 0) {
+                  copySelectedShapes();
+                } else {
+                  handleCopyToClipboard();
+                }
+              }}
+              title={selectedShapeIds.length > 0 ? "Copy Shapes" : "Copy to clipboard"}
+              style={{
+                padding: '0.375rem',
+                backgroundColor: 'transparent',
+                border: '1px solid #ddd',
+                cursor: 'pointer',
+                color: '#5f6368',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#f1f3f4';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              <Copy size={18} />
+            </button>
           )}
           <UserMenu />
         </div>
-      </header>
+      </div>
 
       {/* Horizontal Toolbar */}
       {isCanvasInitialized && (
@@ -921,65 +948,6 @@ function App() {
           gap: '0.5rem',
           boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
         }}>
-          {/* Undo/Redo Group */}
-          <div style={{
-            display: 'flex',
-            gap: '0.125rem',
-            paddingRight: '0.5rem',
-            borderRight: '1px solid #e0e0e0'
-          }}>
-            <button
-              onClick={undo}
-              disabled={!canUndo}
-              title="Undo (Ctrl+Z)"
-              style={{
-                padding: '0.25rem 0.375rem',
-                backgroundColor: canUndo ? 'transparent' : 'transparent',
-                border: '1px solid transparent',
-                borderRadius: '4px',
-                cursor: canUndo ? 'pointer' : 'not-allowed',
-                opacity: canUndo ? 1 : 0.3,
-                display: 'flex',
-                alignItems: 'center',
-                fontSize: '1rem',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                if (canUndo) e.currentTarget.style.backgroundColor = '#f5f5f5';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
-            >
-              <Undo2 size={16} />
-            </button>
-            <button
-              onClick={redo}
-              disabled={!canRedo}
-              title="Redo (Ctrl+Y)"
-              style={{
-                padding: '0.25rem 0.375rem',
-                backgroundColor: 'transparent',
-                border: '1px solid transparent',
-                borderRadius: '4px',
-                cursor: canRedo ? 'pointer' : 'not-allowed',
-                opacity: canRedo ? 1 : 0.3,
-                display: 'flex',
-                alignItems: 'center',
-                fontSize: '1rem',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                if (canRedo) e.currentTarget.style.backgroundColor = '#f5f5f5';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
-            >
-              <Redo2 size={16} />
-            </button>
-          </div>
-
           {/* Drawing Tools */}
           <div style={{ 
             display: 'flex', 
@@ -1006,31 +974,6 @@ function App() {
             alignItems: 'center',
             marginLeft: 'auto'
           }}>
-            {/* Settings Menu */}
-            <SettingsMenu
-              showGrid={showGrid}
-              onToggleGrid={() => setShowGrid(!showGrid)}
-              canvasBackground={canvasBackground}
-              onChangeBackground={setCanvasBackground}
-              measurementCalibration={drawingState.measurementCalibration}
-              onStartCalibration={() => {
-                if (zoomLevel !== 1) {
-                  setZoomLevel(1);
-                }
-                setActiveTool(DrawingTool.CALIBRATE);
-                measurement.startCalibration();
-              }}
-              onChangeUnit={(unit) => {
-                measurement.changeUnit(unit);
-                if (drawingState.measurementCalibration.pixelsPerUnit !== null) {
-                  setMeasurementCalibration({
-                    ...drawingState.measurementCalibration,
-                    unit: unit
-                  });
-                }
-              }}
-              zoomLevel={zoomLevel}
-            />
 
             <div style={{
               display: 'flex',

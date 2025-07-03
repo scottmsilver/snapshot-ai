@@ -146,40 +146,85 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
         ...style
       }}>
         {tools.map(({ tool, icon: Icon, label, shortcut }) => {
-          const isDisabled = tool === DrawingTool.MEASURE && !isCalibrated;
-          const tooltipText = isDisabled 
-            ? 'Set scale first to use measurements' 
+          const tooltipText = tool === DrawingTool.MEASURE && !isCalibrated
+            ? 'Click to set scale for measurements' 
             : `${label} (${shortcut})`;
           
+          // Handle Measure tool specially - show with dropdown if calibrated
+          if (tool === DrawingTool.MEASURE) {
+            return (
+              <div key={tool} style={{ position: 'relative', display: 'flex' }}>
+                <button
+                  title={tooltipText}
+                  onClick={() => {
+                    if (!isCalibrated) {
+                      // If not calibrated, switch to CALIBRATE tool
+                      setActiveTool(DrawingTool.CALIBRATE);
+                    } else {
+                      // If calibrated, use MEASURE tool
+                      setActiveTool(DrawingTool.MEASURE);
+                    }
+                  }}
+                  style={{
+                    padding: '0.375rem',
+                    backgroundColor: activeTool === tool ? '#e3f2fd' : 'transparent',
+                    border: activeTool === tool ? '1px solid #2196f3' : '1px solid transparent',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.875rem',
+                    color: activeTool === tool ? '#1976d2' : '#666',
+                    transition: 'all 0.2s',
+                    width: '32px',
+                    height: '32px',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (activeTool !== tool) {
+                      e.currentTarget.style.backgroundColor = '#f5f5f5';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeTool !== tool) {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }
+                  }}
+                >
+                  <Icon size={18} />
+                </button>
+              </div>
+            );
+          }
+          
+          // Regular tool buttons
           return (
             <button
               key={tool}
               title={tooltipText}
-              onClick={() => !isDisabled && setActiveTool(tool)}
-              disabled={isDisabled}
+              onClick={() => setActiveTool(tool)}
               style={{
                 padding: '0.375rem',
                 backgroundColor: activeTool === tool ? '#e3f2fd' : 'transparent',
                 border: activeTool === tool ? '1px solid #2196f3' : '1px solid transparent',
                 borderRadius: '4px',
-                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: '0.875rem',
-                color: isDisabled ? '#ccc' : (activeTool === tool ? '#1976d2' : '#666'),
+                color: activeTool === tool ? '#1976d2' : '#666',
                 transition: 'all 0.2s',
                 width: '32px',
                 height: '32px',
-                opacity: isDisabled ? 0.5 : 1
               }}
               onMouseEnter={(e) => {
-                if (!isDisabled && activeTool !== tool) {
+                if (activeTool !== tool) {
                   e.currentTarget.style.backgroundColor = '#f5f5f5';
                 }
               }}
               onMouseLeave={(e) => {
-                if (!isDisabled && activeTool !== tool) {
+                if (activeTool !== tool) {
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }
               }}

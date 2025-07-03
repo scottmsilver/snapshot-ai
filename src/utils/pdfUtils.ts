@@ -33,7 +33,7 @@ export async function loadPDFDocument(file: File): Promise<PDFDocumentProxy> {
     });
     
     // Add progress tracking
-    loadingTask.onProgress = function(progress) {
+    loadingTask.onProgress = function(progress: { loaded: number; total: number }) {
       console.log('PDF loading progress:', Math.round(progress.loaded / progress.total * 100) + '%');
     };
     

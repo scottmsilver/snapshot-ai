@@ -57,6 +57,16 @@ export const AnimatedButton: React.FC<AnimatedButtonProps> = ({
     ...style,
   };
 
+  const { 
+    onClick,
+    onMouseEnter,
+    onMouseLeave,
+    className,
+    title,
+    type,
+    ...otherProps 
+  } = props;
+  
   return (
     <motion.button
       whileHover={disabled ? {} : { scale: 1.02 }}
@@ -64,7 +74,12 @@ export const AnimatedButton: React.FC<AnimatedButtonProps> = ({
       transition={{ type: 'spring', stiffness: 400, damping: 17 }}
       style={baseStyle}
       disabled={disabled}
-      {...props}
+      onClick={onClick}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className={className}
+      title={title}
+      type={type}
     >
       {children}
     </motion.button>

@@ -372,13 +372,8 @@ export const useDrawing = () => {
         };
         
         // Clear drawing state
-        setDrawingState({
-          ...state,
-          isDrawing: false,
-          tempPoints: [],
-          startPoint: null,
-          lastPoint: null,
-        });
+        setDrawingState(false, null, null);
+        setTempPoints([]);
         
         // Trigger a custom event with the bounds after a small delay
         // This ensures the drawing state is cleared and mouse events are done

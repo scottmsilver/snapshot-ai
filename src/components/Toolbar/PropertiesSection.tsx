@@ -245,17 +245,7 @@ export const PropertiesSection: React.FC<PropertiesSectionProps> = ({
 
   // Don't show properties for SELECT tool with no selection
   if (activeTool === DrawingTool.SELECT && !hasSelection) {
-    return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 16px',
-        fontSize: '0.75rem',
-        color: '#999',
-      }}>
-        Click on shapes to select
-      </div>
-    );
+    return null;
   }
 
   // Minimum width needed for each control
