@@ -66,15 +66,18 @@ export const UserMenu: React.FC = () => {
     <div style={{ position: 'relative' }}>
       <button
         onClick={() => setShowDropdown(!showDropdown)}
+        title={user?.name || 'User menu'}
         style={{
-          padding: '0.25rem 0.5rem',
+          padding: '0.25rem',
           backgroundColor: 'transparent',
           border: '1px solid #ddd',
-          borderRadius: '4px',
+          borderRadius: '50%',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
-          gap: '0.5rem'
+          justifyContent: 'center',
+          width: '32px',
+          height: '32px'
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = '#f5f5f5';
@@ -111,23 +114,6 @@ export const UserMenu: React.FC = () => {
             {user?.name?.[0]?.toUpperCase() || 'U'}
           </div>
         )}
-        <span style={{ fontSize: '0.75rem', color: '#666' }}>
-          {user?.email}
-        </span>
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          style={{
-            transform: showDropdown ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 0.2s'
-          }}
-        >
-          <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
       </button>
 
       {showDropdown && (
