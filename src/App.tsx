@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Stage, Layer } from 'react-konva'
+import { Stage, Layer, Rect, Line } from 'react-konva'
 import Konva from 'konva'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
@@ -32,6 +32,8 @@ function App() {
   const CANVAS_PADDING = 100
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null)
   const [isCanvasInitialized, setIsCanvasInitialized] = useState(false)
+  const [showGrid, setShowGrid] = useState(true)
+  const [canvasBackground, setCanvasBackground] = useState('#ffffff')
   const stageRef = useRef<Konva.Stage | null>(null)
   const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool, deleteSelected, updateStyle } = useDrawing()
   const { state: drawingState, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes } = useDrawingContext()
@@ -494,6 +496,75 @@ function App() {
       }
     }
   }, [currentIndex, getCurrentState, setShapes, drawingState.shapes])
+
+  // Handle paste events for images
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      // Don't handle paste if user is typing in an input
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          
+          const blob = item.getAsFile();
+          if (!blob) continue;
+
+          try {
+            // Convert blob to File
+            const file = new File([blob], 'pasted-image.png', { type: blob.type });
+            
+            // Create image shape from pasted file
+            const imageShape = await createImageShapeFromFile(file);
+            
+            // If pasting into existing canvas, offset the position
+            if (isCanvasInitialized && shapes.length > 0) {
+              // Find a good position that doesn't overlap too much
+              let offsetX = 50;
+              let offsetY = 50;
+              
+              // Check if there are recent shapes at the default position
+              const recentShapes = shapes.slice(-3);
+              const hasOverlap = recentShapes.some(s => 
+                'x' in s && 'y' in s && 
+                Math.abs(s.x - CANVAS_PADDING) < 50 && 
+                Math.abs(s.y - CANVAS_PADDING) < 50
+              );
+              
+              if (hasOverlap) {
+                // Offset based on number of shapes
+                offsetX = 50 + (shapes.length % 5) * 30;
+                offsetY = 50 + (shapes.length % 5) * 30;
+              }
+              
+              imageShape.x = CANVAS_PADDING + offsetX;
+              imageShape.y = CANVAS_PADDING + offsetY;
+            }
+            
+            addShape(imageShape);
+            setActiveTool(DrawingTool.SELECT);
+            selectShape(imageShape.id);
+          } catch (error) {
+            console.error('Failed to paste image:', error);
+          }
+          
+          // Only handle the first image
+          break;
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, [isCanvasInitialized, shapes, addShape, setActiveTool, selectShape]);
   
   // Handle new measurement and calibration lines
   useEffect(() => {
@@ -809,6 +880,50 @@ function App() {
             <DrawingToolbar horizontal={true} selectedShapes={selectedShapes} />
           </div>
 
+          {/* Add Image Button */}
+          <div style={{
+            paddingLeft: '0.5rem',
+            borderLeft: '1px solid #e0e0e0'
+          }}>
+            <button
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.onchange = async (e) => {
+                  const file = (e.target as HTMLInputElement).files?.[0];
+                  if (file) {
+                    await handleImageUpload(file);
+                  }
+                };
+                input.click();
+              }}
+              title="Add Image"
+              style={{
+                padding: '0.375rem 0.75rem',
+                backgroundColor: 'transparent',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                color: '#666',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                height: '32px'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#f5f5f5';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              <FileText size={14} />
+              Add Image
+            </button>
+          </div>
+
           {/* Color Picker */}
           {isCanvasInitialized && (
             <div style={{
@@ -1074,6 +1189,63 @@ function App() {
               <ZoomIn size={16} />
             </button>
           </div>
+
+          {/* Canvas Options */}
+          <div style={{
+            display: 'flex',
+            gap: '0.5rem',
+            alignItems: 'center',
+            paddingLeft: '0.5rem',
+            borderLeft: '1px solid #e0e0e0'
+          }}>
+            {/* Grid Toggle */}
+            <button
+              onClick={() => setShowGrid(!showGrid)}
+              title={showGrid ? "Hide Grid" : "Show Grid"}
+              style={{
+                padding: '0.25rem 0.5rem',
+                backgroundColor: showGrid ? '#e3f2fd' : 'transparent',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                color: '#666',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = showGrid ? '#e3f2fd' : '#f5f5f5';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = showGrid ? '#e3f2fd' : 'transparent';
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18" />
+              </svg>
+              Grid
+            </button>
+
+            {/* Background Color */}
+            <div style={{ position: 'relative' }}>
+              <input
+                type="color"
+                value={canvasBackground}
+                onChange={(e) => setCanvasBackground(e.target.value)}
+                title="Canvas Background Color"
+                style={{
+                  width: '32px',
+                  height: '28px',
+                  padding: '2px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: canvasBackground
+                }}
+              />
+            </div>
+          </div>
         </div>
       )}
 
@@ -1300,7 +1472,51 @@ function App() {
                   cursor: activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'
                 }}
               >
-                {/* Canvas background - no longer needed as shapes include images */}
+                {/* Canvas background layer */}
+                <Layer>
+                  {/* Background color */}
+                  <Rect
+                    x={0}
+                    y={0}
+                    width={canvasSize.width}
+                    height={canvasSize.height}
+                    fill={canvasBackground}
+                  />
+                  
+                  {/* Optional grid */}
+                  {showGrid && (() => {
+                    const gridSize = 20;
+                    const lines = [];
+                    
+                    // Vertical lines
+                    for (let x = 0; x <= canvasSize.width; x += gridSize) {
+                      lines.push(
+                        <Line
+                          key={`v-${x}`}
+                          points={[x, 0, x, canvasSize.height]}
+                          stroke="#e0e0e0"
+                          strokeWidth={1}
+                          listening={false}
+                        />
+                      );
+                    }
+                    
+                    // Horizontal lines
+                    for (let y = 0; y <= canvasSize.height; y += gridSize) {
+                      lines.push(
+                        <Line
+                          key={`h-${y}`}
+                          points={[0, y, canvasSize.width, y]}
+                          stroke="#e0e0e0"
+                          strokeWidth={1}
+                          listening={false}
+                        />
+                      );
+                    }
+                    
+                    return lines;
+                  })()}
+                </Layer>
                 
                 {/* Drawing Layer for annotations */}
                 <DrawingLayer 
