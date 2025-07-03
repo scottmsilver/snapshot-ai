@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Stage, Layer, Image as KonvaImage } from 'react-konva'
+import { Stage, Layer } from 'react-konva'
 import Konva from 'konva'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
@@ -16,26 +16,24 @@ import { UserMenu } from '@/components/Auth/UserMenu'
 import { FileMenu } from '@/components/FileMenu/FileMenu'
 import { SaveIndicator } from '@/components/SaveIndicator'
 import { PDFViewer } from '@/components/PDFViewer/PDFViewer'
-import { useImage } from '@/hooks/useImage'
 import { useHistory } from '@/hooks/useHistory'
 import { useDrawing } from '@/hooks/useDrawing'
 import { useDrawingContext } from '@/contexts/DrawingContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useMeasurement } from '@/hooks/useMeasurement'
-import { calculateImageFit } from '@/utils/imageHelpers'
 import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils'
-import { DrawingTool, type Point, type TextShape, type MeasurementLineShape } from '@/types/drawing'
+import { DrawingTool, type Point, type TextShape, type MeasurementLineShape, type ImageShape } from '@/types/drawing'
 import { googleDriveService, type ProjectData } from '@/services/googleDrive'
 import { CalibrationDialog } from '@/components/Tools/CalibrationDialog'
 import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurementUtils'
 import type { MeasurementUnit } from '@/utils/measurementUtils'
 
 function App() {
-  const [stageSize, setStageSize] = useState({ width: 800, height: 600 })
+  const CANVAS_PADDING = 100
+  const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null)
+  const [isCanvasInitialized, setIsCanvasInitialized] = useState(false)
   const stageRef = useRef<Konva.Stage | null>(null)
-  const { imageData, loadImage, clearImage, loadImageFromData } = useImage()
-  const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
-  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool, deleteSelected } = useDrawing()
+  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool, deleteSelected, updateStyle } = useDrawing()
   const { state: drawingState, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes } = useDrawingContext()
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true)
   const [zoomLevel, setZoomLevel] = useState(1) // 1 = 100%
@@ -84,6 +82,52 @@ function App() {
     // Auth context not available
   }
 
+  // Helper function to create IMAGE shape from file
+  const createImageShapeFromFile = async (file: File): Promise<ImageShape> => {
+    const dataURL = await new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = (e) => resolve(e.target?.result as string)
+      reader.readAsDataURL(file)
+    })
+    
+    const img = await new Promise<HTMLImageElement>((resolve) => {
+      const image = new window.Image()
+      image.onload = () => resolve(image)
+      image.src = dataURL
+    })
+    
+    // If canvas not initialized, set canvas size based on image
+    if (!isCanvasInitialized) {
+      setCanvasSize({
+        width: img.width + (CANVAS_PADDING * 2),
+        height: img.height + (CANVAS_PADDING * 2)
+      })
+      setIsCanvasInitialized(true)
+    }
+    
+    const imageShape: ImageShape = {
+      id: `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type: DrawingTool.IMAGE,
+      x: CANVAS_PADDING,
+      y: CANVAS_PADDING,
+      width: img.width,
+      height: img.height,
+      imageData: dataURL,
+      style: {
+        stroke: '#ddd',
+        strokeWidth: 0,
+        opacity: 1
+      },
+      visible: true,
+      locked: false,
+      zIndex: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    
+    return imageShape
+  }
+
   // Handle shared file loading from URL parameters
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -102,17 +146,37 @@ function App() {
           })
           .then((projectData: ProjectData) => {
             
-            // Load the image
-            const imageToLoad = {
-              src: projectData.image.data,
-              name: projectData.image.name || 'Shared Image',
-              width: projectData.image.width || 0,
-              height: projectData.image.height || 0
-            };
-            loadImageFromData(projectData.image.data, projectData.image.name || 'Shared Image');
+            // For now, skip loading old format files with background images
+            if (projectData.image && projectData.image.data) {
+              console.warn('This project uses the old format with background images. Please re-save it in the new format.');
+              setSharedFileError('This project uses an old format. Please open it in an older version and re-save.');
+              return;
+            }
             
             // Load the shapes
             setShapes(projectData.shapes || []);
+            
+            // Initialize canvas if we have shapes
+            if (projectData.shapes && projectData.shapes.length > 0) {
+              // Find bounds of all shapes to set canvas size
+              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+              projectData.shapes.forEach(shape => {
+                if ('x' in shape && 'y' in shape && 'width' in shape && 'height' in shape) {
+                  minX = Math.min(minX, shape.x);
+                  minY = Math.min(minY, shape.y);
+                  maxX = Math.max(maxX, shape.x + shape.width);
+                  maxY = Math.max(maxY, shape.y + shape.height);
+                }
+              });
+              
+              if (isFinite(minX)) {
+                setCanvasSize({
+                  width: maxX + CANVAS_PADDING,
+                  height: maxY + CANVAS_PADDING
+                });
+                setIsCanvasInitialized(true);
+              }
+            }
             
             // Save the file ID for future saves
             setLoadedFileId(fileId);
@@ -132,76 +196,54 @@ function App() {
           });
       }
     }
-  }, [authContext?.isAuthenticated, authContext?.getAccessToken, loadImageFromData, setShapes]);
+  }, [authContext?.isAuthenticated, authContext?.getAccessToken, setShapes]);
 
-  // Load image when imageData changes and update stage size
-  useEffect(() => {
-    if (imageData) {
-      const img = new window.Image()
-      img.src = imageData.src
-      img.onload = () => {
-        setKonvaImage(img)
-        // Calculate appropriate stage size - don't make it too large for big images
-        const maxStageWidth = 2000;
-        const maxStageHeight = 2000;
-        const minStageWidth = 800;
-        const minStageHeight = 600;
-        
-        // Use image dimensions but cap at max values
-        const width = Math.min(maxStageWidth, Math.max(minStageWidth, img.width));
-        const height = Math.min(maxStageHeight, Math.max(minStageHeight, img.height));
-        
-        setStageSize({ width, height })
-        
-        // Reset zoom if image is very large
-        if (img.width > maxStageWidth || img.height > maxStageHeight) {
-          setZoomLevel(0.75);
-        } else {
-          setZoomLevel(1);
-        }
-      }
-    } else {
-      setKonvaImage(null)
-      setStageSize({ width: 800, height: 600 })
-      setZoomLevel(1)
-    }
-  }, [imageData])
 
   const handleImageUpload = async (file: File) => {
-    await loadImage(file)
-    setPdfFile(null) // Clear any PDF state
-    setPdfPageInfo(null)
+    try {
+      const imageShape = await createImageShapeFromFile(file)
+      addShape(imageShape)
+      setPdfFile(null) // Clear any PDF state
+      setPdfPageInfo(null)
+      // Switch to select tool to allow immediate manipulation
+      if (activeTool !== DrawingTool.SELECT) {
+        setActiveTool(DrawingTool.SELECT)
+      }
+      selectShape(imageShape.id)
+    } catch (error) {
+      console.error('Failed to load image:', error)
+    }
   }
   
   const handlePDFUpload = (file: File) => {
     console.log('PDF Upload:', file.name, file.type, file.size)
     console.log('Setting pdfFile state...')
     setPdfFile(file)
-    clearImage() // Clear any existing image
-    setKonvaImage(null) // Also clear konva image
     console.log('PDF state updated')
   }
   
-  const handlePDFPageLoad = (image: HTMLImageElement, pageInfo: { current: number; total: number }) => {
+  const handlePDFPageLoad = async (image: HTMLImageElement, pageInfo: { current: number; total: number }) => {
     console.log('PDF page loaded:', pageInfo)
     
-    // Convert the selected page to an image file and load it
-    fetch(image.src)
-      .then(res => res.blob())
-      .then(blob => {
-        const fileName = pdfFile ? `${pdfFile.name} - Page ${pageInfo.current}` : `pdf-page-${pageInfo.current}.png`
-        const file = new File([blob], fileName, { type: 'image/png' })
-        
-        // Load the page as a regular image
-        loadImage(file)
-        
-        // Clear PDF state so it works like a normal image
-        setPdfFile(null)
-        setPdfPageInfo(null)
-      })
-      .catch(err => {
-        console.error('Error converting PDF page to file:', err)
-      })
+    try {
+      // Convert the selected page to an image file
+      const res = await fetch(image.src)
+      const blob = await res.blob()
+      const fileName = pdfFile ? `${pdfFile.name} - Page ${pageInfo.current}` : `pdf-page-${pageInfo.current}.png`
+      const file = new File([blob], fileName, { type: 'image/png' })
+      
+      // Create image shape from the PDF page
+      const imageShape = await createImageShapeFromFile(file)
+      addShape(imageShape)
+      
+      // Clear PDF state and select the new image
+      setPdfFile(null)
+      setPdfPageInfo(null)
+      setActiveTool(DrawingTool.SELECT)
+      selectShape(imageShape.id)
+    } catch (err) {
+      console.error('Error converting PDF page to shape:', err)
+    }
   }
 
   // Track if we're in the middle of history navigation
@@ -571,11 +613,7 @@ function App() {
             fontWeight: '600',
             color: '#333'
           }}>
-            {imageData ? (
-              pdfPageInfo 
-                ? `${(imageData.name || 'PDF').replace(/\.pdf$/i, '')} - Page ${pdfPageInfo.current} of ${pdfPageInfo.total}`
-                : imageData.name || 'Untitled'
-            ) : 'No image loaded'}
+            {loadedFileId ? 'Saved Project' : 'New Project'}
           </h1>
           <SaveIndicator status={saveStatus} lastSaved={lastSaved} />
         </div>
@@ -588,25 +626,25 @@ function App() {
         }}>
           <FileMenu 
             stageRef={stageRef} 
-            imageData={imageData} 
+            imageData={null} 
             initialFileId={loadedFileId}
             onSaveStatusChange={(status, saved) => {
               setSaveStatus(status);
               setLastSaved(saved);
             }}
           />
-          {imageData && (
+          {isCanvasInitialized && (
             <>
               <button
                 onClick={() => {
-                  clearImage();
-                  setKonvaImage(null);
                   clearSelection();
                   setShapes([]);
                   setLoadedFileId(null);
                   setSaveStatus('saved');
+                  setCanvasSize(null);
+                  setIsCanvasInitialized(false);
                 }}
-                title="New Image"
+                title="New Project"
                 style={{
                   padding: '0.25rem 0.75rem',
                   backgroundColor: 'transparent',
@@ -692,7 +730,7 @@ function App() {
       </header>
 
       {/* Horizontal Toolbar */}
-      {imageData && (
+      {isCanvasInitialized && (
         <div style={{
           backgroundColor: '#ffffff',
           borderBottom: '1px solid #e0e0e0',
@@ -772,7 +810,7 @@ function App() {
           </div>
 
           {/* Color Picker */}
-          {imageData && (
+          {isCanvasInitialized && (
             <div style={{
               paddingLeft: '0.5rem',
               borderLeft: '1px solid #e0e0e0'
@@ -782,7 +820,7 @@ function App() {
                 fillColor={currentStyle.fill}
                 onStrokeChange={(color) => updateStyle({ stroke: color })}
                 onFillChange={(color) => updateStyle({ fill: color })}
-                showFill={[DrawingTool.RECTANGLE, DrawingTool.CIRCLE, DrawingTool.STAR].includes(activeTool)}
+                showFill={[DrawingTool.RECTANGLE, DrawingTool.CIRCLE, DrawingTool.STAR].includes(activeTool as any)}
               />
             </div>
           )}
@@ -1049,7 +1087,7 @@ function App() {
         minHeight: 0
       }}>
         {/* Properties Panel */}
-        {imageData && (
+        {isCanvasInitialized && (
           <aside style={{
             position: 'relative',
             transition: 'width 0.3s ease',
@@ -1220,17 +1258,17 @@ function App() {
                 </button>
               </div>
             </div>
-          ) : !imageData ? (
+          ) : !isCanvasInitialized ? (
             <div style={{ width: '100%', height: '100%' }}>
               <ImageUploader onImageUpload={handleImageUpload} onPDFUpload={handlePDFUpload} />
             </div>
-          ) : (
+          ) : canvasSize ? (
             <div style={{ 
               position: 'relative', 
               display: 'inline-block',
               padding: '20px',
-              width: stageSize.width * zoomLevel,
-              height: stageSize.height * zoomLevel
+              width: canvasSize.width * zoomLevel,
+              height: canvasSize.height * zoomLevel
             }}>
               {/* Show calibration instructions when CALIBRATE tool is active */}
               {activeTool === DrawingTool.CALIBRATE && (
@@ -1251,8 +1289,8 @@ function App() {
                 </div>
               )}
               <Stage
-                width={stageSize.width}
-                height={stageSize.height}
+                width={canvasSize.width}
+                height={canvasSize.height}
                 ref={stageRef}
                 scaleX={zoomLevel}
                 scaleY={zoomLevel}
@@ -1262,20 +1300,7 @@ function App() {
                   cursor: activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'
                 }}
               >
-                <Layer>
-                  {konvaImage && imageData && (() => {
-                    const fit = calculateImageFit(imageData, stageSize);
-                    return (
-                      <KonvaImage
-                        image={konvaImage}
-                        x={fit.x}
-                        y={fit.y}
-                        width={fit.width}
-                        height={fit.height}
-                      />
-                    );
-                  })()}
-                </Layer>
+                {/* Canvas background - no longer needed as shapes include images */}
                 
                 {/* Drawing Layer for annotations */}
                 <DrawingLayer 
@@ -1288,7 +1313,7 @@ function App() {
                 />
               </Stage>
             </div>
-          )}
+          ) : null}
           
           {/* PDF Viewer - shows when PDF is loaded */}
           {pdfFile && (

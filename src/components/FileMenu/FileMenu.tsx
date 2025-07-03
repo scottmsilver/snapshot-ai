@@ -119,17 +119,17 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
     }
     
     const performInitialSave = async () => {
-      if (imageData && !currentFileId && isAuthenticated && isInitialized) {
+      if (!currentFileId && isAuthenticated && isInitialized && drawingState.shapes.length > 0) {
         // Use the autoSave function which will handle onFileIdChange
         await autoSave();
       }
     };
     
     performInitialSave();
-  }, [imageData, currentFileId, isAuthenticated, isInitialized, autoSave]);
+  }, [currentFileId, isAuthenticated, isInitialized, autoSave, drawingState.shapes]);
 
   const handleSave = async () => {
-    if (!isAuthenticated || !stageRef.current || !imageData) return;
+    if (!isAuthenticated || !stageRef.current) return;
 
     // If we have a file ID but no write permission, do Save As instead
     if (currentFileId && hasWritePermission === false) {
@@ -295,29 +295,29 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
               handleSave();
               setShowDropdown(false);
             }}
-            disabled={!imageData || isSaving || !isInitialized}
+            disabled={isSaving || !isInitialized}
             style={{
               width: '100%',
               padding: '0.5rem 0.75rem',
               backgroundColor: 'transparent',
               border: 'none',
               textAlign: 'left',
-              cursor: imageData && !isSaving && isInitialized ? 'pointer' : 'not-allowed',
+              cursor: !isSaving && isInitialized ? 'pointer' : 'not-allowed',
               fontSize: '0.75rem',
-              color: imageData && !isSaving && isInitialized ? '#333' : '#999',
+              color: !isSaving && isInitialized ? '#333' : '#999',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center'
             }}
             title={
               !isInitialized ? 'Initializing Google Drive...' : 
-              !imageData ? 'No image loaded' : 
+              drawingState.shapes.length === 0 ? 'No content to save' : 
               currentFileId && hasWritePermission === false ? 'You have view-only access. A copy will be saved.' :
               currentFileId && hasWritePermission ? 'Save changes to the current file' :
               'Save as a new file to Google Drive'
             }
             onMouseEnter={(e) => {
-              if (imageData && !isSaving && isInitialized) {
+              if (!isSaving && isInitialized) {
                 e.currentTarget.style.backgroundColor = '#f5f5f5';
               }
             }}
@@ -338,19 +338,19 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
               handleSaveAs();
               setShowDropdown(false);
             }}
-            disabled={!imageData || isSaving}
+            disabled={isSaving}
             style={{
               width: '100%',
               padding: '0.5rem 0.75rem',
               backgroundColor: 'transparent',
               border: 'none',
               textAlign: 'left',
-              cursor: imageData && !isSaving ? 'pointer' : 'not-allowed',
+              cursor: !isSaving ? 'pointer' : 'not-allowed',
               fontSize: '0.75rem',
-              color: imageData && !isSaving ? '#333' : '#999'
+              color: !isSaving ? '#333' : '#999'
             }}
             onMouseEnter={(e) => {
-              if (imageData && !isSaving && isInitialized) {
+              if (!isSaving && isInitialized) {
                 e.currentTarget.style.backgroundColor = '#f5f5f5';
               }
             }}

@@ -6,10 +6,11 @@ import type { ImageData } from '@/types/canvas';
 
 interface UseAutoSaveOptions {
   fileId: string | null;
-  imageData: ImageData | null;
+  imageData: ImageData | null; // No longer used but kept for compatibility
   hasWritePermission: boolean | null;
   debounceMs?: number;
   onFileIdChange?: (fileId: string) => void;
+  canvasSize?: { width: number; height: number } | null;
 }
 
 type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
@@ -45,7 +46,7 @@ export const useAutoSave = ({
 
   // Manual save function
   const save = useCallback(async () => {
-    if (!authContext?.isAuthenticated || !imageData || !authContext?.getAccessToken) {
+    if (!authContext?.isAuthenticated || !authContext?.getAccessToken) {
       return;
     }
 
@@ -63,21 +64,15 @@ export const useAutoSave = ({
 
       await googleDriveService.initialize(token);
 
-      // Create project data
+      // Create project data (new format without background image)
       const projectData: ProjectData = {
-        version: '1.0',
-        image: {
-          data: imageData.src,
-          name: imageData.name,
-          width: imageData.width,
-          height: imageData.height,
-        },
+        version: '2.0', // Version 2.0 indicates no background image
         shapes: drawingState.shapes,
         metadata: {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           author: authContext.user?.email || 'unknown',
-          version: '1.0',
+          version: '2.0',
         },
       };
 
@@ -86,7 +81,7 @@ export const useAutoSave = ({
       
       setSaveStatus('saved');
       setLastSaved(new Date());
-      lastSavedDataRef.current = JSON.stringify({ shapes: drawingState.shapes, imageData });
+      lastSavedDataRef.current = JSON.stringify({ shapes: drawingState.shapes });
       
       // If this was a new file, notify parent of the new fileId
       if (!fileId && result.fileId && onFileIdChange) {
@@ -96,7 +91,7 @@ export const useAutoSave = ({
       console.error('Auto-save failed:', error);
       setSaveStatus('error');
     }
-  }, [authContext, drawingState.shapes, fileId, hasWritePermission, imageData, onFileIdChange]);
+  }, [authContext, drawingState.shapes, fileId, hasWritePermission, onFileIdChange]);
 
   // Mark as unsaved
   const markAsUnsaved = useCallback(() => {
@@ -141,7 +136,7 @@ export const useAutoSave = ({
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [drawingState.shapes, imageData, fileId, hasWritePermission, save, debounceMs, authContext?.isAuthenticated]);
+  }, [drawingState.shapes, fileId, hasWritePermission, save, debounceMs, authContext?.isAuthenticated]);
 
   // Warn before leaving with unsaved changes
   useEffect(() => {

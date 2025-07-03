@@ -11,7 +11,7 @@ interface ProjectMetadata {
 
 export interface ProjectData {
   version: string;
-  image: {
+  image?: { // Optional for backwards compatibility checking
     data: string;
     name: string;
     width: number;
@@ -19,6 +19,10 @@ export interface ProjectData {
   };
   shapes: Shape[];
   metadata: ProjectMetadata;
+  canvas?: { // Canvas dimensions
+    width: number;
+    height: number;
+  };
 }
 
 export interface ProjectFile {
