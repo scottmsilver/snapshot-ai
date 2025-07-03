@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, Star, RegularPolygon } from 'react-konva';
+import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, Star, RegularPolygon, Image } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import { useSelectionMachine } from '@/hooks/useSelectionMachine';
 import { DrawingTool } from '@/types/drawing';
-import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, StarShape, MeasurementLineShape, Point } from '@/types/drawing';
+import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, StarShape, MeasurementLineShape, ImageShape, Point } from '@/types/drawing';
 import { 
   perimeterOffsetToPoint, 
   getArrowPathString, 
@@ -22,6 +22,41 @@ interface DrawingLayerProps {
   stageRef: React.RefObject<Konva.Stage | null>;
   onTextClick?: (position: Point) => void;
 }
+
+// Component for rendering image shapes
+const ImageShapeComponent: React.FC<{
+  shape: ImageShape;
+  commonProps: any;
+  onRef: (node: Konva.Node | null) => void;
+}> = ({ shape, commonProps, onRef }) => {
+  const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
+  
+  // Load image from base64 data
+  useEffect(() => {
+    if (shape.imageData) {
+      const img = new window.Image();
+      img.onload = () => {
+        setLoadedImage(img);
+      };
+      img.src = shape.imageData;
+    }
+  }, [shape.imageData]);
+  
+  if (!loadedImage) return null;
+  
+  return (
+    <Image
+      {...commonProps}
+      image={loadedImage}
+      x={shape.x}
+      y={shape.y}
+      width={shape.width}
+      height={shape.height}
+      rotation={shape.rotation || 0}
+      ref={onRef}
+    />
+  );
+};
 
 export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClick }) => {
   const {
@@ -640,6 +675,25 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               listening={false}
             />
           </Group>
+        );
+
+      case DrawingTool.SCREENSHOT:
+        if (tempPoints.length < 2) return null;
+        const screenshotStart = tempPoints[0];
+        const screenshotEnd = tempPoints[tempPoints.length - 1];
+        
+        return (
+          <Rect
+            x={Math.min(screenshotStart.x, screenshotEnd.x)}
+            y={Math.min(screenshotStart.y, screenshotEnd.y)}
+            width={Math.abs(screenshotEnd.x - screenshotStart.x)}
+            height={Math.abs(screenshotEnd.y - screenshotStart.y)}
+            stroke="#4a90e2"
+            strokeWidth={2}
+            dash={[10, 5]}
+            fill="rgba(74, 144, 226, 0.1)"
+            listening={false}
+          />
         );
 
       default:
@@ -1434,6 +1488,23 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               />
             )}
           </Group>
+        );
+        
+      case DrawingTool.IMAGE:
+        const imageShape = shape as ImageShape;
+        return (
+          <ImageShapeComponent
+            key={shape.id}
+            shape={imageShape}
+            commonProps={commonProps}
+            onRef={(node) => {
+              if (node) {
+                selectedShapeRefs.current.set(shape.id, node);
+              } else {
+                selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
+          />
         );
         
       default:

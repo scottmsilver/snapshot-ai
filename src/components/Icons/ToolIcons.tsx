@@ -8,7 +8,8 @@ import {
   Type,
   MessageSquare,
   Star,
-  Ruler
+  Ruler,
+  Crop
 } from 'lucide-react';
 
 interface IconProps {
@@ -51,4 +52,8 @@ export const StarIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor
 
 export const MeasureIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor' }) => (
   <Ruler size={size} color={color} />
+);
+
+export const ScreenshotIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor' }) => (
+  <Crop size={size} color={color} />
 );

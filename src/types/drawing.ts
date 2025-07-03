@@ -9,7 +9,9 @@ export const DrawingTool = {
   CALLOUT: 'callout',
   STAR: 'star',
   MEASURE: 'measure',
-  CALIBRATE: 'calibrate' // Internal tool for setting scale
+  CALIBRATE: 'calibrate', // Internal tool for setting scale
+  SCREENSHOT: 'screenshot', // Tool for capturing canvas area
+  IMAGE: 'image' // Shape type for pasted images
 } as const;
 
 export type DrawingTool = typeof DrawingTool[keyof typeof DrawingTool];
@@ -163,8 +165,19 @@ export interface MeasurementLineShape extends BaseShape {
   };
 }
 
+// Image shape (for screenshots and pasted images)
+export interface ImageShape extends BaseShape {
+  type: typeof DrawingTool.IMAGE;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  imageData: string; // Base64 encoded image data
+  rotation?: number;
+}
+
 // Union type for all shapes
-export type Shape = PenShape | RectShape | CircleShape | ArrowShape | TextShape | CalloutShape | StarShape | MeasurementLineShape;
+export type Shape = PenShape | RectShape | CircleShape | ArrowShape | TextShape | CalloutShape | StarShape | MeasurementLineShape | ImageShape;
 
 // Drawing state
 export interface DrawingState {
@@ -199,6 +212,9 @@ export interface DrawingState {
     unit: string;
     calibrationLineId: string | null;
   };
+  
+  // Clipboard state
+  clipboard: Shape[];
 }
 
 // Helper functions for z-order management

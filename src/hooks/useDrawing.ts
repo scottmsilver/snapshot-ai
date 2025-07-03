@@ -65,6 +65,7 @@ export const useDrawing = () => {
       case DrawingTool.STAR:
       case DrawingTool.MEASURE:
       case DrawingTool.CALIBRATE:
+      case DrawingTool.SCREENSHOT:
         // These tools need start and end points
         break;
 
@@ -96,6 +97,7 @@ export const useDrawing = () => {
       case DrawingTool.STAR:
       case DrawingTool.MEASURE:
       case DrawingTool.CALIBRATE:
+      case DrawingTool.SCREENSHOT:
         // Update end point for preview
         setTempPoints([startPoint, point]);
         break;
@@ -351,6 +353,34 @@ export const useDrawing = () => {
           } as MeasurementLineShape;
         }
         break;
+
+      case DrawingTool.SCREENSHOT:
+        // For screenshot, we don't create a shape immediately
+        // Instead, we'll capture the area and create an IMAGE shape
+        // The capture logic will be handled in the component
+        setDrawingState({
+          ...state,
+          isDrawing: false,
+          tempPoints: [],
+          startPoint: null,
+          lastPoint: null,
+        });
+        
+        // Return the selected area bounds for the parent to handle
+        const screenshotBounds = {
+          x: Math.min(startPoint.x, endPoint.x),
+          y: Math.min(startPoint.y, endPoint.y),
+          width: Math.abs(endPoint.x - startPoint.x),
+          height: Math.abs(endPoint.y - startPoint.y)
+        };
+        
+        // Trigger a custom event with the bounds
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('screenshot-area-selected', {
+            detail: screenshotBounds
+          }));
+        }
+        return;
     }
 
     // Add shape if created

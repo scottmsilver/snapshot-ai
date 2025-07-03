@@ -29,6 +29,8 @@ export enum DrawingActionType {
   REORDER_SHAPE = 'REORDER_SHAPE',
   SET_ACTIVE_SHAPE = 'SET_ACTIVE_SHAPE',
   SET_MEASUREMENT_CALIBRATION = 'SET_MEASUREMENT_CALIBRATION',
+  COPY_SHAPES = 'COPY_SHAPES',
+  PASTE_SHAPES = 'PASTE_SHAPES',
 }
 
 // Action definitions
@@ -59,7 +61,9 @@ type DrawingAction =
         unit: string;
         calibrationLineId: string | null;
       };
-    };
+    }
+  | { type: DrawingActionType.COPY_SHAPES; shapes: Shape[] }
+  | { type: DrawingActionType.PASTE_SHAPES; offset?: Point };
 
 // Initial state
 const initialState: DrawingState = {
@@ -87,6 +91,7 @@ const initialState: DrawingState = {
     unit: 'ft',
     calibrationLineId: null,
   },
+  clipboard: [],
 };
 
 // Reducer
@@ -208,6 +213,64 @@ const drawingReducer = (state: DrawingState, action: DrawingAction): DrawingStat
         measurementCalibration: action.calibration,
       };
 
+    case DrawingActionType.COPY_SHAPES:
+      return {
+        ...state,
+        clipboard: action.shapes.map(shape => ({ ...shape })), // Deep copy shapes
+      };
+
+    case DrawingActionType.PASTE_SHAPES: {
+      const offset = action.offset || { x: 20, y: 20 };
+      const newShapes = state.clipboard.map(shape => {
+        const newId = `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const newShape = {
+          ...shape,
+          id: newId,
+          zIndex: getNextZIndex(state.shapes) + state.clipboard.indexOf(shape),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        
+        // Offset position based on shape type
+        if ('x' in newShape && 'y' in newShape) {
+          newShape.x += offset.x;
+          newShape.y += offset.y;
+        } else if ('points' in newShape && Array.isArray(newShape.points)) {
+          // For shapes with points array (pen, arrow, measure)
+          const offsetPoints = [...newShape.points];
+          for (let i = 0; i < offsetPoints.length; i += 2) {
+            offsetPoints[i] += offset.x;
+            offsetPoints[i + 1] += offset.y;
+          }
+          newShape.points = offsetPoints;
+        }
+        
+        // Special handling for callout shapes
+        if (newShape.type === DrawingTool.CALLOUT && 'textX' in newShape) {
+          newShape.textX += offset.x;
+          newShape.textY += offset.y;
+          newShape.arrowX += offset.x;
+          newShape.arrowY += offset.y;
+          if ('curveControl1X' in newShape && typeof newShape.curveControl1X === 'number' && typeof newShape.curveControl1Y === 'number') {
+            newShape.curveControl1X += offset.x;
+            newShape.curveControl1Y += offset.y;
+          }
+          if ('curveControl2X' in newShape && typeof newShape.curveControl2X === 'number' && typeof newShape.curveControl2Y === 'number') {
+            newShape.curveControl2X += offset.x;
+            newShape.curveControl2Y += offset.y;
+          }
+        }
+        
+        return newShape;
+      });
+      
+      return {
+        ...state,
+        shapes: [...state.shapes, ...newShapes],
+        selectedShapeIds: newShapes.map(s => s.id), // Select pasted shapes
+      };
+    }
+
     default:
       return state;
   }
@@ -253,6 +316,10 @@ interface DrawingContextType {
   
   // Helpers
   getSortedShapes: () => Shape[];
+  
+  // Clipboard operations
+  copySelectedShapes: () => void;
+  pasteShapes: (offset?: Point) => void;
 }
 
 // Create context
@@ -353,6 +420,22 @@ export const DrawingProvider: React.FC<{ children: ReactNode }> = ({ children })
     return sortShapesByZIndex(state.shapes);
   }, [state.shapes]);
 
+  // Clipboard operations
+  const copySelectedShapes = useCallback(() => {
+    const selectedShapes = state.shapes.filter(shape => 
+      state.selectedShapeIds.includes(shape.id)
+    );
+    if (selectedShapes.length > 0) {
+      dispatch({ type: DrawingActionType.COPY_SHAPES, shapes: selectedShapes });
+    }
+  }, [state.shapes, state.selectedShapeIds]);
+
+  const pasteShapes = useCallback((offset?: Point) => {
+    if (state.clipboard.length > 0) {
+      dispatch({ type: DrawingActionType.PASTE_SHAPES, offset });
+    }
+  }, [state.clipboard]);
+
   const value: DrawingContextType = {
     state,
     dispatch,
@@ -372,6 +455,8 @@ export const DrawingProvider: React.FC<{ children: ReactNode }> = ({ children })
     reorderShape,
     setMeasurementCalibration,
     getSortedShapes,
+    copySelectedShapes,
+    pasteShapes,
   };
 
   return (

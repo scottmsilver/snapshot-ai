@@ -12,7 +12,8 @@ import {
   TextIcon,
   CalloutIcon,
   StarIcon,
-  MeasureIcon
+  MeasureIcon,
+  ScreenshotIcon
 } from '@/components/Icons/ToolIcons';
 import { ColorPicker } from '@/components/ColorPicker';
 
@@ -26,6 +27,7 @@ const tools = [
   { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' },
   { tool: DrawingTool.CALLOUT, icon: CalloutIcon, label: 'Callout', shortcut: 'L' },
   { tool: DrawingTool.STAR, icon: StarIcon, label: 'Star', shortcut: 'S' },
+  { tool: DrawingTool.SCREENSHOT, icon: ScreenshotIcon, label: 'Screenshot', shortcut: 'X' },
   { tool: DrawingTool.MEASURE, icon: MeasureIcon, label: 'Measure', shortcut: 'M' }
 ];
 

@@ -35,8 +35,8 @@ function App() {
   const stageRef = useRef<Konva.Stage | null>(null)
   const { imageData, loadImage, clearImage, loadImageFromData } = useImage()
   const [konvaImage, setKonvaImage] = useState<HTMLImageElement | null>(null)
-  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool } = useDrawing()
-  const { state: drawingState, setShapes, setMeasurementCalibration } = useDrawingContext()
+  const { shapes, activeTool, clearSelection, addShape, updateShape, currentStyle, selectedShapeIds, selectShape, setActiveTool, deleteSelected } = useDrawing()
+  const { state: drawingState, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes } = useDrawingContext()
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true)
   const [zoomLevel, setZoomLevel] = useState(1) // 1 = 100%
   const [isLoadingSharedFile, setIsLoadingSharedFile] = useState(false)
@@ -269,6 +269,69 @@ function App() {
     setPendingCalibrationLine(null);
   };
 
+  // Generate unique ID for shapes
+  const generateId = () => `shape-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  // Handle screenshot area selection
+  useEffect(() => {
+    const handleScreenshotAreaSelected = async (event: Event) => {
+      const bounds = (event as CustomEvent).detail;
+      if (!stageRef.current || bounds.width < 10 || bounds.height < 10) return;
+
+      try {
+        // Get the stage and create a temporary layer
+        const stage = stageRef.current;
+        const scale = stage.scaleX();
+        
+        // Convert to data URL of the selected area
+        const dataURL = await stage.toDataURL({
+          x: bounds.x * scale,
+          y: bounds.y * scale,
+          width: bounds.width * scale,
+          height: bounds.height * scale,
+          pixelRatio: 1 / scale
+        });
+
+        // Create an IMAGE shape with the captured data
+        const imageShape = {
+          id: generateId(),
+          type: DrawingTool.IMAGE,
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          imageData: dataURL,
+          style: {
+            stroke: '#ddd',
+            strokeWidth: 1,
+            opacity: 1
+          },
+          visible: true,
+          locked: false,
+          zIndex: Math.max(...shapes.map(s => s.zIndex || 0), 0) + 1,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+
+        // Add the image shape
+        addShape(imageShape);
+        
+        // Switch back to select tool
+        setActiveTool(DrawingTool.SELECT);
+        
+        // Select the new image
+        selectShape(imageShape.id);
+      } catch (error) {
+        console.error('Failed to capture screenshot:', error);
+      }
+    };
+
+    window.addEventListener('screenshot-area-selected', handleScreenshotAreaSelected as EventListener);
+    return () => {
+      window.removeEventListener('screenshot-area-selected', handleScreenshotAreaSelected as EventListener);
+    };
+  }, [shapes, addShape, setActiveTool, selectShape]);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -286,12 +349,36 @@ function App() {
           redo()
         }
       }
-      // Ctrl/Cmd + C for copy to clipboard (when not in text input)
+      // Ctrl/Cmd + C for copy shapes (when not in text input)
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.shiftKey) {
         const target = e.target as HTMLElement;
         if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
           e.preventDefault();
-          handleCopyToClipboard();
+          if (selectedShapeIds.length > 0) {
+            copySelectedShapes();
+          } else {
+            // If no shapes selected, copy the whole canvas
+            handleCopyToClipboard();
+          }
+        }
+      }
+      // Ctrl/Cmd + V for paste shapes
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !e.shiftKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          pasteShapes();
+        }
+      }
+      // Ctrl/Cmd + X for cut shapes
+      if ((e.ctrlKey || e.metaKey) && e.key === 'x' && !e.shiftKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          if (selectedShapeIds.length > 0) {
+            copySelectedShapes();
+            deleteSelected();
+          }
         }
       }
       // Ctrl/Cmd + S for download
@@ -320,7 +407,7 @@ function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [canUndo, canRedo, undo, redo, zoomLevel])
+  }, [canUndo, canRedo, undo, redo, zoomLevel, selectedShapeIds, copySelectedShapes, pasteShapes, deleteSelected])
 
   // Initialize history with empty state
   useEffect(() => {
@@ -543,8 +630,14 @@ function App() {
                 <span>New</span>
               </button>
               <button
-                onClick={handleCopyToClipboard}
-                title="Copy to Clipboard (Ctrl+C)"
+                onClick={() => {
+                  if (selectedShapeIds.length > 0) {
+                    copySelectedShapes();
+                  } else {
+                    handleCopyToClipboard();
+                  }
+                }}
+                title={selectedShapeIds.length > 0 ? "Copy Shapes (Ctrl+C)" : "Copy Canvas (Ctrl+C)"}
                 style={{
                   padding: '0.25rem 0.75rem',
                   backgroundColor: 'transparent',
