@@ -13,7 +13,8 @@ import {
   CalloutIcon,
   StarIcon,
   MeasureIcon,
-  ScreenshotIcon
+  ScreenshotIcon,
+  ImageIcon
 } from '@/components/Icons/ToolIcons';
 import { ColorPicker } from '@/components/ColorPicker';
 
@@ -27,6 +28,7 @@ const tools = [
   { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' },
   { tool: DrawingTool.CALLOUT, icon: CalloutIcon, label: 'Callout', shortcut: 'L' },
   { tool: DrawingTool.STAR, icon: StarIcon, label: 'Star', shortcut: 'S' },
+  { tool: DrawingTool.IMAGE, icon: ImageIcon, label: 'Image', shortcut: 'I' },
   { tool: DrawingTool.SCREENSHOT, icon: ScreenshotIcon, label: 'Screenshot', shortcut: 'X' },
   { tool: DrawingTool.MEASURE, icon: MeasureIcon, label: 'Measure', shortcut: 'M' }
 ];
@@ -62,7 +64,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
   // Determine which properties to show
   const toolOrShapeType = selectedShape ? selectedShape.type : activeTool;
   const showFillOption = toolOrShapeType === DrawingTool.RECTANGLE || toolOrShapeType === DrawingTool.CIRCLE || toolOrShapeType === DrawingTool.STAR;
-  const showStrokeWidth = toolOrShapeType !== DrawingTool.TEXT && toolOrShapeType !== DrawingTool.CALLOUT;
+  const showStrokeWidth = toolOrShapeType !== DrawingTool.TEXT && toolOrShapeType !== DrawingTool.CALLOUT && toolOrShapeType !== DrawingTool.IMAGE;
   const showTextOptions = toolOrShapeType === DrawingTool.TEXT || toolOrShapeType === DrawingTool.CALLOUT;
 
   // Handle property updates for both selected shapes and default style

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { googleDriveService, type ProjectData } from '@/services/googleDrive';
 import { useDrawingContext } from '@/contexts/DrawingContext';
@@ -14,9 +14,12 @@ interface FileMenuProps {
   onProjectLoad?: (data: ProjectData) => void;
   initialFileId?: string | null;
   onSaveStatusChange?: (status: 'saved' | 'saving' | 'unsaved' | 'error', lastSaved: Date | null) => void;
+  onNew?: () => void;
+  onAddImage?: () => void;
+  onExport?: () => void;
 }
 
-export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId, onSaveStatusChange }) => {
+export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId, onSaveStatusChange, onNew, onAddImage, onExport }) => {
   // Try to use auth context, but handle case where it's not available
   let authContext;
   try {
@@ -35,6 +38,21 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [hasWritePermission, setHasWritePermission] = useState<boolean | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    if (showDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showDropdown]);
 
   // Initialize Google Drive API when authenticated
   React.useEffect(() => {
@@ -236,7 +254,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
 
   return (
     <>
-      <div style={{ position: 'relative' }}>
+      <div ref={menuRef} style={{ position: 'relative' }}>
         <button
         onClick={() => setShowDropdown(!showDropdown)}
         style={{
@@ -290,6 +308,37 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
             zIndex: 1000
           }}
         >
+          {onNew && (
+            <>
+              <button
+                onClick={() => {
+                  onNew();
+                  setShowDropdown(false);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 0.75rem',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  color: '#333'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f5f5f5';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                New
+              </button>
+              
+              <div style={{ height: '1px', backgroundColor: '#eee', margin: '0.25rem 0' }} />
+            </>
+          )}
+          
           <button
             onClick={() => {
               handleSave();
@@ -391,6 +440,68 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
             <span>Open from Drive</span>
             <span style={{ fontSize: '0.625rem', color: '#999' }}>Ctrl+O</span>
           </button>
+
+          {onAddImage && (
+            <>
+              <button
+                onClick={() => {
+                  onAddImage();
+                  setShowDropdown(false);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 0.75rem',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  color: '#333'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f5f5f5';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                Add Image...
+              </button>
+            </>
+          )}
+
+          {onExport && (
+            <>
+              <button
+                onClick={() => {
+                  onExport();
+                  setShowDropdown(false);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 0.75rem',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  color: '#333',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f5f5f5';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                <span>Export Image</span>
+                <span style={{ fontSize: '0.625rem', color: '#999' }}>Ctrl+E</span>
+              </button>
+            </>
+          )}
 
           <div style={{ height: '1px', backgroundColor: '#eee', margin: '0.25rem 0' }} />
 

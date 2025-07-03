@@ -21,6 +21,7 @@ import { pixelsToMeasurement, formatMeasurement, type MeasurementUnit } from '@/
 interface DrawingLayerProps {
   stageRef: React.RefObject<Konva.Stage | null>;
   onTextClick?: (position: Point) => void;
+  onImageToolComplete?: (bounds: { x: number; y: number; width: number; height: number }) => void;
 }
 
 // Component for rendering image shapes
@@ -60,7 +61,7 @@ const ImageShapeComponent: React.FC<{
   );
 };
 
-export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClick }) => {
+export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClick, onImageToolComplete }) => {
   const {
     activeTool,
     currentStyle,
@@ -70,6 +71,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     startDrawing,
     continueDrawing,
     finishDrawing,
+    cancelDrawing,
     getSortedShapes,
     updateShape,
     deleteSelected,
@@ -312,7 +314,25 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           y: (e.evt.clientY - rect.top) / scaleY
         };
         
-        finishDrawing(pos || undefined, e.evt as any);
+        // Special handling for IMAGE tool
+        if (activeTool === DrawingTool.IMAGE && tempPoints.length >= 2 && onImageToolComplete) {
+          const startPoint = tempPoints[0];
+          const endPoint = tempPoints[tempPoints.length - 1];
+          const bounds = {
+            x: Math.min(startPoint.x, endPoint.x),
+            y: Math.min(startPoint.y, endPoint.y),
+            width: Math.abs(endPoint.x - startPoint.x),
+            height: Math.abs(endPoint.y - startPoint.y)
+          };
+          
+          // Cancel the drawing operation
+          cancelDrawing();
+          
+          // Notify parent to show file picker
+          onImageToolComplete(bounds);
+        } else {
+          finishDrawing(pos || undefined, e.evt as any);
+        }
       }
       
       // Control point dragging is handled by state machine
@@ -354,9 +374,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     activeTool,
     isDrawing,
     shapes,
+    tempPoints,
     startDrawing,
     continueDrawing,
     finishDrawing,
+    cancelDrawing,
     handleShapeClick,
     handleEmptyClick,
     handleShapeHover,
@@ -380,6 +402,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     startControlPointDrag,
     endControlPointDrag,
     onTextClick,
+    onImageToolComplete,
     selectShape,
     clearSelection,
     selectedShapeIds,
@@ -696,6 +719,44 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             fill="rgba(74, 144, 226, 0.1)"
             listening={false}
           />
+        );
+        
+      case DrawingTool.IMAGE:
+        if (tempPoints.length < 2) return null;
+        const imageStart = tempPoints[0];
+        const imageEnd = tempPoints[tempPoints.length - 1];
+        const imageX = Math.min(imageStart.x, imageEnd.x);
+        const imageY = Math.min(imageStart.y, imageEnd.y);
+        const imageWidth = Math.abs(imageEnd.x - imageStart.x);
+        const imageHeight = Math.abs(imageEnd.y - imageStart.y);
+        
+        return (
+          <Group>
+            <Rect
+              x={imageX}
+              y={imageY}
+              width={imageWidth}
+              height={imageHeight}
+              stroke={currentStyle.stroke}
+              strokeWidth={currentStyle.strokeWidth}
+              fill="#f0f0f0"
+              opacity={0.7}
+              listening={false}
+            />
+            <Text
+              x={imageX + imageWidth / 2}
+              y={imageY + imageHeight / 2}
+              text="Drop Image"
+              fontSize={Math.min(imageWidth / 8, imageHeight / 4, 24)}
+              fontFamily="Arial"
+              fill="#666"
+              align="center"
+              verticalAlign="middle"
+              offsetX={40}
+              offsetY={12}
+              listening={false}
+            />
+          </Group>
         );
 
       default:

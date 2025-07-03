@@ -72,6 +72,10 @@ export const useDrawing = () => {
       case DrawingTool.TEXT:
         // Text tool is handled in DrawingLayer with dialog
         return;
+        
+      case DrawingTool.IMAGE:
+        // Image tool needs start and end points for placeholder
+        break;
     }
   }, [state.activeTool, setDrawingState, setTempPoints]);
 
@@ -98,6 +102,7 @@ export const useDrawing = () => {
       case DrawingTool.MEASURE:
       case DrawingTool.CALIBRATE:
       case DrawingTool.SCREENSHOT:
+      case DrawingTool.IMAGE:
         // Update end point for preview
         setTempPoints([startPoint, point]);
         break;
@@ -456,6 +461,9 @@ export const useDrawing = () => {
         break;
       case 's':
         setActiveTool(DrawingTool.STAR);
+        break;
+      case 'i':
+        setActiveTool(DrawingTool.IMAGE);
         break;
       case 'm':
         setActiveTool(DrawingTool.MEASURE);

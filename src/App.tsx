@@ -10,6 +10,7 @@ import {
 import { ImageUploader } from '@/components/ImageUploader'
 import { DrawingToolbar } from '@/components/Toolbar'
 import { PropertiesSection } from '@/components/Toolbar/PropertiesSection'
+import { SettingsMenu } from '@/components/Toolbar/SettingsMenu'
 import { DrawingLayer } from '@/components/Canvas/DrawingLayer'
 import { TextInputDialog } from '@/components/TextInputDialog'
 import { UserMenu } from '@/components/Auth/UserMenu'
@@ -848,41 +849,30 @@ function App() {
               setSaveStatus(status);
               setLastSaved(saved);
             }}
+            onNew={() => {
+              clearSelection();
+              setShapes([]);
+              setLoadedFileId(null);
+              setSaveStatus('saved');
+              setCanvasSize(null);
+              setIsCanvasInitialized(false);
+            }}
+            onAddImage={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = 'image/*';
+              input.onchange = async (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (file) {
+                  await handleImageUpload(file);
+                }
+              };
+              input.click();
+            }}
+            onExport={handleDownloadImage}
           />
           {isCanvasInitialized && (
             <>
-              <button
-                onClick={() => {
-                  clearSelection();
-                  setShapes([]);
-                  setLoadedFileId(null);
-                  setSaveStatus('saved');
-                  setCanvasSize(null);
-                  setIsCanvasInitialized(false);
-                }}
-                title="New Project"
-                style={{
-                  padding: '0.25rem 0.75rem',
-                  backgroundColor: 'transparent',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '0.75rem',
-                  color: '#666',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.25rem'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#f5f5f5';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                <FileText size={14} />
-                <span>New</span>
-              </button>
               <button
                 onClick={() => {
                   if (selectedShapeIds.length > 0) {
@@ -913,31 +903,6 @@ function App() {
               >
                 <Copy size={14} />
                 <span>Copy</span>
-              </button>
-              <button
-                onClick={handleDownloadImage}
-                title="Download Image (Ctrl+S)"
-                style={{
-                  padding: '0.25rem 0.75rem',
-                  backgroundColor: '#4a90e2',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '0.75rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.25rem'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#357abd';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#4a90e2';
-                }}
-              >
-                <Download size={14} />
-                <span>Export</span>
               </button>
             </>
           )}
@@ -1041,149 +1006,32 @@ function App() {
             alignItems: 'center',
             marginLeft: 'auto'
           }}>
-            {/* Add Image Button */}
-            <button
-              onClick={() => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = 'image/*';
-                input.onchange = async (e) => {
-                  const file = (e.target as HTMLInputElement).files?.[0];
-                  if (file) {
-                    await handleImageUpload(file);
-                  }
-                };
-                input.click();
+            {/* Settings Menu */}
+            <SettingsMenu
+              showGrid={showGrid}
+              onToggleGrid={() => setShowGrid(!showGrid)}
+              canvasBackground={canvasBackground}
+              onChangeBackground={setCanvasBackground}
+              measurementCalibration={drawingState.measurementCalibration}
+              onStartCalibration={() => {
+                if (zoomLevel !== 1) {
+                  setZoomLevel(1);
+                }
+                setActiveTool(DrawingTool.CALIBRATE);
+                measurement.startCalibration();
               }}
-              title="Add Image"
-              style={{
-                padding: '0.25rem 0.5rem',
-                backgroundColor: 'transparent',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '0.75rem',
-                color: '#666',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                height: '28px'
+              onChangeUnit={(unit) => {
+                measurement.changeUnit(unit);
+                if (drawingState.measurementCalibration.pixelsPerUnit !== null) {
+                  setMeasurementCalibration({
+                    ...drawingState.measurementCalibration,
+                    unit: unit
+                  });
+                }
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#f5f5f5';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
-            >
-              <FileText size={14} />
-              <span>Add Image</span>
-            </button>
+              zoomLevel={zoomLevel}
+            />
 
-            {/* Measurement Calibration */}
-            {!measurement.isCalibrated ? (
-              <button
-                  onClick={() => {
-                    // Reset zoom to 1 when calibrating to avoid coordinate issues
-                    if (zoomLevel !== 1) {
-                      setZoomLevel(1);
-                    }
-                    setActiveTool(DrawingTool.CALIBRATE);
-                    measurement.startCalibration();
-                  }}
-                  style={{
-                    padding: '0.25rem 0.75rem',
-                    backgroundColor: '#ff9800',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '0.75rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#f57c00';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#ff9800';
-                  }}
-                >
-                  <AlertTriangle size={14} />
-                  <span>Set Scale</span>
-                </button>
-              ) : (
-                <>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem',
-                    fontSize: '0.75rem',
-                    color: '#666'
-                  }}>
-                    <Ruler size={14} />
-                    <span>{measurement.calibration.pixelsPerUnit?.toFixed(2)} px/{measurement.calibration.unit}</span>
-                  </div>
-                  <select
-                    value={measurement.calibration.unit}
-                    onChange={(e) => {
-                      measurement.changeUnit(e.target.value as MeasurementUnit);
-                      // Also update global state
-                      if (drawingState.measurementCalibration.pixelsPerUnit !== null) {
-                        setMeasurementCalibration({
-                          ...drawingState.measurementCalibration,
-                          unit: e.target.value
-                        });
-                      }
-                    }}
-                    style={{
-                      padding: '0.125rem 0.25rem',
-                      fontSize: '0.75rem',
-                      backgroundColor: 'white',
-                      border: '1px solid #ddd',
-                      borderRadius: '3px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="mm">mm</option>
-                    <option value="cm">cm</option>
-                    <option value="m">m</option>
-                    <option value="in">in</option>
-                    <option value="ft">ft</option>
-                  </select>
-                  <button
-                    onClick={() => {
-                      // Reset zoom to 1 when calibrating to avoid coordinate issues
-                      if (zoomLevel !== 1) {
-                        setZoomLevel(1);
-                      }
-                      setActiveTool(DrawingTool.CALIBRATE);
-                      measurement.startCalibration();
-                    }}
-                    title="Recalibrate"
-                    style={{
-                      padding: '0.25rem',
-                      backgroundColor: 'transparent',
-                      border: '1px solid #ddd',
-                      borderRadius: '3px',
-                      cursor: 'pointer',
-                      fontSize: '0.75rem',
-                      color: '#666'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f5f5f5';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
-                  >
-                    <RefreshCw size={14} />
-                  </button>
-                </>
-              )}
-
-            {/* Zoom Controls */}
             <div style={{
               display: 'flex',
               gap: '0.125rem',
@@ -1278,63 +1126,6 @@ function App() {
             >
               <ZoomIn size={16} />
             </button>
-          </div>
-
-          {/* Canvas Options */}
-          <div style={{
-            display: 'flex',
-            gap: '0.5rem',
-            alignItems: 'center',
-            paddingLeft: '0.5rem',
-            borderLeft: '1px solid #e0e0e0'
-          }}>
-            {/* Grid Toggle */}
-            <button
-              onClick={() => setShowGrid(!showGrid)}
-              title={showGrid ? "Hide Grid" : "Show Grid"}
-              style={{
-                padding: '0.25rem 0.5rem',
-                backgroundColor: showGrid ? '#e3f2fd' : 'transparent',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '0.75rem',
-                color: '#666',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = showGrid ? '#e3f2fd' : '#f5f5f5';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = showGrid ? '#e3f2fd' : 'transparent';
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18" />
-              </svg>
-              Grid
-            </button>
-
-            {/* Background Color */}
-            <div style={{ position: 'relative' }}>
-              <input
-                type="color"
-                value={canvasBackground}
-                onChange={(e) => setCanvasBackground(e.target.value)}
-                title="Canvas Background Color"
-                style={{
-                  width: '32px',
-                  height: '28px',
-                  padding: '2px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  backgroundColor: canvasBackground
-                }}
-              />
-            </div>
             </div>
           </div>
         </div>
@@ -1516,6 +1307,51 @@ function App() {
                     setTextPosition(pos);
                     setEditingTextId(null);
                     setTextDialogOpen(true);
+                  }}
+                  onImageToolComplete={(bounds) => {
+                    // Create file input and show picker
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = async (e) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
+                      if (file) {
+                        try {
+                          // Create image shape with original dimensions
+                          const imageShape = await createImageShapeFromFile(file);
+                          
+                          // Calculate dimensions that fit within bounds while maintaining aspect ratio
+                          const imageAspectRatio = imageShape.width / imageShape.height;
+                          const boundsAspectRatio = bounds.width / bounds.height;
+                          
+                          let finalWidth, finalHeight;
+                          
+                          if (imageAspectRatio > boundsAspectRatio) {
+                            // Image is wider than bounds - fit to width
+                            finalWidth = bounds.width;
+                            finalHeight = bounds.width / imageAspectRatio;
+                          } else {
+                            // Image is taller than bounds - fit to height
+                            finalHeight = bounds.height;
+                            finalWidth = bounds.height * imageAspectRatio;
+                          }
+                          
+                          // Center the image within the drawn bounds
+                          imageShape.x = bounds.x + (bounds.width - finalWidth) / 2;
+                          imageShape.y = bounds.y + (bounds.height - finalHeight) / 2;
+                          imageShape.width = finalWidth;
+                          imageShape.height = finalHeight;
+                          
+                          // Add to canvas and switch to select tool
+                          addShape(imageShape);
+                          setActiveTool(DrawingTool.SELECT);
+                          selectShape(imageShape.id);
+                        } catch (error) {
+                          console.error('Failed to load image:', error);
+                        }
+                      }
+                    };
+                    input.click();
                   }}
                 />
               </Stage>
