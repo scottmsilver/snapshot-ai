@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useDrawing } from '@/hooks/useDrawing';
 import { useDrawingContext } from '@/contexts/DrawingContext';
@@ -17,6 +17,7 @@ import {
   ImageIcon
 } from '@/components/Icons/ToolIcons';
 import { ColorPicker } from '@/components/ColorPicker';
+import { ChevronDown } from 'lucide-react';
 
 
 const tools = [
@@ -43,6 +44,22 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
   const { activeTool, setActiveTool, currentStyle, updateStyle, handleKeyPress, updateShape } = useDrawing();
   const { state: drawingState } = useDrawingContext();
   const isCalibrated = drawingState.measurementCalibration.pixelsPerUnit !== null;
+  const [showMeasureDropdown, setShowMeasureDropdown] = useState(false);
+  const measureDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (measureDropdownRef.current && !measureDropdownRef.current.contains(event.target as Node)) {
+        setShowMeasureDropdown(false);
+      }
+    };
+
+    if (showMeasureDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showMeasureDropdown]);
   
   // Determine if we're showing properties for selected shapes or for the active tool
   const hasSelection = selectedShapes.length > 0;
@@ -153,7 +170,17 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
           // Handle Measure tool specially - show with dropdown if calibrated
           if (tool === DrawingTool.MEASURE) {
             return (
-              <div key={tool} style={{ position: 'relative', display: 'flex' }}>
+              <div 
+                key={tool} 
+                ref={measureDropdownRef} 
+                style={{ 
+                  position: 'relative', 
+                  display: 'flex',
+                  backgroundColor: (activeTool === tool || showMeasureDropdown) ? '#e3f2fd' : 'transparent',
+                  border: (activeTool === tool || showMeasureDropdown) ? '1px solid #2196f3' : '1px solid transparent',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                }}>
                 <button
                   title={tooltipText}
                   onClick={() => {
@@ -167,32 +194,113 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
                   }}
                   style={{
                     padding: '0.375rem',
-                    backgroundColor: activeTool === tool ? '#e3f2fd' : 'transparent',
-                    border: activeTool === tool ? '1px solid #2196f3' : '1px solid transparent',
-                    borderRadius: '4px',
+                    paddingRight: isCalibrated ? '0.1875rem' : '0.375rem',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    borderRadius: isCalibrated ? '4px 0 0 4px' : '4px',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '0.875rem',
-                    color: activeTool === tool ? '#1976d2' : '#666',
+                    color: activeTool === tool || showMeasureDropdown ? '#1976d2' : '#666',
                     transition: 'all 0.2s',
-                    width: '32px',
+                    width: isCalibrated ? '26px' : '32px',
                     height: '32px',
                   }}
-                  onMouseEnter={(e) => {
-                    if (activeTool !== tool) {
-                      e.currentTarget.style.backgroundColor = '#f5f5f5';
+                  onMouseEnter={() => {
+                    if (activeTool !== tool && !showMeasureDropdown && measureDropdownRef.current) {
+                      measureDropdownRef.current.style.backgroundColor = '#f5f5f5';
                     }
                   }}
-                  onMouseLeave={(e) => {
-                    if (activeTool !== tool) {
-                      e.currentTarget.style.backgroundColor = 'transparent';
+                  onMouseLeave={() => {
+                    if (measureDropdownRef.current) {
+                      measureDropdownRef.current.style.backgroundColor = (activeTool === tool || showMeasureDropdown) ? '#e3f2fd' : 'transparent';
                     }
                   }}
                 >
                   <Icon size={18} />
                 </button>
+                {isCalibrated && (
+                  <>
+                    <button
+                      title="Measurement options"
+                      onClick={() => setShowMeasureDropdown(!showMeasureDropdown)}
+                      style={{
+                        padding: '0.375rem 0.1875rem',
+                        paddingLeft: '0.125rem',
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        borderLeft: '1px solid #e0e0e0',
+                        borderRadius: '0 4px 4px 0',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.875rem',
+                        color: activeTool === tool || showMeasureDropdown ? '#1976d2' : '#666',
+                        transition: 'all 0.2s',
+                        width: '18px',
+                        height: '32px',
+                      }}
+                      onMouseEnter={() => {
+                        if (activeTool !== tool && !showMeasureDropdown && measureDropdownRef.current) {
+                          measureDropdownRef.current.style.backgroundColor = '#f5f5f5';
+                        }
+                      }}
+                      onMouseLeave={() => {
+                        if (measureDropdownRef.current) {
+                          measureDropdownRef.current.style.backgroundColor = (activeTool === tool || showMeasureDropdown) ? '#e3f2fd' : 'transparent';
+                        }
+                      }}
+                    >
+                      <ChevronDown size={12} />
+                    </button>
+                    {showMeasureDropdown && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          marginTop: '4px',
+                          backgroundColor: 'white',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                          padding: '0.25rem',
+                          zIndex: 1000,
+                          minWidth: '120px',
+                        }}
+                      >
+                        <button
+                          onClick={() => {
+                            setActiveTool(DrawingTool.CALIBRATE);
+                            setShowMeasureDropdown(false);
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '0.5rem 0.75rem',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            fontSize: '0.75rem',
+                            color: '#333',
+                            borderRadius: '4px',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#f5f5f5';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          Recalibrate
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             );
           }

@@ -1024,7 +1024,7 @@ function App() {
           <div style={{ 
             display: 'flex', 
             gap: '0.25rem',
-            paddingRight: '0.5rem',
+            paddingRight: '0.75rem',
             borderRight: '1px solid #e0e0e0'
           }}>
             <DrawingToolbar horizontal={true} selectedShapes={selectedShapes} />
