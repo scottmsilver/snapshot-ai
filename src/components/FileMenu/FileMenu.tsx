@@ -11,7 +11,7 @@ import Konva from 'konva';
 interface FileMenuProps {
   stageRef: React.RefObject<Konva.Stage | null>;
   imageData: any | null;
-  onProjectLoad?: (data: ProjectData) => void;
+  onProjectLoad?: (data: ProjectData, fileName: string) => void;
   initialFileId?: string | null;
   onSaveStatusChange?: (status: 'saved' | 'saving' | 'unsaved' | 'error', lastSaved: Date | null) => void;
   onNew?: () => void;
@@ -20,9 +20,10 @@ interface FileMenuProps {
   onToggleGrid?: () => void;
   canvasBackground?: string;
   onChangeBackground?: (color: string) => void;
+  documentName?: string;
 }
 
-export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId, onSaveStatusChange, onNew, onExport, showGrid, onToggleGrid, canvasBackground, onChangeBackground }) => {
+export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId, onSaveStatusChange, onNew, onExport, showGrid, onToggleGrid, canvasBackground, onChangeBackground, documentName }) => {
   // Try to use auth context, but handle case where it's not available
   let authContext;
   try {
@@ -122,7 +123,8 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
     debounceMs: 2000, // 2 seconds
     onFileIdChange: (newFileId) => {
       setCurrentFileId(newFileId);
-    }
+    },
+    documentName
   });
 
   // Report save status changes to parent
@@ -165,25 +167,19 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
 
       await googleDriveService.initialize(token);
 
-      // Create project data
+      // Create project data (new format without background image)
       const projectData: ProjectData = {
-        version: '1.0',
-        image: {
-          data: imageData.src,
-          name: imageData.name,
-          width: imageData.width,
-          height: imageData.height,
-        },
+        version: '2.0', // Version 2.0 indicates no background image
         shapes: drawingState.shapes,
         metadata: {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           author: user?.email || 'unknown',
-          version: '1.0',
+          version: '2.0',
         },
       };
 
-      const result = await googleDriveService.saveProject(projectData, currentFileId || undefined);
+      const result = await googleDriveService.saveProject(projectData, currentFileId || undefined, documentName || 'Untitled');
       setCurrentFileId(result.fileId);
       
       // Show success notification
@@ -223,7 +219,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
       const token = getAccessToken();
       if (!token) throw new Error('No access token');
 
-      const projectData = await googleDriveService.loadProject(fileId);
+      const { projectData, fileName } = await googleDriveService.loadProject(fileId);
       
       // Load the image
       if (projectData.image && projectData.image.data) {
@@ -238,9 +234,9 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
       // Update current file ID
       setCurrentFileId(fileId);
       
-      // Call the optional callback
+      // Call the optional callback with both project data and file name
       if (onProjectLoad) {
-        onProjectLoad(projectData);
+        onProjectLoad(projectData, fileName);
       }
       
       alert('Project loaded successfully!');
@@ -268,6 +264,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
           fontSize: '0.8125rem',
           color: '#202124',
           fontWeight: '400',
+          marginLeft: '-0.25rem',
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = '#f1f3f4';

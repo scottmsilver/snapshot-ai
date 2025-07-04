@@ -11,6 +11,7 @@ interface UseAutoSaveOptions {
   debounceMs?: number;
   onFileIdChange?: (fileId: string) => void;
   canvasSize?: { width: number; height: number } | null;
+  documentName?: string;
 }
 
 type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
@@ -27,7 +28,8 @@ export const useAutoSave = ({
   imageData,
   hasWritePermission,
   debounceMs = 2000, // 2 seconds default
-  onFileIdChange
+  onFileIdChange,
+  documentName
 }: UseAutoSaveOptions): UseAutoSaveReturn => {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -77,7 +79,7 @@ export const useAutoSave = ({
       };
 
       // Save project - create new if no fileId
-      const result = await googleDriveService.saveProject(projectData, fileId || undefined);
+      const result = await googleDriveService.saveProject(projectData, fileId || undefined, documentName);
       
       setSaveStatus('saved');
       setLastSaved(new Date());
@@ -91,7 +93,7 @@ export const useAutoSave = ({
       console.error('Auto-save failed:', error);
       setSaveStatus('error');
     }
-  }, [authContext, drawingState.shapes, fileId, hasWritePermission, onFileIdChange]);
+  }, [authContext, drawingState.shapes, fileId, hasWritePermission, onFileIdChange, documentName]);
 
   // Mark as unsaved
   const markAsUnsaved = useCallback(() => {

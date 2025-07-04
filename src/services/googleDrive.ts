@@ -113,13 +113,13 @@ class GoogleDriveService {
     return this.initPromise;
   }
 
-  async saveProject(data: ProjectData, fileId?: string): Promise<{ fileId: string }> {
+  async saveProject(data: ProjectData, fileId?: string, fileName?: string): Promise<{ fileId: string }> {
     try {
       const fileContent = JSON.stringify(data, null, 2);
       const file = new Blob([fileContent], { type: 'application/json' });
       
       const metadata = {
-        name: `Markup - ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+        name: fileName ? `Markup - ${fileName}` : `Markup - ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
         mimeType: 'application/json'
       };
 
@@ -168,8 +168,15 @@ class GoogleDriveService {
     }
   }
 
-  async loadProject(fileId: string): Promise<ProjectData> {
+  async loadProject(fileId: string): Promise<{ projectData: ProjectData; fileName: string }> {
     try {
+      // First get the file metadata to get the name
+      const metadataResponse = await gapi.client.drive.files.get({
+        fileId: fileId,
+        fields: 'name',
+      });
+      
+      // Then get the file content
       const response = await gapi.client.drive.files.get({
         fileId: fileId,
         alt: 'media',
@@ -180,7 +187,10 @@ class GoogleDriveService {
         ? JSON.parse(response.result) 
         : response.result;
       
-      return data as ProjectData;
+      return {
+        projectData: data as ProjectData,
+        fileName: metadataResponse.result.name
+      };
     } catch (error) {
       console.error('Error loading project:', error);
       throw error;

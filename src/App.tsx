@@ -46,6 +46,9 @@ function App() {
   const [loadedFileId, setLoadedFileId] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved')
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const [documentName, setDocumentName] = useState('Untitled')
+  const [isEditingName, setIsEditingName] = useState(false)
+  const nameInputRef = useRef<HTMLInputElement>(null)
   
   // Get selected shapes
   const selectedShapes = shapes.filter(shape => selectedShapeIds.includes(shape.id))
@@ -214,7 +217,7 @@ function App() {
           .then(() => {
             return googleDriveService.loadProject(fileId);
           })
-          .then((projectData: ProjectData) => {
+          .then(({ projectData, fileName }) => {
             
             // For now, skip loading old format files with background images
             if (projectData.image && projectData.image.data) {
@@ -222,6 +225,13 @@ function App() {
               setSharedFileError('This project uses an old format. Please open it in an older version and re-save.');
               return;
             }
+            
+            // Set the document name
+            let displayName = fileName;
+            if (fileName.startsWith('Markup - ')) {
+              displayName = fileName.substring(9); // Remove "Markup - " prefix
+            }
+            setDocumentName(displayName);
             
             // Load the shapes
             setShapes(projectData.shapes || []);
@@ -827,15 +837,67 @@ function App() {
           }}>
             {/* File Name and save indicator */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-              <h1 style={{ 
-                margin: 0, 
-                fontSize: '1rem',
-                fontWeight: '400',
-                color: '#202124',
-                lineHeight: '1'
-              }}>
-                {loadedFileId ? 'Saved Project' : 'Untitled'}
-              </h1>
+              {isEditingName ? (
+                <input
+                  ref={nameInputRef}
+                  value={documentName}
+                  onChange={(e) => setDocumentName(e.target.value)}
+                  onBlur={() => {
+                    setIsEditingName(false);
+                    if (documentName.trim() === '') {
+                      setDocumentName('Untitled');
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      setIsEditingName(false);
+                      if (documentName.trim() === '') {
+                        setDocumentName('Untitled');
+                      }
+                    } else if (e.key === 'Escape') {
+                      setDocumentName(loadedFileId ? 'Saved Project' : 'Untitled');
+                      setIsEditingName(false);
+                    }
+                  }}
+                  style={{
+                    margin: 0,
+                    padding: '0.125rem 0.25rem',
+                    fontSize: '1rem',
+                    fontWeight: '400',
+                    color: '#202124',
+                    lineHeight: '1',
+                    border: '1px solid #dadce0',
+                    borderRadius: '4px',
+                    backgroundColor: '#fff',
+                    outline: 'none',
+                    minWidth: '200px',
+                  }}
+                  autoFocus
+                />
+              ) : (
+                <h1 
+                  onClick={() => setIsEditingName(true)}
+                  style={{ 
+                    margin: 0, 
+                    fontSize: '1rem',
+                    fontWeight: '400',
+                    color: '#202124',
+                    lineHeight: '1',
+                    cursor: 'text',
+                    padding: '0.125rem 0.25rem',
+                    borderRadius: '4px',
+                    transition: 'background-color 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#f1f3f4';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  {documentName}
+                </h1>
+              )}
               <SaveIndicator status={saveStatus} lastSaved={lastSaved} />
             </div>
           </div>
@@ -845,15 +907,24 @@ function App() {
             display: 'flex',
             alignItems: 'center',
             height: '28px',
-            padding: '0 0 0.125rem',
+            padding: '0 0.5rem 0.125rem',
           }}>
             <FileMenu 
               stageRef={stageRef} 
               imageData={null} 
               initialFileId={loadedFileId}
+              documentName={documentName}
               onSaveStatusChange={(status, saved) => {
                 setSaveStatus(status);
                 setLastSaved(saved);
+              }}
+              onProjectLoad={(projectData, fileName) => {
+                // Extract the name without the "Markup - " prefix if it exists
+                let displayName = fileName;
+                if (fileName.startsWith('Markup - ')) {
+                  displayName = fileName.substring(9); // Remove "Markup - " prefix
+                }
+                setDocumentName(displayName);
               }}
               onNew={() => {
                 clearSelection();
@@ -862,6 +933,7 @@ function App() {
                 setSaveStatus('saved');
                 setCanvasSize(null);
                 setIsCanvasInitialized(false);
+                setDocumentName('Untitled');
               }}
               onExport={handleDownloadImage}
               showGrid={showGrid}
