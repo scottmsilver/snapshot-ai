@@ -135,6 +135,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           if (rectNode) {
             nodes.push(rectNode);
           }
+        } else if (shape?.type === DrawingTool.MEASURE) {
+          // Skip measurement lines - they have their own control points
+          return;
         } else {
           // For other shapes, transform the whole shape
           const node = selectedShapeRefs.current.get(id);
@@ -189,7 +192,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                            e.target.getLayer() === stage.findOne('Layer') ||
                            e.target.getClassName() === 'Layer' ||
                            e.target.getClassName() === 'Image' ||
-                           (!e.target.id() && e.target.getClassName() !== 'Transformer');
+                           (!e.target.id() && e.target.getClassName() !== 'Transformer' && e.target.name?.() !== 'measurement-control-point');
       
       // Check if clicking on transformer or its anchors
       const targetName = e.target.name?.() || '';
@@ -198,9 +201,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                                 targetName.includes('_anchor') ||
                                 targetName.includes('rotater');
       
+      // Check if this is a control point
+      const isControlPoint = targetName === 'measurement-control-point' ||
+                            (targetClass === 'Circle' && e.target.draggable());
       
       // Handle deselection on empty click for any tool
-      if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint) {
+      if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint && !isControlPoint) {
         const shouldMultiSelect = e.evt.shiftKey || e.evt.ctrlKey || e.evt.metaKey;
         if (!shouldMultiSelect && drawingSelectedShapeIds.length > 0) {
           clearSelection();
@@ -208,12 +214,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       }
 
       if (activeTool === DrawingTool.SELECT) {
-        if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint) {
+        if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint && !isControlPoint) {
           // Check if we should start drag selection
           if (e.evt.button === 0) { // Left mouse button
             startDragSelection(pos);
           }
-        } else if (!isTransformerClick && e.target.id() && !isDraggingControlPoint) {
+        } else if (!isTransformerClick && e.target.id() && !isDraggingControlPoint && !isControlPoint) {
           // Shape clicks and dragging are handled by the shape's event handlers
         }
         return;
@@ -277,8 +283,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                                 targetName.includes('rotater');
       
       // Check if this is a control point (they're Circle shapes that are draggable)
-      const isControlPoint = targetClass === 'Circle' && target.draggable() && 
-                            target.getAttr('fill') && (target.getAttr('fill') === '#4a90e2' || target.getAttr('fill') === '#e24a4a');
+      const isControlPoint = (targetClass === 'Circle' && target.draggable() && 
+                            target.getAttr('fill') && (target.getAttr('fill') === '#4a90e2' || target.getAttr('fill') === '#e24a4a')) ||
+                            targetName === 'measurement-control-point';
       
       if (isTransformerClick || isControlPoint) {
         // Don't process mouseup from transformer handles or control points
@@ -641,29 +648,72 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               dash={[5, 5]}
               listening={false}
             />
-            {/* Preview label */}
-            <Text
+            {/* Preview label with background */}
+            <Group
               x={(measureStart.x + measureEnd.x) / 2}
-              y={(measureStart.y + measureEnd.y) / 2 - 15}
-              text={(() => {
-                if (drawingState.measurementCalibration.pixelsPerUnit) {
-                  const value = pixelsToMeasurement(
-                    measureDistance,
-                    drawingState.measurementCalibration.pixelsPerUnit,
-                    drawingState.measurementCalibration.unit as MeasurementUnit
-                  );
-                  return formatMeasurement(value, drawingState.measurementCalibration.unit as MeasurementUnit);
-                }
-                return `${Math.round(measureDistance)}px`;
-              })()}
-              fontSize={12}
-              fontFamily="Arial"
-              fill="#666"
-              align="center"
+              y={(measureStart.y + measureEnd.y) / 2}
               rotation={(measureAngle > 90 || measureAngle < -90) ? measureAngle + 180 : measureAngle}
-              offsetX={30}
               listening={false}
-            />
+            >
+              {(() => {
+                const labelText = drawingState.measurementCalibration.pixelsPerUnit
+                  ? formatMeasurement(
+                      pixelsToMeasurement(
+                        measureDistance,
+                        drawingState.measurementCalibration.pixelsPerUnit,
+                        drawingState.measurementCalibration.unit as MeasurementUnit
+                      ),
+                      drawingState.measurementCalibration.unit as MeasurementUnit
+                    )
+                  : `${Math.round(measureDistance)}px`;
+                
+                return (
+                  <>
+                    {/* Background rectangle */}
+                    <Rect
+                      x={-50}
+                      y={-30}
+                      width={100}
+                      height={20}
+                      fill="#ffffff"
+                      opacity={0.85}
+                      cornerRadius={2}
+                      listening={false}
+                    />
+                    {/* Text */}
+                    <Text
+                      x={0}
+                      y={-26}
+                      text={labelText}
+                      fontSize={12}
+                      fontFamily="Arial"
+                      fill="#666"
+                      align="center"
+                      listening={false}
+                      ref={(node) => {
+                        if (node) {
+                          const textWidth = node.width();
+                          const boxWidth = textWidth + 8;
+                          
+                          node.x(-textWidth / 2);
+                          
+                          const parent = node.getParent();
+                          if (parent) {
+                            const bgRect = parent.findOne('Rect');
+                            if (bgRect) {
+                              bgRect.setAttrs({
+                                x: -boxWidth / 2,
+                                width: boxWidth,
+                              });
+                            }
+                          }
+                        }
+                      }}
+                    />
+                  </>
+                );
+              })()}
+            </Group>
           </Group>
         );
 
@@ -686,19 +736,60 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               dash={[5, 5]}
               listening={false}
             />
-            {/* Preview label */}
-            <Text
+            {/* Preview label with background */}
+            <Group
               x={(calibrateStart.x + calibrateEnd.x) / 2}
-              y={(calibrateStart.y + calibrateEnd.y) / 2 - 15}
-              text={`${Math.round(calibrateDistance)}px - Set Reference`}
-              fontSize={12}
-              fontFamily="Arial"
-              fill="#4a90e2"
-              align="center"
+              y={(calibrateStart.y + calibrateEnd.y) / 2}
               rotation={(calibrateAngle > 90 || calibrateAngle < -90) ? calibrateAngle + 180 : calibrateAngle}
-              offsetX={60}
               listening={false}
-            />
+            >
+              {(() => {
+                const labelText = `${Math.round(calibrateDistance)}px - Set Reference`;
+                return (
+                  <>
+                    {/* Background rectangle */}
+                    <Rect
+                      x={-80}
+                      y={-30}
+                      width={160}
+                      height={20}
+                      fill="#ffffff"
+                      opacity={0.85}
+                      cornerRadius={2}
+                    />
+                    {/* Text */}
+                    <Text
+                      x={0}
+                      y={-26}
+                      text={labelText}
+                      fontSize={12}
+                      fontFamily="Arial"
+                      fill="#4a90e2"
+                      align="center"
+                      ref={(node) => {
+                        if (node) {
+                          const textWidth = node.width();
+                          const boxWidth = textWidth + 8;
+                          
+                          node.x(-textWidth / 2);
+                          
+                          const parent = node.getParent();
+                          if (parent) {
+                            const bgRect = parent.findOne('Rect');
+                            if (bgRect) {
+                              bgRect.setAttrs({
+                                x: -boxWidth / 2,
+                                width: boxWidth,
+                              });
+                            }
+                          }
+                        }
+                      }}
+                    />
+                  </>
+                );
+              })()}
+            </Group>
           </Group>
         );
 
@@ -1510,6 +1601,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               lineJoin="round"
               opacity={measureShape.style.opacity}
               dash={measureShape.isCalibration ? [5, 5] : undefined}
+              hitStrokeWidth={20} // Make it easier to select the line
             />
             
             {/* End caps */}
@@ -1528,18 +1620,57 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
               opacity={measureShape.style.opacity}
             />
             
-            {/* Measurement label */}
-            <Text
+            {/* Measurement label with background */}
+            <Group
               x={midX}
-              y={midY - 15}
-              text={measurementLabel}
-              fontSize={12}
-              fontFamily="Arial"
-              fill={measureShape.isCalibration ? '#4a90e2' : '#333333'}
-              align="center"
+              y={midY}
               rotation={textAngle}
-              offsetX={measurementLabel.length * 3} // Rough centering
-            />
+              listening={false}
+            >
+              {/* Background rectangle */}
+              <Rect
+                x={-50} // Will be updated by ref
+                y={-30} // 20px above line + 10px for half height
+                width={100} // Will be updated by ref
+                height={20}
+                fill="#ffffff"
+                opacity={0.85}
+                cornerRadius={2}
+                listening={false}
+              />
+              {/* Text */}
+              <Text
+                x={0}
+                y={-26} // 20px above line + 6px for text baseline
+                text={measurementLabel}
+                fontSize={12}
+                fontFamily="Arial"
+                fill={measureShape.isCalibration ? '#4a90e2' : '#333333'}
+                align="center"
+                listening={false}
+                ref={(node) => {
+                  if (node) {
+                    const textWidth = node.width();
+                    const boxWidth = textWidth + 8;
+                    
+                    // Center the text horizontally
+                    node.x(-textWidth / 2);
+                    
+                    // Update background rectangle
+                    const parent = node.getParent();
+                    if (parent) {
+                      const bgRect = parent.findOne('Rect');
+                      if (bgRect) {
+                        bgRect.setAttrs({
+                          x: -boxWidth / 2,
+                          width: boxWidth,
+                        });
+                      }
+                    }
+                  }
+                }}
+              />
+            </Group>
             
             {/* Calibration icon */}
             {measureShape.isCalibration && (
@@ -1548,6 +1679,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                 y={y1 - 15}
                 text="📐"
                 fontSize={16}
+                listening={false}
               />
             )}
           </Group>
@@ -1649,7 +1781,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       }
     };
     
-    const handleControlPointDragEnd = (_index: number, _e: Konva.KonvaEventObject<DragEvent>) => {
+    const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>) => {
+      e.cancelBubble = true;
       setTimeout(() => {
         isDraggingControlPointRef.current = false;
         endControlPointDrag();
@@ -1657,7 +1790,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
     };
 
     return (
-      <>
+      <Group listening={true}>
         {/* Visual guide line */}
         <Line
           points={[actualX1, actualY1, actualX2, actualY2]}
@@ -1670,20 +1803,28 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         
         {/* Start point control (blue) */}
         <Circle
+          name="measurement-control-point"
           x={actualX1}
           y={actualY1}
-          radius={6}
+          radius={10}
           fill="#4a90e2"
           stroke="#fff"
-          strokeWidth={2}
+          strokeWidth={3}
+          shadowColor="rgba(0,0,0,0.5)"
+          shadowBlur={10}
+          shadowOffset={{ x: 2, y: 2 }}
           draggable={true}
-          onDragStart={() => {
+          onDragStart={(e) => {
+            e.cancelBubble = true;
             startControlPointDrag();
             isDraggingControlPointRef.current = true;
             setDraggingControlPointIndex(0);
           }}
           onDragMove={(e) => handleControlPointDragMove(0, e)}
           onDragEnd={(e) => handleControlPointDragEnd(0, e)}
+          onClick={(e) => {
+            e.cancelBubble = true;
+          }}
           onMouseEnter={(e) => {
             const container = e.target.getStage()?.container();
             if (container) {
@@ -1700,20 +1841,28 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
         
         {/* End point control (red) */}
         <Circle
+          name="measurement-control-point"
           x={actualX2}
           y={actualY2}
-          radius={6}
+          radius={10}
           fill="#e24a4a"
           stroke="#fff"
-          strokeWidth={2}
+          strokeWidth={3}
+          shadowColor="rgba(0,0,0,0.5)"
+          shadowBlur={10}
+          shadowOffset={{ x: 2, y: 2 }}
           draggable={true}
-          onDragStart={() => {
+          onDragStart={(e) => {
+            e.cancelBubble = true;
             startControlPointDrag();
             isDraggingControlPointRef.current = true;
             setDraggingControlPointIndex(1);
           }}
           onDragMove={(e) => handleControlPointDragMove(1, e)}
           onDragEnd={(e) => handleControlPointDragEnd(1, e)}
+          onClick={(e) => {
+            e.cancelBubble = true;
+          }}
           onMouseEnter={(e) => {
             const container = e.target.getStage()?.container();
             if (container) {
@@ -1727,7 +1876,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             }
           }}
         />
-      </>
+      </Group>
     );
   };
 
@@ -1788,7 +1937,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       updateShape(arrowShape.id, { points: newPoints });
     };
     
-    const handleControlPointDragEnd = (_index: number, _e: Konva.KonvaEventObject<DragEvent>) => {
+    const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>) => {
+      e.cancelBubble = true;
       setTimeout(() => {
         isDraggingControlPointRef.current = false;
         endControlPointDrag();

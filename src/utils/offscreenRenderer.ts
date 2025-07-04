@@ -276,7 +276,7 @@ export async function renderShapeOffscreen(
       });
       group.add(cap2);
       
-      // Label
+      // Label with background
       const midX = (x1 + x2) / 2;
       const midY = (y1 + y2) / 2;
       const textAngle = (angle > 90 || angle < -90) ? angle + 180 : angle;
@@ -285,18 +285,47 @@ export async function renderShapeOffscreen(
         ? formatMeasurement(measureShape.measurement.value, measureShape.measurement.unit as MeasurementUnit)
         : `${Math.round(Math.sqrt(dx * dx + dy * dy))}px`;
       
-      const label = new Konva.Text({
+      // Create a group for the label and background
+      const labelGroup = new Konva.Group({
         x: midX + offsetX,
-        y: midY + offsetY - 15,
+        y: midY + offsetY,
+        rotation: textAngle,
+      });
+      
+      // Measure text to create background
+      const tempText = new Konva.Text({
+        text: measurementLabel,
+        fontSize: 12,
+        fontFamily: 'Arial',
+      });
+      const textWidth = tempText.width();
+      tempText.destroy();
+      
+      // Background rectangle
+      const labelBg = new Konva.Rect({
+        x: -textWidth / 2 - 4,
+        y: -30,
+        width: textWidth + 8,
+        height: 20,
+        fill: '#ffffff',
+        opacity: 0.85,
+        cornerRadius: 2,
+      });
+      labelGroup.add(labelBg);
+      
+      // Text
+      const label = new Konva.Text({
+        x: -textWidth / 2,
+        y: -26,
         text: measurementLabel,
         fontSize: 12,
         fontFamily: 'Arial',
         fill: measureShape.isCalibration ? '#4a90e2' : '#333333',
         align: 'center',
-        rotation: textAngle,
-        offsetX: measurementLabel.length * 3,
       });
-      group.add(label);
+      labelGroup.add(label);
+      
+      group.add(labelGroup);
       
       return group;
     }
