@@ -1416,13 +1416,23 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           y: calloutShape.arrowY
         };
         
-        const currentPerimeterOffset = calculateInitialPerimeterOffset(textBox, arrowTip);
+        // Use stored perimeter offset if available, otherwise calculate it
+        const currentPerimeterOffset = calloutShape.perimeterOffset !== undefined 
+          ? calloutShape.perimeterOffset 
+          : calculateInitialPerimeterOffset(textBox, arrowTip);
         const basePoint = perimeterOffsetToPoint(textBox, currentPerimeterOffset);
         
-        // Calculate optimal control points for current positions
-        const optimalPoints = getOptimalControlPoints(basePoint, arrowTip, textBox);
-        const control1 = optimalPoints.control1;
-        const control2 = optimalPoints.control2;
+        // Use stored control points if available, otherwise calculate optimal ones
+        let control1: Point, control2: Point;
+        if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined &&
+            calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
+          control1 = { x: calloutShape.curveControl1X, y: calloutShape.curveControl1Y };
+          control2 = { x: calloutShape.curveControl2X, y: calloutShape.curveControl2Y };
+        } else {
+          const optimalPoints = getOptimalControlPoints(basePoint, arrowTip, textBox);
+          control1 = optimalPoints.control1;
+          control2 = optimalPoints.control2;
+        }
         
         return (
           <Group
