@@ -21,6 +21,7 @@ import { pixelsToMeasurement, formatMeasurement, type MeasurementUnit } from '@/
 interface DrawingLayerProps {
   stageRef: React.RefObject<Konva.Stage | null>;
   onTextClick?: (position: Point) => void;
+  onTextShapeEdit?: (shapeId: string) => void;
   onImageToolComplete?: (bounds: { x: number; y: number; width: number; height: number }) => void;
 }
 
@@ -61,7 +62,7 @@ const ImageShapeComponent: React.FC<{
   );
 };
 
-export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClick, onImageToolComplete }) => {
+export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClick, onTextShapeEdit, onImageToolComplete }) => {
   const {
     activeTool,
     currentStyle,
@@ -1371,6 +1372,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             align={textShape.align}
             width={textShape.width}
             rotation={textShape.rotation || 0}
+            onDblClick={(e) => {
+              e.cancelBubble = true;
+              if (onTextShapeEdit) {
+                onTextShapeEdit(shape.id);
+              }
+            }}
             ref={(node) => {
               if (node) {
                 selectedShapeRefs.current.set(shape.id, node);
@@ -1426,6 +1433,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                 selectedShapeRefs.current.set(shape.id, node);
               } else {
                 selectedShapeRefs.current.delete(shape.id);
+              }
+            }}
+            onDblClick={(e) => {
+              e.cancelBubble = true;
+              if (onTextShapeEdit) {
+                onTextShapeEdit(shape.id);
               }
             }}
           >

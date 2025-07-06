@@ -61,6 +61,15 @@ function App() {
   const [textPosition, setTextPosition] = useState<Point | null>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
   
+  // Handle editing existing text shapes
+  const handleTextShapeEdit = (shapeId: string) => {
+    const shape = shapes.find(s => s.id === shapeId);
+    if (shape && (shape.type === DrawingTool.TEXT || shape.type === DrawingTool.CALLOUT)) {
+      setEditingTextId(shapeId);
+      setTextDialogOpen(true);
+    }
+  }
+  
   // Measurement state
   const measurement = useMeasurement(shapes, setShapes, {
     pixelsPerUnit: drawingState.measurementCalibration.pixelsPerUnit,
@@ -1372,6 +1381,7 @@ function App() {
                     setEditingTextId(null);
                     setTextDialogOpen(true);
                   }}
+                  onTextShapeEdit={handleTextShapeEdit}
                   onImageToolComplete={(bounds) => {
                     // Create file input and show picker
                     const input = document.createElement('input');
@@ -1440,9 +1450,9 @@ function App() {
       {/* Text Input Dialog - rendered outside canvas */}
       <TextInputDialog
         isOpen={textDialogOpen}
-        initialText={editingTextId ? (shapes.find(s => s.id === editingTextId) as TextShape)?.text || '' : ''}
-        initialFontSize={editingTextId ? (shapes.find(s => s.id === editingTextId) as TextShape)?.fontSize || 16 : 16}
-        initialFontFamily={editingTextId ? (shapes.find(s => s.id === editingTextId) as TextShape)?.fontFamily || 'Arial' : currentStyle.fontFamily || 'Arial'}
+        initialText={editingTextId ? (shapes.find(s => s.id === editingTextId) as TextShape | CalloutShape)?.text || '' : ''}
+        initialFontSize={editingTextId ? (shapes.find(s => s.id === editingTextId) as TextShape | CalloutShape)?.fontSize || 16 : 16}
+        initialFontFamily={editingTextId ? (shapes.find(s => s.id === editingTextId) as TextShape | CalloutShape)?.fontFamily || 'Arial' : currentStyle.fontFamily || 'Arial'}
         onSubmit={(text, fontSize, fontFamily) => {
           if (editingTextId) {
             // Update existing text
