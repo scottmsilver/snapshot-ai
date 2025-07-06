@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
+import { storeSession, getStoredSession, clearStoredSession, isSessionValid } from '@/utils/tokenPersistence';
+import { useActivityMonitor } from '@/hooks/useActivityMonitor';
 
 interface User {
   id: string;
@@ -39,35 +41,6 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [tokenExpiry, setTokenExpiry] = useState<number | null>(null);
 
-  // Check for existing session on mount
-  useEffect(() => {
-    const storedToken = localStorage.getItem('google_access_token');
-    const storedUser = localStorage.getItem('google_user');
-    const storedExpiry = localStorage.getItem('google_token_expiry');
-    
-    if (storedToken && storedUser) {
-      const expiry = storedExpiry ? parseInt(storedExpiry) : null;
-      
-      // Check if token is expired
-      if (expiry && Date.now() > expiry) {
-        // Token expired, clear session
-        logout();
-      } else {
-        setAccessToken(storedToken);
-        setUser(JSON.parse(storedUser));
-        setTokenExpiry(expiry);
-        
-        // Validate token is still valid
-        validateToken(storedToken).catch(() => {
-          // Token is invalid, clear session
-          logout();
-        });
-      }
-    }
-    
-    setIsLoading(false);
-  }, []);
-
   const validateToken = async (token: string) => {
     try {
       const response = await fetch('https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=' + token);
@@ -84,12 +57,13 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
     try {
       const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
         headers: {
-          Authorization: `Bearer ${token}`,
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
         },
       });
       
       if (!response.ok) {
-        throw new Error('Failed to fetch user info');
+        throw new Error(`Failed to fetch user info: ${response.status}`);
       }
       
       const userData = await response.json();
@@ -101,8 +75,6 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
         picture: userData.picture,
       };
       
-      // Store user info
-      localStorage.setItem('google_user', JSON.stringify(user));
       setUser(user);
       
       return user;
@@ -112,106 +84,119 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
     }
   };
 
+
+  const logout = useCallback(() => {
+    const currentAccessToken = accessToken;
+    setUser(null);
+    setAccessToken(null);
+    setTokenExpiry(null);
+    
+    // Clear stored session
+    clearStoredSession();
+    
+    // Optional: Revoke token
+    if (currentAccessToken) {
+      fetch(`https://oauth2.googleapis.com/revoke?token=${currentAccessToken}`, {
+        method: 'POST',
+      }).catch(console.error);
+    }
+  }, [accessToken]);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      const session = getStoredSession();
+      
+      if (session && isSessionValid()) {
+        setUser(session.user);
+        setAccessToken(session.token);
+        setTokenExpiry(session.expiry);
+        
+        // Validate token is still valid with Google
+        try {
+          await validateToken(session.token);
+        } catch (error) {
+          console.error('Stored token is invalid:', error);
+          logout();
+        }
+      }
+      
+      setIsLoading(false);
+    };
+    
+    checkSession();
+  }, [logout]);
+
   const googleLogin = useGoogleLogin({
     onSuccess: async (response) => {
       const token = response.access_token;
-      setAccessToken(token);
-      localStorage.setItem('google_access_token', token);
+      if (!token) {
+        console.error('No access token in response');
+        return;
+      }
       
-      // Calculate and store token expiry (Google tokens typically expire in 1 hour)
-      // response.expires_in is in seconds, we convert to milliseconds
-      const expiresIn = response.expires_in || 3600; // Default to 1 hour if not provided
+      setAccessToken(token);
+      
+      // Calculate and store token expiry
+      const expiresIn = response.expires_in || 3600;
       const expiryTime = Date.now() + (expiresIn * 1000);
       setTokenExpiry(expiryTime);
-      localStorage.setItem('google_token_expiry', expiryTime.toString());
       
       // Fetch user info
-      await fetchUserInfo(token);
+      try {
+        const user = await fetchUserInfo(token);
+        
+        // Store session with improved persistence
+        storeSession(token, user, expiresIn);
+      } catch (error) {
+        console.error('Failed to fetch user info after login:', error);
+      }
     },
     onError: (error) => {
       console.error('Login failed:', error);
     },
     scope: 'openid email profile https://www.googleapis.com/auth/drive.file',
+    // Use implicit flow for now (simpler and works well for SPAs)
+    flow: 'implicit',
+    // Configure popup
+    ux_mode: 'popup',
   });
 
   const login = () => {
     googleLogin();
   };
 
-  const logout = () => {
-    setUser(null);
-    setAccessToken(null);
-    setTokenExpiry(null);
-    localStorage.removeItem('google_access_token');
-    localStorage.removeItem('google_user');
-    localStorage.removeItem('google_token_expiry');
-    
-    // Optional: Revoke token
-    if (accessToken) {
-      fetch(`https://oauth2.googleapis.com/revoke?token=${accessToken}`, {
-        method: 'POST',
-      }).catch(console.error);
-    }
-  };
-
   const getAccessToken = () => accessToken;
 
-  // Check if token is expired or will expire soon (within 5 minutes)
-  const checkAndRefreshToken = async (): Promise<boolean> => {
-    if (!accessToken || !tokenExpiry) {
-      return false;
-    }
+  // Check if token is expired or will expire soon
+  const checkAndRefreshToken = useCallback(async (): Promise<boolean> => {
+    return isSessionValid();
+  }, []);
 
-    const now = Date.now();
-    const fiveMinutes = 5 * 60 * 1000;
-    
-    if (now > tokenExpiry - fiveMinutes) {
-      // Token is expired or will expire soon
-      // With implicit flow, we can't refresh - need to re-authenticate
-      console.log('Token expired or expiring soon, please log in again');
-      
-      // Show user-friendly notification
-      if (now > tokenExpiry) {
-        alert('Your session has expired. Please log in again to continue.');
-      } else {
-        console.log('Your session will expire soon. Please save your work.');
-      }
-      
-      // Clear the session
+  // Set up activity monitoring
+  useActivityMonitor({
+    enabled: !!accessToken,
+    onSessionExpiring: (minutesLeft) => {
+      console.log(`Session expiring in ${minutesLeft} minutes`);
+      // You could show a notification here
+    },
+    onSessionExpired: () => {
+      console.log('Session expired');
       logout();
-      
-      return false;
     }
-    
-    return true;
+  });
+
+  const value: AuthContextType = {
+    user,
+    isAuthenticated: !!user,
+    isLoading,
+    login,
+    logout,
+    getAccessToken,
+    checkAndRefreshToken,
   };
 
-  // Set up periodic token check (every minute)
-  useEffect(() => {
-    if (!accessToken) return;
-    
-    const interval = setInterval(() => {
-      checkAndRefreshToken();
-    }, 60000); // Check every minute
-    
-    return () => clearInterval(interval);
-  }, [accessToken, tokenExpiry]);
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated: !!user,
-        isLoading,
-        login,
-        logout,
-        getAccessToken,
-        checkAndRefreshToken,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 interface AuthProviderProps {
@@ -221,13 +206,22 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   
-  if (!clientId || clientId === 'your-client-id-here') {
-    console.error('Google Client ID is not configured. Please set VITE_GOOGLE_CLIENT_ID in your .env file.');
-    console.error('Follow the instructions in GOOGLE_SETUP.md to create a Google Cloud project and get credentials.');
-    return <>{children}</>;
+  if (!clientId) {
+    console.error('Google Client ID not configured');
+    // Provide a minimal context when auth is not configured
+    const value: AuthContextType = {
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
+      login: () => console.error('Google OAuth not configured'),
+      logout: () => {},
+      getAccessToken: () => null,
+      checkAndRefreshToken: async () => false,
+    };
+    
+    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
   }
   
-  // Google OAuth initialized
   return (
     <GoogleOAuthProvider clientId={clientId}>
       <AuthProviderInner>{children}</AuthProviderInner>
