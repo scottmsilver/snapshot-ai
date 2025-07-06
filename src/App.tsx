@@ -1027,11 +1027,7 @@ function App() {
           {isCanvasInitialized && (
             <div 
               onClick={() => {
-                if (selectedShapeIds.length > 0) {
-                  copySelectedShapes();
-                } else {
-                  handleCopyToClipboard();
-                }
+                handleCopyToClipboard();
               }}
               style={{
                 padding: '0.375rem',
@@ -1053,7 +1049,7 @@ function App() {
                 (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
               }}
               role="button"
-              title={selectedShapeIds.length > 0 ? "Copy Shapes" : "Copy to clipboard"}
+              title="Copy canvas to clipboard"
             >
               <Copy size={18} style={{ pointerEvents: 'none' }} />
             </div>
