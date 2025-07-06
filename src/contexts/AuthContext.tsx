@@ -75,8 +75,6 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
         picture: userData.picture,
       };
       
-      setUser(user);
-      
       return user;
     } catch (error) {
       console.error('Error fetching user info:', error);
@@ -102,6 +100,23 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
     }
   }, [accessToken]);
 
+  // Listen for OAuth messages
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      // Try to parse the data if it's a string
+      if (typeof event.data === 'string') {
+        try {
+          const parsed = JSON.parse(event.data);
+        } catch (e) {
+          // Not JSON
+        }
+      }
+    };
+    
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   // Check for existing session on mount
   useEffect(() => {
     const checkSession = async () => {
@@ -116,11 +131,10 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
         try {
           await validateToken(session.token);
         } catch (error) {
-          console.error('Stored token is invalid:', error);
+          console.error('❌ Stored token is invalid:', error);
           logout();
         }
       }
-      
       setIsLoading(false);
     };
     
@@ -131,7 +145,7 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
     onSuccess: async (response) => {
       const token = response.access_token;
       if (!token) {
-        console.error('No access token in response');
+        console.error('❌ No access token in response');
         return;
       }
       
@@ -148,18 +162,31 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
         
         // Store session with improved persistence
         storeSession(token, user, expiresIn);
+        
+        // Update the user state - this was missing!
+        setUser(user);
       } catch (error) {
-        console.error('Failed to fetch user info after login:', error);
+        console.error('❌ Failed to fetch user info after login:', error);
+        // Clear tokens on error
+        setAccessToken(null);
+        setTokenExpiry(null);
       }
     },
     onError: (error) => {
-      console.error('Login failed:', error);
+      console.error('❌ Login failed:', error);
+      console.error('Error details:', JSON.stringify(error, null, 2));
+    },
+    onNonOAuthError: (error) => {
+      console.error('❌ Non-OAuth error:', error);
+      if (error && typeof error === 'object') {
+        console.error('Error type:', (error as any).type);
+        console.error('Error message:', (error as any).message);
+        console.error('Full error object:', JSON.stringify(error, null, 2));
+      }
     },
     scope: 'openid email profile https://www.googleapis.com/auth/drive.file',
     // Use implicit flow for now (simpler and works well for SPAs)
     flow: 'implicit',
-    // Configure popup
-    ux_mode: 'popup',
   });
 
   const login = () => {
@@ -177,14 +204,13 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
   useActivityMonitor({
     enabled: !!accessToken,
     onSessionExpiring: (minutesLeft) => {
-      console.log(`Session expiring in ${minutesLeft} minutes`);
       // You could show a notification here
     },
     onSessionExpired: () => {
-      console.log('Session expired');
       logout();
     }
   });
+
 
   const value: AuthContextType = {
     user,
@@ -207,7 +233,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   
   if (!clientId) {
-    console.error('Google Client ID not configured');
+    console.error('❌ Google Client ID not configured');
     // Provide a minimal context when auth is not configured
     const value: AuthContextType = {
       user: null,

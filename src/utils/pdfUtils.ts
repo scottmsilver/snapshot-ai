@@ -4,8 +4,6 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 // Use locally served worker from public directory
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/pdf.worker.min.js';
 
-console.log('PDF.js initialized with local worker');
-
 export interface PDFPageInfo {
   pageNumber: number;
   width: number;
@@ -21,11 +19,8 @@ export interface PDFDocumentInfo {
  * Load a PDF document from a file
  */
 export async function loadPDFDocument(file: File): Promise<PDFDocumentProxy> {
-  console.log('Loading PDF document:', file.name, file.size);
-  
   try {
     const arrayBuffer = await file.arrayBuffer();
-    console.log('ArrayBuffer created, size:', arrayBuffer.byteLength);
     
     const loadingTask = pdfjsLib.getDocument({ 
       data: arrayBuffer,
@@ -34,12 +29,10 @@ export async function loadPDFDocument(file: File): Promise<PDFDocumentProxy> {
     
     // Add progress tracking
     loadingTask.onProgress = function(progress: { loaded: number; total: number }) {
-      console.log('PDF loading progress:', Math.round(progress.loaded / progress.total * 100) + '%');
+      // Progress tracking available here
     };
     
-    console.log('Loading task created, waiting for promise...');
     const pdf = await loadingTask.promise;
-    console.log('PDF loaded successfully, pages:', pdf.numPages);
     
     return pdf;
   } catch (error) {

@@ -30,6 +30,9 @@ import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurem
 import type { MeasurementUnit } from '@/utils/measurementUtils'
 import { renderShapeOffscreen } from '@/utils/offscreenRenderer'
 import { calculateScaledDimensions, ImageSource, isPDFSourcedImage, isLikelyScreenshot } from '@/utils/imageScaling'
+import { AuthDebugger } from '@/components/Auth/AuthDebugger'
+import { OAuthTester } from '@/components/Auth/OAuthTester'
+import { CredentialsChecker } from '@/components/Auth/CredentialsChecker'
 
 function App() {
   const CANVAS_PADDING = 100
@@ -86,6 +89,7 @@ function App() {
   try {
     authContext = useAuth();
   } catch (error) {
+    console.error('❌ App: Failed to get auth context:', error);
     // Auth context not available
   }
 
@@ -294,14 +298,10 @@ function App() {
   }
   
   const handlePDFUpload = (file: File) => {
-    console.log('PDF Upload:', file.name, file.type, file.size)
-    console.log('Setting pdfFile state...')
     setPdfFile(file)
-    console.log('PDF state updated')
   }
   
   const handlePDFPageLoad = async (image: HTMLImageElement, pageInfo: { current: number; total: number }) => {
-    console.log('PDF page loaded:', pageInfo)
     
     try {
       // Convert the selected page to an image file
@@ -337,10 +337,26 @@ function App() {
     
     try {
       await copyCanvasToClipboard(stageRef.current);
-      // You could add a toast notification here
+      // Show success feedback
+      const button = document.querySelector('div[title*="Copy"]') as HTMLElement;
+      if (button) {
+        const originalTitle = button.title;
+        button.title = 'Copied!';
+        button.style.backgroundColor = '#4caf50';
+        button.style.color = 'white';
+        setTimeout(() => {
+          button.title = originalTitle;
+          button.style.backgroundColor = 'transparent';
+          button.style.color = '#5f6368';
+        }, 2000);
+      }
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
-      alert('Failed to copy to clipboard. Your browser may not support this feature.');
+      if (error instanceof Error) {
+        alert(error.message);
+      } else {
+        alert('Failed to copy to clipboard. Your browser may not support this feature.');
+      }
     }
   };
 
@@ -768,8 +784,39 @@ function App() {
     }
   }, [measurement.calibration.pixelsPerUnit, measurement.calibration.unit, measurement.isCalibrated])
 
-  // Show login screen if not authenticated or auth context not available
-  if (!authContext || !authContext.isAuthenticated) {
+  // Show loading screen while checking authentication
+  if (!authContext || authContext.isLoading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        backgroundColor: '#f5f5f5',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '1rem'
+        }}>
+          <div style={{
+            width: '48px',
+            height: '48px',
+            border: '3px solid #e0e0e0',
+            borderTopColor: '#4285f4',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }} />
+          <p style={{ color: '#666', fontSize: '0.875rem' }}>Loading...</p>
+        </div>
+        <AuthDebugger />
+      </div>
+    );
+  }
+
+  // Show login screen if not authenticated
+  if (!authContext.isAuthenticated) {
     return (
       <div style={{
         minHeight: '100vh',
@@ -799,6 +846,9 @@ function App() {
           </p>
           <UserMenu />
         </div>
+        <AuthDebugger />
+        <OAuthTester />
+        <CredentialsChecker />
       </div>
     );
   }
@@ -975,7 +1025,7 @@ function App() {
           gap: '0.5rem'
         }}>
           {isCanvasInitialized && (
-            <button
+            <div 
               onClick={() => {
                 if (selectedShapeIds.length > 0) {
                   copySelectedShapes();
@@ -983,7 +1033,6 @@ function App() {
                   handleCopyToClipboard();
                 }
               }}
-              title={selectedShapeIds.length > 0 ? "Copy Shapes" : "Copy to clipboard"}
               style={{
                 padding: '0.375rem',
                 backgroundColor: 'transparent',
@@ -994,16 +1043,20 @@ function App() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                position: 'relative',
+                zIndex: 10,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#f1f3f4';
+                (e.currentTarget as HTMLElement).style.backgroundColor = '#f1f3f4';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
+                (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
               }}
+              role="button"
+              title={selectedShapeIds.length > 0 ? "Copy Shapes" : "Copy to clipboard"}
             >
-              <Copy size={18} />
-            </button>
+              <Copy size={18} style={{ pointerEvents: 'none' }} />
+            </div>
           )}
           <UserMenu />
         </div>

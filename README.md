@@ -50,8 +50,9 @@ A powerful web-based image annotation and markup tool built with React, TypeScri
 
 ### Prerequisites
 - Node.js 18+ and npm
+- Google Cloud account (for OAuth setup)
 
-### Installation
+### Quick Setup (Recommended)
 
 ```bash
 # Clone the repository
@@ -61,8 +62,31 @@ cd snapshot-ai
 # Install dependencies
 npm install
 
+# Run the automated setup wizard
+./setup-oauth.sh
+
 # Start development server
 npm run dev
+```
+
+The setup wizard will:
+- ✅ Check system requirements
+- ✅ Find or create Google OAuth credentials
+- ✅ Set up environment files automatically
+- ✅ Optionally deploy to Vercel
+
+### Manual Setup
+
+If you prefer to set up manually:
+
+```bash
+# Clone and install
+git clone https://github.com/scottmsilver/snapshot-ai.git
+cd snapshot-ai
+npm install
+
+# Create .env.local file with your credentials
+# See Configuration section below for details
 ```
 
 ### Building for Production
@@ -110,19 +134,30 @@ npm run test:coverage
 ## Configuration
 
 ### Environment Variables
-Create a `.env` file in the root directory:
+
+The setup wizard will create these files automatically, but if setting up manually, create a `.env.local` file:
 
 ```env
 VITE_GOOGLE_CLIENT_ID=your-google-client-id
 VITE_GOOGLE_API_KEY=your-google-api-key
+VITE_GOOGLE_DRIVE_APP_ID=your-drive-app-id  # Optional
 ```
 
-To get Google API credentials:
+### Manual Google API Setup
+
+If not using the setup wizard:
+
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select existing
 3. Enable Google Drive API
-4. Create OAuth 2.0 credentials
-5. Add authorized JavaScript origins and redirect URIs
+4. Create OAuth 2.0 credentials (Web application)
+5. Add authorized JavaScript origins:
+   - `http://localhost:5173`
+   - `http://localhost:5174`
+   - `http://localhost:4173`
+   - Your production URL (e.g., `https://your-app.vercel.app`)
+6. Add the same URLs as authorized redirect URIs
+7. Create an API key for Google services
 
 ## Contributing
 

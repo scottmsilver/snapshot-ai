@@ -32,4 +32,11 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
   },
+  build: {
+    // Keep console logs in production for debugging
+    minify: 'esbuild',
+  },
+  esbuild: {
+    drop: [], // Don't drop console logs
+  }
 })

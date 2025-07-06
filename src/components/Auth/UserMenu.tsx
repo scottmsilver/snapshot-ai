@@ -7,6 +7,7 @@ export const UserMenu: React.FC = () => {
   try {
     authContext = useAuth();
   } catch (error) {
+    console.error('❌ UserMenu: Failed to get auth context:', error);
     // Auth context not available (Google OAuth not configured)
     return (
       <div style={{
@@ -28,7 +29,9 @@ export const UserMenu: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <button
-        onClick={login}
+        onClick={() => {
+          login();
+        }}
         style={{
           backgroundColor: '#fff',
           border: '1px solid #dadce0',

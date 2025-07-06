@@ -5,12 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:vercel": "vercel dev",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "test:coverage": "vitest --coverage",
+    "deploy:vercel": "./scripts/deploy-vercel.sh",
+    "deploy:netlify": "npm run build && netlify deploy --prod",
+    "serve": "vite preview"
   },
   "dependencies": {
     "@react-oauth/google": "^0.12.2",

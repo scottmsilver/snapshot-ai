@@ -1,0 +1,12 @@
+{
+  "displayName": "Image Markup App",
+  "supportEmail": "scottmsilver@gmail.com",
+  "developerEmail": "scottmsilver@gmail.com",
+  "scopes": [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/drive.file"
+  ],
+  "type": "EXTERNAL"
+}
