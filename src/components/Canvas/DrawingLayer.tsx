@@ -2108,31 +2108,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       y: calloutShape.arrowY
     };
     
-    // Get base point from perimeter offset
-    let basePoint: Point;
+    // Get base point from perimeter offset - always use stored value if available
+    const basePoint = perimeterOffsetToPoint(textBox, calloutShape.perimeterOffset);
     
-    // If we're dragging, recalculate the perimeter offset to match what will be stored
-    if (nodePos.x !== 0 || nodePos.y !== 0) {
-      // During drag, calculate the optimal perimeter offset for the current positions
-      const currentPerimeterOffset = calculateInitialPerimeterOffset(textBox, arrowTip);
-      basePoint = perimeterOffsetToPoint(textBox, currentPerimeterOffset);
-    } else {
-      // Use stored perimeter offset
-      basePoint = perimeterOffsetToPoint(textBox, calloutShape.perimeterOffset);
-    }
-    
-    // Get control points - always calculate based on current positions
+    // Get control points - always use stored values if available
     let control1: Point, control2: Point;
     
-    // If we're dragging (nodePos is non-zero), calculate where control points should be
-    if (nodePos.x !== 0 || nodePos.y !== 0) {
-      // During drag, recalculate optimal control points for the current positions
-      const optimalPoints = getOptimalControlPoints(basePoint, arrowTip, textBox);
-      control1 = optimalPoints.control1;
-      control2 = optimalPoints.control2;
-    } else if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined &&
-               calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
-      // After drag, use stored control points
+    if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined &&
+        calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
+      // Use stored control points
       control1 = { x: calloutShape.curveControl1X, y: calloutShape.curveControl1Y };
       control2 = { x: calloutShape.curveControl2X, y: calloutShape.curveControl2Y };
     } else {
@@ -2201,22 +2185,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                   // Update arrow tip position
                   const newArrowTip = { x: arrowTip.x + dx, y: arrowTip.y + dy };
                   
-                  // Auto-adjust control points if needed
-                  const newControlPoints = autoAdjustControlPoint(
-                    basePoint,
-                    newArrowTip,
-                    control1,
-                    control2,
-                    textBox
-                  );
-                  
+                  // Only update the arrow position, keep existing control points
                   updateShape(calloutShape.id, {
                     arrowX: newArrowTip.x,
-                    arrowY: newArrowTip.y,
-                    curveControl1X: newControlPoints.control1.x,
-                    curveControl1Y: newControlPoints.control1.y,
-                    curveControl2X: newControlPoints.control2.x,
-                    curveControl2Y: newControlPoints.control2.y
+                    arrowY: newArrowTip.y
                   });
                 }}
                 onDragEnd={(e) => {
@@ -2265,32 +2237,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           onDragMove={(e) => {
             const pos = e.target.position();
             // Convert position to perimeter offset
-            const localTextBox = {
-              x: calloutShape.textX,
-              y: calloutShape.textY,
-              width: calloutShape.textWidth || 120,
-              height: calloutShape.textHeight || 40
-            };
             const newOffset = pointToPerimeterOffset(textBox, pos);
             
             // Get new base point position
             const newBasePoint = perimeterOffsetToPoint(textBox, newOffset);
             
-            // Auto-adjust control points if needed
-            const newControlPoints = autoAdjustControlPoint(
-              newBasePoint,
-              arrowTip,
-              control1,
-              control2,
-              textBox
-            );
-            
+            // Only update the perimeter offset
             updateShape(calloutShape.id, {
-              perimeterOffset: newOffset,
-              curveControl1X: newControlPoints.control1.x,
-              curveControl1Y: newControlPoints.control1.y,
-              curveControl2X: newControlPoints.control2.x,
-              curveControl2Y: newControlPoints.control2.y
+              perimeterOffset: newOffset
             });
             
             // Snap the control point to the perimeter
@@ -2329,6 +2283,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           shadowBlur={5}
           shadowOffset={{ x: 1, y: 1 }}
           draggable={true}
+          dragBoundFunc={(pos) => {
+            // Allow free movement
+            return pos;
+          }}
           onClick={(e) => {
             e.cancelBubble = true;
           }}
@@ -2337,14 +2295,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             isDraggingControlPointRef.current = true;
           }}
           onDragMove={(e) => {
+            // Don't update shape during drag to avoid double rendering
+            // The draggable circle will move on its own
+          }}
+          onDragEnd={(e) => {
+            e.cancelBubble = true;
             const pos = e.target.position();
+            // Update shape only on drag end
             updateShape(calloutShape.id, {
               curveControl1X: pos.x,
               curveControl1Y: pos.y
             });
-          }}
-          onDragEnd={(e) => {
-            e.cancelBubble = true;
             setTimeout(() => {
               isDraggingControlPointRef.current = false;
             }, 50);
@@ -2384,14 +2345,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             isDraggingControlPointRef.current = true;
           }}
           onDragMove={(e) => {
+            // Don't update shape during drag to avoid double rendering
+          }}
+          onDragEnd={(e) => {
+            e.cancelBubble = true;
             const pos = e.target.position();
             updateShape(calloutShape.id, {
               curveControl2X: pos.x,
               curveControl2Y: pos.y
             });
-          }}
-          onDragEnd={(e) => {
-            e.cancelBubble = true;
             setTimeout(() => {
               isDraggingControlPointRef.current = false;
             }, 50);
@@ -2418,7 +2380,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           return (
             <>
               <Line
-                points={[basePoint.x, basePoint.y, control1.x + nodePos.x, control1.y + nodePos.y]}
+                points={[basePoint.x, basePoint.y, control1.x, control1.y]}
                 stroke={guideColor}
                 strokeWidth={1}
                 dash={[5, 5]}
@@ -2426,7 +2388,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                 listening={false}
               />
               <Line
-                points={[control1.x + nodePos.x, control1.y + nodePos.y, control2.x + nodePos.x, control2.y + nodePos.y]}
+                points={[control1.x, control1.y, control2.x, control2.y]}
                 stroke={guideColor}
                 strokeWidth={1}
                 dash={[5, 5]}
@@ -2434,7 +2396,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
                 listening={false}
               />
               <Line
-                points={[control2.x + nodePos.x, control2.y + nodePos.y, arrowTip.x, arrowTip.y]}
+                points={[control2.x, control2.y, arrowTip.x, arrowTip.y]}
                 stroke={guideColor}
                 strokeWidth={1}
                 dash={[5, 5]}
