@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Upload } from 'lucide-react';
 import type { FileType, UploadError } from '@/types/canvas';
@@ -27,6 +27,8 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type as FileType);
     const isPDF = ACCEPTED_PDF_TYPES.includes(file.type);
     
+    console.log('Validating file:', file.name, 'Type:', file.type, 'Is image:', isImage, 'Is PDF:', isPDF);
+    
     if (!isImage && !isPDF) {
       return { 
         message: 'Please upload only JPG, PNG images or PDF files', 
@@ -46,7 +48,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     return null;
   };
 
-  const handleFile = (file: File) => {
+  const handleFile = useCallback((file: File) => {
     const error = validateFile(file);
     if (error) {
       setError(error);
@@ -68,7 +70,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     } else {
       onImageUpload(file);
     }
-  };
+  }, [onImageUpload, onPDFUpload, maxSizeMB]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -113,14 +115,21 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   // Handle paste events
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
+      console.log('Paste event detected');
       const items = e.clipboardData?.items;
-      if (!items) return;
+      if (!items) {
+        console.log('No clipboard items found');
+        return;
+      }
 
+      console.log('Clipboard items:', items.length);
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
+        console.log('Item type:', item.type);
         if (item.type.indexOf('image') !== -1) {
           const file = item.getAsFile();
           if (file) {
+            console.log('Image file found:', file.name, file.type, file.size);
             handleFile(file);
             break;
           }
@@ -132,7 +141,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     return () => {
       document.removeEventListener('paste', handlePaste);
     };
-  }, []);
+  }, [handleFile]);
 
   return (
     <div style={{
