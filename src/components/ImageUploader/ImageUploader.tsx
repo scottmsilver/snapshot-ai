@@ -27,8 +27,6 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type as FileType);
     const isPDF = ACCEPTED_PDF_TYPES.includes(file.type);
     
-    console.log('Validating file:', file.name, 'Type:', file.type, 'Is image:', isImage, 'Is PDF:', isPDF);
-    
     if (!isImage && !isPDF) {
       return { 
         message: 'Please upload only JPG, PNG images or PDF files', 
@@ -114,26 +112,13 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
 
   // Enhanced paste handler
   const handlePaste = useCallback(async (e: ClipboardEvent) => {
-    console.log('=== Paste Event Detected ===');
-    console.log('Event type:', e.type);
-    console.log('Is trusted:', e.isTrusted);
-    
     e.preventDefault();
     e.stopPropagation();
     
     // Method 1: Check DataTransfer items (most compatible)
     if (e.clipboardData && e.clipboardData.items) {
       const items = e.clipboardData.items;
-      console.log(`DataTransfer: Found ${items.length} items`);
-      
-      // Convert to array and log all items
       const itemsArray = Array.from(items);
-      itemsArray.forEach((item, index) => {
-        console.log(`Item ${index}:`, {
-          type: item.type,
-          kind: item.kind
-        });
-      });
       
       // Look for image items
       for (let i = 0; i < itemsArray.length; i++) {
@@ -141,19 +126,9 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         
         if (item.kind === 'file') {
           const file = item.getAsFile();
-          if (file) {
-            console.log('File obtained:', {
-              name: file.name,
-              type: file.type,
-              size: file.size
-            });
-            
-            // Handle image files
-            if (file.type.startsWith('image/')) {
-              console.log('✓ Image file detected, processing...');
-              handleFile(file);
-              return;
-            }
+          if (file && file.type.startsWith('image/')) {
+            handleFile(file);
+            return;
           }
         }
       }
@@ -162,13 +137,9 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     // Method 2: Try Clipboard API (requires HTTPS in production)
     if (navigator.clipboard && navigator.clipboard.read) {
       try {
-        console.log('Attempting Clipboard API...');
         const clipboardItems = await navigator.clipboard.read();
-        console.log(`Clipboard API: Found ${clipboardItems.length} items`);
         
         for (const clipboardItem of clipboardItems) {
-          console.log('Clipboard item types:', clipboardItem.types);
-          
           for (const type of clipboardItem.types) {
             if (type.startsWith('image/')) {
               try {
@@ -176,21 +147,19 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                 const file = new File([blob], `pasted-image-${Date.now()}.png`, { 
                   type: blob.type || 'image/png' 
                 });
-                console.log('✓ File created from blob, processing...');
                 handleFile(file);
                 return;
               } catch (err) {
-                console.error(`Failed to get type ${type}:`, err);
+                // Silently fail for individual type errors
               }
             }
           }
         }
       } catch (err) {
-        console.error('Clipboard API error:', err);
+        // Silently fail if clipboard API is not available
       }
     }
     
-    console.log('❌ No image found in clipboard');
     setError({ 
       message: 'No image found in clipboard. Try copying an image first.', 
       type: 'type' 
@@ -216,8 +185,6 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     document.addEventListener('paste', pasteHandler, false); // Bubble phase
     window.addEventListener('paste', pasteHandler);
     
-    console.log('ImageUploader: Paste handlers attached');
-    
     return () => {
       document.removeEventListener('paste', pasteHandler, true);
       document.removeEventListener('paste', pasteHandler, false);
@@ -239,11 +206,39 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         padding: '2rem',
         outline: 'none'
       }}
-      onFocus={() => console.log('Container focused')}
-      onKeyDown={(e) => {
+      onKeyDown={async (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-          console.log('Ctrl/Cmd+V detected in container');
+          e.preventDefault();
+          
+          // Directly read clipboard when Ctrl+V is pressed
+          try {
+            const clipboardItems = await navigator.clipboard.read();
+            
+            for (const clipboardItem of clipboardItems) {
+              for (const type of clipboardItem.types) {
+                if (type.startsWith('image/')) {
+                  const blob = await clipboardItem.getType(type);
+                  const file = new File([blob], `pasted-image-${Date.now()}.png`, { 
+                    type: blob.type || 'image/png' 
+                  });
+                  handleFile(file);
+                  return;
+                }
+              }
+            }
+          } catch (err) {
+            // Fallback: try to trigger a paste event manually
+            const pasteEvent = new ClipboardEvent('paste', {
+              bubbles: true,
+              cancelable: true,
+              clipboardData: new DataTransfer()
+            });
+            e.currentTarget.dispatchEvent(pasteEvent);
+          }
         }
+      }}
+      onPaste={(e) => {
+        handlePaste(e.nativeEvent);
       }}
     >
       <motion.div
