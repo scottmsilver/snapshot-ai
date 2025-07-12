@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, Star, RegularPolygon, Image } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
@@ -115,6 +115,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
   const isDraggingControlPointRef = useRef(false);
   const [draggedArrowId, setDraggedArrowId] = useState<string | null>(null);
   const [, forceUpdate] = useState({});
+  const [currentlyDraggingShapeId, setCurrentlyDraggingShapeId] = useState<string | null>(null);
   const justFinishedDraggingRef = useRef(false);
   
   // Track which control point is being dragged (0 = start, 1 = end)
@@ -902,7 +903,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       id: shape.id,
       opacity: shape.style.opacity,
       visible: shape.visible,
-      listening: true,
+      listening: currentlyDraggingShapeId === shape.id || (!currentlyDraggingShapeId && activeTool === DrawingTool.SELECT),
       draggable: activeTool === DrawingTool.SELECT && !isDraggingControlPoint,
       onClick: (e: Konva.KonvaEventObject<MouseEvent>) => {
         if (activeTool === DrawingTool.SELECT) {
@@ -943,6 +944,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
       },
       onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => {
         const isSelected = drawingSelectedShapeIds.includes(shape.id);
+        
+        // Set currently dragging shape
+        setCurrentlyDraggingShapeId(shape.id);
         
         // Track arrow dragging
         if (shape.type === DrawingTool.ARROW) {
@@ -1020,7 +1024,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
           justFinishedDraggingRef.current = false;
         }, 100);
         
-        // Clear arrow dragging state
+        // Clear dragging states
+        setCurrentlyDraggingShapeId(null);
         if (shape.type === DrawingTool.ARROW) {
           setDraggedArrowId(null);
         }
@@ -1214,6 +1219,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             tension={penShape.tension || 0.5}
             globalCompositeOperation="source-over"
             hitStrokeWidth={Math.max(penShape.style.strokeWidth, 10)}
+            perfectDrawEnabled={false}
+            shadowForStrokeEnabled={false}
             ref={(node) => {
               if (node) {
                 // Add custom getSelfRect for line to help Transformer
@@ -1268,6 +1275,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             fill={rectShape.style.fill}
             cornerRadius={rectShape.cornerRadius}
             rotation={rectShape.rotation || 0}
+            perfectDrawEnabled={false}
+            shadowForStrokeEnabled={false}
             ref={(node) => {
               if (node) {
                 selectedShapeRefs.current.set(shape.id, node);
@@ -1291,6 +1300,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
             strokeWidth={circleShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
             fill={circleShape.style.fill}
             rotation={circleShape.rotation || 0}
+            perfectDrawEnabled={false}
+            shadowForStrokeEnabled={false}
             ref={(node) => {
               if (node) {
                 selectedShapeRefs.current.set(shape.id, node);
