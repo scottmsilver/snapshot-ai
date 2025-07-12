@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import {
   DrawingTool,
@@ -35,9 +35,43 @@ export const useDrawing = () => {
   } = useDrawingContext();
 
   const isDrawingRef = useRef(false);
+  
+  // Hybrid optimization: store pending points
+  const pendingPointsRef = useRef<Point[]>([]);
+  const lastUpdateTimeRef = useRef(0);
+  const updateIntervalRef = useRef<number | null>(null);
 
   // Generate unique ID for shapes
   const generateId = () => `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  // Effect to handle batched point updates at 60fps
+  useEffect(() => {
+    if (state.isDrawing && state.activeTool === DrawingTool.PEN) {
+      updateIntervalRef.current = window.setInterval(() => {
+        if (pendingPointsRef.current.length > 0) {
+          // Batch update all pending points at once
+          const newPoints = [...state.tempPoints, ...pendingPointsRef.current];
+          setTempPoints(newPoints);
+          pendingPointsRef.current = [];
+        }
+      }, 16); // 60fps
+    } else {
+      // Clear interval when not drawing
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+        updateIntervalRef.current = null;
+      }
+      // Clear any remaining pending points
+      pendingPointsRef.current = [];
+    }
+
+    return () => {
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+        updateIntervalRef.current = null;
+      }
+    };
+  }, [state.isDrawing, state.activeTool, state.tempPoints, setTempPoints]);
 
 
   // Start drawing based on current tool
@@ -90,8 +124,15 @@ export const useDrawing = () => {
 
     switch (state.activeTool) {
       case DrawingTool.PEN:
-        // Add point to path
-        setTempPoints([...state.tempPoints, point]);
+        // Hybrid optimization: collect points without immediate React update
+        const now = Date.now();
+        const timeSinceLastPoint = now - lastUpdateTimeRef.current;
+        
+        // Optional: throttle point collection to reduce density (uncomment if needed)
+        // if (timeSinceLastPoint < 8) return; // 125Hz max
+        
+        pendingPointsRef.current.push(point);
+        lastUpdateTimeRef.current = now;
         break;
 
       case DrawingTool.RECTANGLE:
@@ -123,10 +164,17 @@ export const useDrawing = () => {
 
     switch (state.activeTool) {
       case DrawingTool.PEN:
-        if (state.tempPoints.length > 1) {
+        // Flush any remaining pending points
+        let finalPoints = [...state.tempPoints];
+        if (pendingPointsRef.current.length > 0) {
+          finalPoints = [...finalPoints, ...pendingPointsRef.current];
+          pendingPointsRef.current = [];
+        }
+        
+        if (finalPoints.length > 1) {
           // Convert points to flat array
           const flatPoints: number[] = [];
-          state.tempPoints.forEach(p => {
+          finalPoints.forEach(p => {
             flatPoints.push(p.x, p.y);
           });
 
@@ -423,6 +471,8 @@ export const useDrawing = () => {
     setDrawingState(false, null, null);
     setTempPoints([]);
     setActiveShape(null);
+    // Clear any pending points
+    pendingPointsRef.current = [];
   }, [setDrawingState, setTempPoints, setActiveShape]);
 
   // Handle keyboard shortcuts for tools
