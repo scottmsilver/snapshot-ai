@@ -19,8 +19,10 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   maxSizeMB = 10 
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<UploadError | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
 
   const validateFile = (file: File): UploadError | null => {
     // Check file type
@@ -116,6 +118,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   const handlePaste = useCallback(async (e: ClipboardEvent) => {
     console.log('=== Paste Event Detected ===');
     console.log('Event type:', e.type);
+    console.log('Event target:', e.target);
     console.log('Is trusted:', e.isTrusted);
     
     e.preventDefault();
@@ -126,8 +129,10 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
       const items = e.clipboardData.items;
       console.log(`DataTransfer: Found ${items.length} items`);
       
-      // Convert to array and log all items
+      // Convert to array for easier manipulation
       const itemsArray = Array.from(items);
+      
+      // Log all items first
       itemsArray.forEach((item, index) => {
         console.log(`Item ${index}:`, {
           type: item.type,
@@ -157,6 +162,8 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
           }
         }
       }
+    } else {
+      console.log('No clipboardData.items available');
     }
     
     // Method 2: Try Clipboard API (requires HTTPS in production)
@@ -169,13 +176,21 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         for (const clipboardItem of clipboardItems) {
           console.log('Clipboard item types:', clipboardItem.types);
           
+          // Try each type
           for (const type of clipboardItem.types) {
             if (type.startsWith('image/')) {
               try {
                 const blob = await clipboardItem.getType(type);
+                console.log('Blob obtained:', {
+                  type: blob.type,
+                  size: blob.size
+                });
+                
+                // Create file from blob
                 const file = new File([blob], `pasted-image-${Date.now()}.png`, { 
                   type: blob.type || 'image/png' 
                 });
+                
                 console.log('✓ File created from blob, processing...');
                 handleFile(file);
                 return;
@@ -187,7 +202,13 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         }
       } catch (err) {
         console.error('Clipboard API error:', err);
+        console.log('This might be due to:');
+        console.log('- Not running on HTTPS');
+        console.log('- Browser permissions');
+        console.log('- Browser compatibility');
       }
+    } else {
+      console.log('Clipboard API not available');
     }
     
     console.log('❌ No image found in clipboard');
@@ -200,34 +221,40 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     setTimeout(() => setError(null), 3000);
   }, [handleFile]);
 
-  // Set up paste event listeners
+  // Set up paste event listener
   useEffect(() => {
-    // Focus container on mount
-    const container = document.querySelector('[data-paste-target="true"]');
-    if (container instanceof HTMLElement) {
-      container.focus();
-    }
+    const container = containerRef.current;
+    if (!container) return;
 
-    // Add paste listener to both container and document
+    // Focus container on mount
+    container.focus();
+
+    // Add paste listener to both the container and document
     const pasteHandler = (e: Event) => handlePaste(e as ClipboardEvent);
     
-    // Try to capture paste events at multiple levels
-    document.addEventListener('paste', pasteHandler, true); // Capture phase
-    document.addEventListener('paste', pasteHandler, false); // Bubble phase
-    window.addEventListener('paste', pasteHandler);
+    container.addEventListener('paste', pasteHandler);
+    document.addEventListener('paste', pasteHandler);
     
-    console.log('ImageUploader: Paste handlers attached');
+    // Log when component is ready
+    console.log('ImageUploader: Paste handler attached');
     
     return () => {
-      document.removeEventListener('paste', pasteHandler, true);
-      document.removeEventListener('paste', pasteHandler, false);
-      window.removeEventListener('paste', pasteHandler);
+      container.removeEventListener('paste', pasteHandler);
+      document.removeEventListener('paste', pasteHandler);
     };
   }, [handlePaste]);
 
+  // Handle keyboard events
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      console.log('Ctrl/Cmd+V detected via keydown');
+      // The paste event will be triggered automatically
+    }
+  };
+
   return (
     <div 
-      data-paste-target="true"
+      ref={containerRef}
       tabIndex={0}
       style={{
         width: '100%',
@@ -237,14 +264,15 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         alignItems: 'center',
         justifyContent: 'center',
         padding: '2rem',
-        outline: 'none'
+        outline: isFocused ? '2px solid #4a90e2' : 'none',
+        outlineOffset: '2px'
       }}
-      onFocus={() => console.log('Container focused')}
-      onKeyDown={(e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-          console.log('Ctrl/Cmd+V detected in container');
-        }
+      onFocus={() => {
+        console.log('Container focused');
+        setIsFocused(true);
       }}
+      onBlur={() => setIsFocused(false)}
+      onKeyDown={handleKeyDown}
     >
       <motion.div
         onClick={handleClick}
@@ -303,6 +331,17 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         }}>
           or paste an image (Ctrl+V)
         </p>
+        
+        {isFocused && (
+          <p style={{
+            marginTop: '0.5rem',
+            color: '#4a90e2',
+            fontSize: '0.75rem',
+            fontWeight: 500
+          }}>
+            Ready to paste!
+          </p>
+        )}
       </motion.div>
 
       {error && (
@@ -326,6 +365,27 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         onChange={handleFileChange}
         style={{ display: 'none' }}
       />
+      
+      {/* Debug info in development */}
+      {process.env.NODE_ENV === 'development' && (
+        <div style={{
+          marginTop: '2rem',
+          padding: '1rem',
+          backgroundColor: '#f0f0f0',
+          borderRadius: '4px',
+          fontSize: '0.75rem',
+          fontFamily: 'monospace',
+          color: '#666',
+          maxWidth: '400px',
+          width: '100%'
+        }}>
+          <div>Clipboard Debug Info:</div>
+          <div>- Protocol: {window.location.protocol}</div>
+          <div>- Clipboard API: {navigator.clipboard ? '✓' : '✗'}</div>
+          <div>- Clipboard Read: {navigator.clipboard?.read ? '✓' : '✗'}</div>
+          <div>- Focus state: {isFocused ? 'Focused' : 'Not focused'}</div>
+        </div>
+      )}
     </div>
   );
 };
