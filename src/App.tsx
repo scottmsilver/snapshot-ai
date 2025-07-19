@@ -1166,10 +1166,22 @@ function App() {
               <option value="0.5">50%</option>
               <option value="0.75">75%</option>
               <option value="1">100%</option>
+              <option value="1.25">125%</option>
               <option value="1.5">150%</option>
+              <option value="1.75">175%</option>
               <option value="2">200%</option>
+              <option value="2.25">225%</option>
+              <option value="2.5">250%</option>
+              <option value="2.75">275%</option>
               <option value="3">300%</option>
+              <option value="3.25">325%</option>
+              <option value="3.5">350%</option>
+              <option value="3.75">375%</option>
               <option value="4">400%</option>
+              {/* Add current zoom level if it's not in the list */}
+              {![0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4].includes(zoomLevel) && (
+                <option value={zoomLevel}>{Math.round(zoomLevel * 100)}%</option>
+              )}
             </select>
             
             <button
@@ -1293,9 +1305,9 @@ function App() {
             <div style={{ 
               position: 'relative', 
               display: 'inline-block',
-              padding: '20px',
-              width: canvasSize.width * zoomLevel,
-              height: canvasSize.height * zoomLevel
+              padding: 20,
+              width: 'fit-content',
+              height: 'fit-content'
             }}>
               {/* Show calibration instructions when CALIBRATE tool is active */}
               {activeTool === DrawingTool.CALIBRATE && (
@@ -1315,20 +1327,25 @@ function App() {
                   Click and drag to draw a reference line for calibration
                 </div>
               )}
-              <Stage
-                width={canvasSize.width}
-                height={canvasSize.height}
-                ref={stageRef}
-                scaleX={zoomLevel}
-                scaleY={zoomLevel}
-                style={{
-                  border: '1px solid #ddd',
-                  backgroundColor: '#fafafa',
-                  cursor: activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'
-                }}
-              >
+              <div style={{
+                width: canvasSize.width * zoomLevel,
+                height: canvasSize.height * zoomLevel,
+                overflow: 'visible'
+              }}>
+                <Stage
+                  width={canvasSize.width * zoomLevel}
+                  height={canvasSize.height * zoomLevel}
+                  ref={stageRef}
+                  scaleX={1}
+                  scaleY={1}
+                  style={{
+                    border: '1px solid #ddd',
+                    backgroundColor: '#fafafa',
+                    cursor: activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'
+                  }}
+                >
                 {/* Canvas background layer */}
-                <Layer>
+                <Layer scaleX={zoomLevel} scaleY={zoomLevel}>
                   {/* Background color */}
                   <Rect
                     x={0}
@@ -1375,7 +1392,8 @@ function App() {
                 
                 {/* Drawing Layer for annotations */}
                 <DrawingLayer 
-                  stageRef={stageRef} 
+                  stageRef={stageRef}
+                  zoomLevel={zoomLevel}
                   onTextClick={(pos) => {
                     setTextPosition(pos);
                     setEditingTextId(null);
@@ -1429,6 +1447,7 @@ function App() {
                   }}
                 />
               </Stage>
+              </div>
             </div>
           ) : null}
           

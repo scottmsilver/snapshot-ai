@@ -20,6 +20,7 @@ import { pixelsToMeasurement, formatMeasurement, type MeasurementUnit } from '@/
 
 interface DrawingLayerProps {
   stageRef: React.RefObject<Konva.Stage | null>;
+  zoomLevel?: number;
   onTextClick?: (position: Point) => void;
   onTextShapeEdit?: (shapeId: string) => void;
   onImageToolComplete?: (bounds: { x: number; y: number; width: number; height: number }) => void;
@@ -62,7 +63,7 @@ const ImageShapeComponent: React.FC<{
   );
 };
 
-export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClick, onTextShapeEdit, onImageToolComplete }) => {
+export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel = 1, onTextClick, onTextShapeEdit, onImageToolComplete }) => {
   const {
     activeTool,
     currentStyle,
@@ -2422,7 +2423,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, onTextClic
   };
 
   return (
-    <Layer>
+    <Layer scaleX={zoomLevel} scaleY={zoomLevel}>
       {/* Render all shapes in z-order */}
       {getSortedShapes().map(renderShape)}
       
