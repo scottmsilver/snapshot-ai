@@ -30,9 +30,6 @@ import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurem
 import type { MeasurementUnit } from '@/utils/measurementUtils'
 import { renderShapeOffscreen } from '@/utils/offscreenRenderer'
 import { calculateScaledDimensions, ImageSource, isPDFSourcedImage, isLikelyScreenshot } from '@/utils/imageScaling'
-import { AuthDebugger } from '@/components/Auth/AuthDebugger'
-import { OAuthTester } from '@/components/Auth/OAuthTester'
-import { CredentialsChecker } from '@/components/Auth/CredentialsChecker'
 
 function App() {
   const CANVAS_PADDING = 100
@@ -819,7 +816,6 @@ function App() {
           }} />
           <p style={{ color: '#666', fontSize: '0.875rem' }}>Loading...</p>
         </div>
-        <AuthDebugger />
       </div>
     );
   }
@@ -855,9 +851,6 @@ function App() {
           </p>
           <UserMenu />
         </div>
-        <AuthDebugger />
-        <OAuthTester />
-        <CredentialsChecker />
       </div>
     );
   }
