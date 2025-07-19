@@ -177,18 +177,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     if (!stage) return;
 
     const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-      // Fix: Calculate position correctly accounting for scale
-      const container = stage.container();
-      const rect = container.getBoundingClientRect();
-      const scaleX = stage.scaleX();
-      const scaleY = stage.scaleY();
-      
-      const pos = {
-        x: (e.evt.clientX - rect.left) / scaleX,
-        y: (e.evt.clientY - rect.top) / scaleY
-      };
+      // Use Konva's built-in pointer position which handles all transformations
+      const pos = stage.getPointerPosition();
       
       if (!pos) return;
+      
+      // Adjust for layer scale
+      const adjustedPos = {
+        x: pos.x / zoomLevel,
+        y: pos.y / zoomLevel
+      };
 
       // Check if clicking on empty space (no shape)
       const clickedOnEmpty = e.target === stage || 
@@ -220,7 +218,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint && !isControlPoint) {
           // Check if we should start drag selection
           if (e.evt.button === 0) { // Left mouse button
-            startDragSelection(pos);
+            startDragSelection(adjustedPos);
           }
         } else if (!isTransformerClick && e.target.id() && !isDraggingControlPoint && !isControlPoint) {
           // Shape clicks and dragging are handled by the shape's event handlers
@@ -231,30 +229,28 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       if (activeTool === DrawingTool.TEXT) {
         // For text tool, notify parent to show dialog
         if (clickedOnEmpty && onTextClick) {
-          onTextClick(pos);
+          onTextClick(adjustedPos);
         }
         return;
       }
       
 
       if (clickedOnEmpty) {
-        startDrawing(pos, e.evt as any);
+        startDrawing(adjustedPos, e.evt as any);
       }
     };
 
     const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
-      // Fix: Calculate position correctly accounting for scale
-      const container = stage.container();
-      const rect = container.getBoundingClientRect();
-      const scaleX = stage.scaleX();
-      const scaleY = stage.scaleY();
-      
-      const pos = {
-        x: (e.evt.clientX - rect.left) / scaleX,
-        y: (e.evt.clientY - rect.top) / scaleY
-      };
+      // Use Konva's built-in pointer position which handles all transformations
+      const pos = stage.getPointerPosition();
       
       if (!pos) return;
+      
+      // Adjust for layer scale
+      const adjustedPos = {
+        x: pos.x / zoomLevel,
+        y: pos.y / zoomLevel
+      };
 
       if (activeTool === DrawingTool.SELECT) {
         // Handle hover
@@ -267,11 +263,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         
         // Handle drag operations
         if (isDragSelecting && !isDraggingControlPoint) {
-          updateDragSelection(pos, shapes);
+          updateDragSelection(adjustedPos, shapes);
         }
         // Shape dragging is now handled by Konva's native dragging
       } else if (isDrawing) {
-        continueDrawing(pos, e.evt as any);
+        continueDrawing(adjustedPos, e.evt as any);
       }
     };
 
@@ -313,15 +309,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           return;
         }
       } else if (isDrawing) {
-        // Fix: Calculate position correctly accounting for scale
-        const container = stage.container();
-        const rect = container.getBoundingClientRect();
-        const scaleX = stage.scaleX();
-        const scaleY = stage.scaleY();
+        // Use Konva's built-in pointer position which handles all transformations
+        const pos = stage.getPointerPosition();
         
-        const pos = {
-          x: (e.evt.clientX - rect.left) / scaleX,
-          y: (e.evt.clientY - rect.top) / scaleY
+        if (!pos) return;
+        
+        // Adjust for layer scale
+        const adjustedPos = {
+          x: pos.x / zoomLevel,
+          y: pos.y / zoomLevel
         };
         
         // Special handling for IMAGE tool
@@ -341,7 +337,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           // Notify parent to show file picker
           onImageToolComplete(bounds);
         } else {
-          finishDrawing(pos || undefined, e.evt as any);
+          finishDrawing(adjustedPos || undefined, e.evt as any);
         }
       }
       
@@ -867,11 +863,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       const node = e.target;
       const newPosition = node.position();
       
+      // Since the layer is scaled, we need to adjust the position
+      const adjustedPosition = {
+        x: newPosition.x / zoomLevel,
+        y: newPosition.y / zoomLevel
+      };
+      
       // Update shape position based on its type
       if (shape.type === DrawingTool.PEN || shape.type === DrawingTool.ARROW) {
         // For pen and arrow shapes, we need to update the points array
-        const dx = newPosition.x;
-        const dy = newPosition.y;
+        const dx = adjustedPosition.x;
+        const dy = adjustedPosition.y;
         
         if ('points' in shape && Array.isArray(shape.points)) {
           const newPoints = [...shape.points];
@@ -894,8 +896,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       } else {
         // For other shapes, update x/y position
         updateShape(shape.id, { 
-          x: newPosition.x, 
-          y: newPosition.y 
+          x: adjustedPosition.x, 
+          y: adjustedPosition.y 
         });
       }
     };
@@ -1033,8 +1035,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         
         // Handle multi-shape drag end
         if (drawingSelectedShapeIds.length > 1) {
-          const dx = e.target.x() - (e.target.attrs._dragStartX || e.target.x());
-          const dy = e.target.y() - (e.target.attrs._dragStartY || e.target.y());
+          const dx = (e.target.x() - (e.target.attrs._dragStartX || e.target.x())) / zoomLevel;
+          const dy = (e.target.y() - (e.target.attrs._dragStartY || e.target.y())) / zoomLevel;
           
           // Update positions for all other selected shapes
           drawingSelectedShapeIds.forEach(id => {
@@ -1079,7 +1081,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 } else {
                   // For other shapes, update position
                   const newPos = otherNode.position();
-                  updateShape(id, { x: newPos.x, y: newPos.y });
+                  updateShape(id, { 
+                    x: newPos.x / zoomLevel, 
+                    y: newPos.y / zoomLevel 
+                  });
                 }
               }
             }
@@ -1097,8 +1102,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             if (!groupNode) return;
             
             const groupPos = groupNode.position();
-            const dx = groupPos.x;
-            const dy = groupPos.y;
+            const dx = groupPos.x / zoomLevel;
+            const dy = groupPos.y / zoomLevel;
             
             // Calculate new text box position
             const newTextX = calloutShape.textX + dx;
