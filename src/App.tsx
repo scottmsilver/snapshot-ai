@@ -28,7 +28,6 @@ import { googleDriveService, type ProjectData } from '@/services/googleDrive'
 import { CalibrationDialog } from '@/components/Tools/CalibrationDialog'
 import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurementUtils'
 import type { MeasurementUnit } from '@/utils/measurementUtils'
-import { renderShapeOffscreen } from '@/utils/offscreenRenderer'
 import { calculateScaledDimensions, ImageSource, isPDFSourcedImage, isLikelyScreenshot } from '@/utils/imageScaling'
 
 function App() {
@@ -426,90 +425,15 @@ function App() {
       try {
         const scale = stageRef.current.scaleX();
         
-        // Create offscreen canvas and stage for clean capture
-        const offscreenContainer = document.createElement('div');
-        offscreenContainer.style.position = 'absolute';
-        offscreenContainer.style.left = '-9999px';
-        offscreenContainer.style.top = '-9999px';
-        document.body.appendChild(offscreenContainer);
-        
-        // Create temporary stage with same dimensions as the screenshot area
-        const tempStage = new Konva.Stage({
-          container: offscreenContainer,
-          width: bounds.width,
-          height: bounds.height,
+        // Use the existing stage's toDataURL to capture exactly what's visible
+        // This will include all transformations, rotations, etc.
+        const dataURL = stageRef.current.toDataURL({
+          x: bounds.x * scale,
+          y: bounds.y * scale,
+          width: bounds.width * scale,
+          height: bounds.height * scale,
+          pixelRatio: 1 / scale // Compensate for zoom level
         });
-        
-        // Create layers matching the main stage structure
-        const bgLayer = new Konva.Layer();
-        const shapesLayer = new Konva.Layer();
-        tempStage.add(bgLayer);
-        tempStage.add(shapesLayer);
-        
-        // Render background
-        const bgRect = new Konva.Rect({
-          x: 0,
-          y: 0,
-          width: bounds.width,
-          height: bounds.height,
-          fill: canvasBackground,
-        });
-        bgLayer.add(bgRect);
-        
-        // Render grid if enabled
-        if (showGrid) {
-          const gridSize = 20;
-          // Adjust grid offset based on screenshot position
-          const offsetX = bounds.x % gridSize;
-          const offsetY = bounds.y % gridSize;
-          
-          // Vertical lines
-          for (let x = -offsetX; x <= bounds.width; x += gridSize) {
-            const line = new Konva.Line({
-              points: [x, 0, x, bounds.height],
-              stroke: '#e0e0e0',
-              strokeWidth: 1,
-            });
-            bgLayer.add(line);
-          }
-          
-          // Horizontal lines
-          for (let y = -offsetY; y <= bounds.height; y += gridSize) {
-            const line = new Konva.Line({
-              points: [0, y, bounds.width, y],
-              stroke: '#e0e0e0',
-              strokeWidth: 1,
-            });
-            bgLayer.add(line);
-          }
-        }
-        
-        // Clone and render only visible shapes that intersect with bounds
-        const sortedShapes = [...shapes].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
-        
-        for (const shape of sortedShapes) {
-          if (!shape.visible) continue;
-          
-          // Check if shape intersects with screenshot bounds
-          // This is a simplified check - you might need more sophisticated intersection logic
-          const shapeNode = await renderShapeOffscreen(shape, bounds);
-          if (shapeNode) {
-            shapesLayer.add(shapeNode);
-          }
-        }
-        
-        // Draw layers
-        bgLayer.draw();
-        shapesLayer.draw();
-        
-        // Capture the offscreen stage
-        const dataURL = tempStage.toDataURL({
-          pixelRatio: 1
-        });
-        
-        // Clean up
-        tempStage.destroy();
-        document.body.removeChild(offscreenContainer);
 
         // Create an IMAGE shape with the captured data
         const imageShape = {
