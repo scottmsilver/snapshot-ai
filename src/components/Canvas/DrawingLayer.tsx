@@ -118,9 +118,13 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   const [, forceUpdate] = useState({});
   const [currentlyDraggingShapeId, setCurrentlyDraggingShapeId] = useState<string | null>(null);
   const justFinishedDraggingRef = useRef(false);
+  const [isSnapping, setIsSnapping] = useState(false);
   
   // Track which control point is being dragged (0 = start, 1 = end)
   const [_draggingControlPointIndex, setDraggingControlPointIndex] = useState<number | null>(null);
+  
+  // Snap angles for rotation
+  const SNAP_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
 
   // Log selection changes for debugging
   useEffect(() => {
@@ -911,8 +915,24 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         
         // This will be handled in the onDragEnd of commonProps
         // Don't reset position here - we need it in the second handler
+      } else if (shape.type === DrawingTool.RECTANGLE) {
+        // For rectangles with center offset, adjust the position
+        const rectShape = shape as RectShape;
+        updateShape(shape.id, { 
+          x: adjustedPosition.x - rectShape.width / 2, 
+          y: adjustedPosition.y - rectShape.height / 2
+        });
+      } else if (shape.type === DrawingTool.TEXT) {
+        // For text with center offset, adjust the position
+        const textShape = shape as TextShape;
+        const lines = textShape.text.split('\n').length;
+        const estimatedHeight = textShape.fontSize * lines * 1.2;
+        updateShape(shape.id, { 
+          x: adjustedPosition.x - (textShape.width || 0) / 2, 
+          y: adjustedPosition.y - estimatedHeight / 2
+        });
       } else {
-        // For other shapes, update x/y position
+        // For other shapes (circles, stars), update x/y position directly
         updateShape(shape.id, { 
           x: adjustedPosition.x, 
           y: adjustedPosition.y 
@@ -1290,10 +1310,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           <Rect
             key={shape.id}
             {...commonProps}
-            x={rectShape.x}
-            y={rectShape.y}
+            x={rectShape.x + rectShape.width / 2}
+            y={rectShape.y + rectShape.height / 2}
             width={rectShape.width}
             height={rectShape.height}
+            offsetX={rectShape.width / 2}
+            offsetY={rectShape.height / 2}
             stroke={rectShape.style.stroke}
             strokeWidth={rectShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
             fill={rectShape.style.fill}
@@ -1393,12 +1415,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       case DrawingTool.TEXT:
         const textShape = shape as TextShape;
+        // Estimate text height based on font size and number of lines
+        const lines = textShape.text.split('\n').length;
+        const estimatedHeight = textShape.fontSize * lines * 1.2;
+        const textOffsetX = textShape.width ? textShape.width / 2 : 0;
+        const textOffsetY = estimatedHeight / 2;
+        
         return (
           <Text
             key={shape.id}
             {...commonProps}
-            x={textShape.x}
-            y={textShape.y}
+            x={textShape.x + textOffsetX}
+            y={textShape.y + textOffsetY}
+            offsetX={textOffsetX}
+            offsetY={textOffsetY}
             text={textShape.text}
             fontSize={textShape.fontSize}
             fontFamily={textShape.fontFamily}
@@ -2476,47 +2506,47 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           key={drawingSelectedShapeIds.join(',')}
           ref={transformerRef}
           borderEnabled={true}
-          borderStroke="#4a90e2"
+          borderStroke={isSnapping ? "#00ff00" : "#4a90e2"}
           borderStrokeWidth={1}
           borderDash={[4, 4]}
           anchorFill="white"
-          anchorStroke="#4a90e2"
+          anchorStroke={isSnapping ? "#00ff00" : "#4a90e2"}
           anchorStrokeWidth={2}
           anchorSize={8}
           rotateEnabled={true}
-          enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
+          resizeEnabled={false}
+          enabledAnchors={[]}
           ignoreStroke={false}
-          keepRatio={false}
-          boundBoxFunc={(oldBox, newBox) => {
-            // Check if any selected shape is a circle or star
-            const hasCircleOrStar = drawingSelectedShapeIds.some(id => {
-              const shape = shapes.find(s => s.id === id);
-              return shape?.type === DrawingTool.CIRCLE || shape?.type === DrawingTool.STAR;
-            });
-            
-            // For circles and stars, maintain aspect ratio
-            if (hasCircleOrStar && drawingSelectedShapeIds.length === 1) {
-              const size = Math.max(newBox.width, newBox.height);
-              return {
-                ...newBox,
-                width: size,
-                height: size
-              };
-            }
-            
-            // Prevent negative width/height which can cause issues with arrows
-            if (newBox.width < 5 || newBox.height < 5) {
-              return oldBox;
-            }
-            return newBox;
-          }}
-          onTransformStart={() => {
+          rotationSnaps={[]}
+          rotationSnapTolerance={5}
+          onTransformStart={(e) => {
             isTransformingRef.current = true;
             startTransform();
             
+            // Disable dragging on nodes during transform
+            const nodes = transformerRef.current?.nodes();
+            if (nodes) {
+              nodes.forEach(node => {
+                node.draggable(false);
+              });
+            }
+            
+            // Check if shift is pressed and update snaps
+            const shiftPressed = e.evt.shiftKey;
+            if (transformerRef.current) {
+              transformerRef.current.rotationSnaps(shiftPressed ? SNAP_ANGLES : []);
+            }
+            setIsSnapping(shiftPressed);
           }}
-          onTransform={() => {
-            // Live update during transform - optional for visual feedback
+          onTransform={(e) => {
+            // Update snaps dynamically based on shift key
+            const shiftPressed = e.evt.shiftKey;
+            if (transformerRef.current) {
+              transformerRef.current.rotationSnaps(shiftPressed ? SNAP_ANGLES : []);
+            }
+            setIsSnapping(shiftPressed);
+            
+            // Live update during transform
             const nodes = transformerRef.current?.nodes();
             if (nodes) {
               nodes.forEach(node => {
@@ -2525,6 +2555,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             }
           }}
           onTransformEnd={(_e) => {
+            // Reset snapping state
+            setIsSnapping(false);
+            
             // End transform state
             setTimeout(() => {
               isTransformingRef.current = false;
@@ -2535,15 +2568,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             const nodes = transformerRef.current?.nodes();
             if (!nodes || nodes.length === 0) return;
             
+            // Re-enable dragging on nodes after transform
             nodes.forEach(node => {
-              if (!node || typeof node.scaleX !== 'function') return;
+              node.draggable(true);
+            });
+            
+            nodes.forEach(node => {
+              if (!node || typeof node.rotation !== 'function') return;
               
-              const scaleX = node.scaleX();
-              const scaleY = node.scaleY();
               const rotation = node.rotation();
-              const x = node.x();
-              const y = node.y();
-              
               
               let shapeId = node.id();
               if (!shapeId) return;
@@ -2554,10 +2587,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 // Extract the actual shape ID
                 shapeId = shapeId.replace('_textbox', '');
                 shape = shapes.find(s => s.id === shapeId);
-                // Skip the standard transform handling for callouts as it's handled in onTransform
+                // Skip callouts as they have special handling
                 if (shape?.type === DrawingTool.CALLOUT) {
-                  node.scaleX(1);
-                  node.scaleY(1);
                   return;
                 }
               } else {
@@ -2567,133 +2598,13 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               if (!shape) return;
               
             
-            // Update shape based on its type
+            // Update only the rotation for all shape types
             try {
-              if (shape.type === DrawingTool.RECTANGLE) {
-                const rectShape = shape as RectShape;
-                // Calculate new dimensions and position
-                const newWidth = Math.max(5, rectShape.width * scaleX);
-                const newHeight = Math.max(5, rectShape.height * scaleY);
-                
-                updateShape(shapeId, {
-                  x: x,
-                  y: y,
-                  width: newWidth,
-                  height: newHeight,
-                  rotation: rotation
-                });
-                
-                // Reset transform but keep the visual position
-                node.scaleX(1);
-                node.scaleY(1);
-                node.x(x);
-                node.y(y);
-                node.rotation(rotation);
-                
-              } else if (shape.type === DrawingTool.CIRCLE) {
-                const circleShape = shape as CircleShape;
-                // Keep it as a perfect circle by using the larger scale factor
-                const scale = Math.max(scaleX, scaleY);
-                const newRadius = Math.max(5, circleShape.radiusX * scale);
-                
-                updateShape(shapeId, {
-                  x: x,
-                  y: y,
-                  radiusX: newRadius,
-                  radiusY: newRadius,
-                  rotation: rotation
-                });
-                
-                // Reset transform
-                node.scaleX(1);
-                node.scaleY(1);
-                node.x(x);
-                node.y(y);
-                node.rotation(rotation);
-                
-              } else if (shape.type === DrawingTool.TEXT) {
-                const textShape = shape as TextShape;
-                const newFontSize = Math.max(8, textShape.fontSize * scaleY);
-                
-                updateShape(shapeId, {
-                  x: x,
-                  y: y,
-                  fontSize: newFontSize,
-                  rotation: rotation
-                });
-                
-                // Reset transform
-                node.scaleX(1);
-                node.scaleY(1);
-                node.x(x);
-                node.y(y);
-                node.rotation(rotation);
-                
-              } else if (shape.type === DrawingTool.ARROW || shape.type === DrawingTool.PEN) {
-                // For arrow and pen shapes, apply scale to points
-                if ('points' in shape && Array.isArray(shape.points)) {
-                  const transformedPoints = [...shape.points];
-                  
-                  // Apply scale and rotation to points
-                  for (let i = 0; i < transformedPoints.length; i += 2) {
-                    const px = transformedPoints[i] * scaleX;
-                    const py = transformedPoints[i + 1] * scaleY;
-                    
-                    // Apply rotation if needed
-                    if (rotation !== 0) {
-                      const rad = (rotation * Math.PI) / 180;
-                      const cos = Math.cos(rad);
-                      const sin = Math.sin(rad);
-                      transformedPoints[i] = px * cos - py * sin;
-                      transformedPoints[i + 1] = px * sin + py * cos;
-                    } else {
-                      transformedPoints[i] = px;
-                      transformedPoints[i + 1] = py;
-                    }
-                  }
-                  
-                  // Add the node position to all points
-                  for (let i = 0; i < transformedPoints.length; i += 2) {
-                    transformedPoints[i] += x;
-                    transformedPoints[i + 1] += y;
-                  }
-                  
-                  updateShape(shapeId, {
-                    points: transformedPoints,
-                    rotation: 0 // Reset rotation since it's baked into points
-                  });
-                  
-                  // Reset transform and position
-                  node.scaleX(1);
-                  node.scaleY(1);
-                  node.x(0);
-                  node.y(0);
-                  node.rotation(0);
-                }
-              } else if (shape.type === DrawingTool.STAR) {
-                const starShape = shape as StarShape;
-                // Keep it proportional by using the larger scale factor
-                const scale = Math.max(scaleX, scaleY);
-                const newRadius = Math.max(5, starShape.radius * scale);
-                const newInnerRadius = starShape.innerRadius ? starShape.innerRadius * scale : newRadius * 0.38;
-                
-                updateShape(shapeId, {
-                  x: x,
-                  y: y,
-                  radius: newRadius,
-                  innerRadius: newInnerRadius,
-                  rotation: rotation
-                });
-                
-                // Reset transform
-                node.scaleX(1);
-                node.scaleY(1);
-                node.x(x);
-                node.y(y);
-                node.rotation(rotation);
-              }
+              updateShape(shapeId, {
+                rotation: rotation
+              });
             } catch (error) {
-              console.error('Error updating shape after transform:', error);
+              console.error('Error updating shape rotation:', error);
             }
             });
             
