@@ -19,6 +19,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
   const [renderScale, setRenderScale] = useState(2); // Default scale for quality
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [rotation, setRotation] = useState(0); // Rotation in degrees (0, 90, 180, 270)
 
   // Load PDF document
   useEffect(() => {
@@ -80,12 +81,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
     };
   }, [file]);
 
-  // Load preview when PDF is ready or page changes
+  // Load preview when PDF is ready, page changes, or rotation changes
   useEffect(() => {
     if (pdf && pdfInfo) {
       loadPreview(currentPage);
     }
-  }, [pdf, pdfInfo, currentPage]);
+  }, [pdf, pdfInfo, currentPage, rotation]);
 
   // Load preview for current page
   const loadPreview = async (pageNum: number) => {
@@ -93,8 +94,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
     
     try {
       setLoadingPreview(true);
-      // Use lower scale for preview
-      const previewImage = await pdfPageToImageElement(pdf, pageNum, 1);
+      // Use lower scale for preview with rotation
+      const previewImage = await pdfPageToImageElement(pdf, pageNum, 1, rotation);
       setPreviewUrl(previewImage.src);
     } catch (err) {
       console.error('Error loading preview:', err);
@@ -109,7 +110,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
     
     try {
       setLoading(true);
-      const image = await pdfPageToImageElement(pdf, currentPage, renderScale);
+      const image = await pdfPageToImageElement(pdf, currentPage, renderScale, rotation);
       onPageLoad(image, { current: currentPage, total: pdfInfo.numPages });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load page';
@@ -140,6 +141,19 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
   // Handle scale changes
   const changeScale = (newScale: number) => {
     setRenderScale(newScale);
+  };
+  
+  // Rotation handlers
+  const rotateLeft = () => {
+    setRotation((prev) => (prev - 90 + 360) % 360);
+  };
+  
+  const rotateRight = () => {
+    setRotation((prev) => (prev + 90) % 360);
+  };
+  
+  const resetRotation = () => {
+    setRotation(0);
   };
 
   if (error) {
@@ -314,6 +328,91 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
         >
           ›
         </button>
+      </div>
+
+      {/* Rotation Controls */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '0.75rem',
+        marginBottom: '1.5rem'
+      }}>
+        <span style={{ fontSize: '1rem', color: '#666' }}>Rotate:</span>
+        <button
+          onClick={rotateLeft}
+          disabled={loading || loadingPreview}
+          style={{
+            padding: '0.5rem',
+            backgroundColor: loading || loadingPreview ? '#ccc' : '#4a90e2',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: loading || loadingPreview ? 'not-allowed' : 'pointer',
+            fontSize: '1.2rem',
+            width: '40px',
+            height: '40px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          title="Rotate Left"
+        >
+          ↺
+        </button>
+        <span style={{ 
+          fontSize: '1rem', 
+          minWidth: '40px', 
+          textAlign: 'center',
+          fontWeight: '500',
+          color: rotation !== 0 ? '#4a90e2' : '#666'
+        }}>
+          {rotation}°
+        </span>
+        <button
+          onClick={rotateRight}
+          disabled={loading || loadingPreview}
+          style={{
+            padding: '0.5rem',
+            backgroundColor: loading || loadingPreview ? '#ccc' : '#4a90e2',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: loading || loadingPreview ? 'not-allowed' : 'pointer',
+            fontSize: '1.2rem',
+            width: '40px',
+            height: '40px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          title="Rotate Right"
+        >
+          ↻
+        </button>
+        {rotation !== 0 && (
+          <button
+            onClick={resetRotation}
+            disabled={loading || loadingPreview}
+            style={{
+              padding: '0.5rem',
+              backgroundColor: loading || loadingPreview ? '#ccc' : '#e74c3c',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: loading || loadingPreview ? 'not-allowed' : 'pointer',
+              fontSize: '1rem',
+              width: '40px',
+              height: '40px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            title="Reset Rotation"
+          >
+            ⟲
+          </button>
+        )}
       </div>
 
       {/* Quality Setting */}

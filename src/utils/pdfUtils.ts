@@ -70,10 +70,17 @@ export async function getPDFInfo(pdf: PDFDocumentProxy): Promise<PDFDocumentInfo
 export async function renderPDFPage(
   pdf: PDFDocumentProxy,
   pageNumber: number,
-  scale: number = 2 // Higher scale for better quality
+  scale: number = 2, // Higher scale for better quality
+  rotation: number = 0 // Rotation in degrees (0, 90, 180, 270)
 ): Promise<HTMLCanvasElement> {
   const page = await pdf.getPage(pageNumber);
-  const viewport = page.getViewport({ scale });
+  
+  // Apply rotation to viewport
+  // Combine any existing page rotation with user-specified rotation
+  const baseRotation = page.rotate || 0;
+  const totalRotation = (baseRotation + rotation) % 360;
+  
+  const viewport = page.getViewport({ scale, rotation: totalRotation });
   
   // Create canvas
   const canvas = document.createElement('canvas');
@@ -105,9 +112,10 @@ export async function pdfPageToImage(
   pageNumber: number,
   scale: number = 2,
   format: 'png' | 'jpeg' = 'png',
-  quality: number = 0.9
+  quality: number = 0.9,
+  rotation: number = 0
 ): Promise<string> {
-  const canvas = await renderPDFPage(pdf, pageNumber, scale);
+  const canvas = await renderPDFPage(pdf, pageNumber, scale, rotation);
   
   if (format === 'jpeg') {
     return canvas.toDataURL('image/jpeg', quality);
@@ -122,9 +130,10 @@ export async function pdfPageToImage(
 export async function pdfPageToImageElement(
   pdf: PDFDocumentProxy,
   pageNumber: number,
-  scale: number = 2
+  scale: number = 2,
+  rotation: number = 0
 ): Promise<HTMLImageElement> {
-  const dataUrl = await pdfPageToImage(pdf, pageNumber, scale);
+  const dataUrl = await pdfPageToImage(pdf, pageNumber, scale, 'png', 0.9, rotation);
   
   return new Promise((resolve, reject) => {
     const img = new Image();

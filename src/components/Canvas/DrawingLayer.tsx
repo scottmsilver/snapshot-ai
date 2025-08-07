@@ -2532,7 +2532,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             }
             
             // Check if shift is pressed and update snaps
-            const shiftPressed = e.evt.shiftKey;
+            const shiftPressed = (e.evt as KeyboardEvent).shiftKey;
             if (transformerRef.current) {
               transformerRef.current.rotationSnaps(shiftPressed ? SNAP_ANGLES : []);
             }
@@ -2540,7 +2540,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           }}
           onTransform={(e) => {
             // Update snaps dynamically based on shift key
-            const shiftPressed = e.evt.shiftKey;
+            const shiftPressed = (e.evt as KeyboardEvent).shiftKey;
             if (transformerRef.current) {
               transformerRef.current.rotationSnaps(shiftPressed ? SNAP_ANGLES : []);
             }
