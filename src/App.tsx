@@ -971,12 +971,41 @@ function App() {
                 setLastSaved(saved);
               }}
               onProjectLoad={(projectData, fileName) => {
+                // Clear any existing canvas state
+                clearSelection();
+                setCanvasSize(null);
+                setIsCanvasInitialized(false);
+                setPdfFile(null);
+                setPdfPageInfo(null);
+                
                 // Extract the name without the "Markup - " prefix if it exists
                 let displayName = fileName;
                 if (fileName.startsWith('Markup - ')) {
                   displayName = fileName.substring(9); // Remove "Markup - " prefix
                 }
                 setDocumentName(displayName);
+                
+                // Re-initialize canvas if we have shapes
+                if (projectData.shapes && projectData.shapes.length > 0) {
+                  // Find bounds of all shapes to set canvas size
+                  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                  projectData.shapes.forEach(shape => {
+                    if ('x' in shape && 'y' in shape && 'width' in shape && 'height' in shape) {
+                      minX = Math.min(minX, shape.x);
+                      minY = Math.min(minY, shape.y);
+                      maxX = Math.max(maxX, shape.x + shape.width);
+                      maxY = Math.max(maxY, shape.y + shape.height);
+                    }
+                  });
+                  
+                  if (isFinite(minX)) {
+                    setCanvasSize({
+                      width: Math.min(maxX + CANVAS_PADDING, 1400),
+                      height: Math.min(maxY + CANVAS_PADDING, 900)
+                    });
+                    setIsCanvasInitialized(true);
+                  }
+                }
               }}
               onNew={() => {
                 clearSelection();

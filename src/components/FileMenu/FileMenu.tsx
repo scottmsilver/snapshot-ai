@@ -221,12 +221,15 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
 
       const { projectData, fileName } = await googleDriveService.loadProject(fileId);
       
+      // Clear existing shapes first to prevent overlap
+      setShapes([]);
+      
       // Load the image
       if (projectData.image && projectData.image.data) {
         await loadImageFromData(projectData.image.data, projectData.image.name);
       }
       
-      // Load the shapes
+      // Load the shapes (after clearing)
       if (projectData.shapes) {
         setShapes(projectData.shapes);
       }

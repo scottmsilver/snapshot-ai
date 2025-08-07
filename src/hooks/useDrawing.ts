@@ -75,7 +75,7 @@ export const useDrawing = () => {
 
 
   // Start drawing based on current tool
-  const startDrawing = useCallback((point: Point, _event?: React.MouseEvent) => {
+  const startDrawing = useCallback((point: Point, _event?: React.MouseEvent, zoomLevel: number = 1) => {
     if (state.activeTool === DrawingTool.SELECT) {
       // Handle selection logic
       return;
@@ -114,7 +114,7 @@ export const useDrawing = () => {
   }, [state.activeTool, setDrawingState, setTempPoints]);
 
   // Continue drawing (mouse move)
-  const continueDrawing = useCallback((point: Point, _event?: React.MouseEvent) => {
+  const continueDrawing = useCallback((point: Point, _event?: React.MouseEvent, zoomLevel: number = 1) => {
     if (!isDrawingRef.current || !state.isDrawing) return;
 
     const startPoint = state.startPoint;
@@ -151,7 +151,7 @@ export const useDrawing = () => {
   }, [state.activeTool, state.isDrawing, state.startPoint, state.tempPoints, setDrawingState, setTempPoints]);
 
   // Finish drawing (mouse up)
-  const finishDrawing = useCallback((point?: Point, _event?: React.MouseEvent) => {
+  const finishDrawing = useCallback((point?: Point, _event?: React.MouseEvent, zoomLevel: number = 1) => {
     if (!isDrawingRef.current || !state.isDrawing) return;
 
     const startPoint = state.startPoint;
@@ -204,7 +204,10 @@ export const useDrawing = () => {
           y: Math.min(startPoint.y, endPoint.y),
           width: Math.abs(width),
           height: Math.abs(height),
-          style: { ...state.currentStyle },
+          style: { 
+            ...state.currentStyle,
+            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+          },
           visible: true,
           locked: false,
           zIndex: 0,
@@ -230,7 +233,10 @@ export const useDrawing = () => {
           y: centerY,
           radiusX: radius,
           radiusY: radius,
-          style: { ...state.currentStyle },
+          style: { 
+            ...state.currentStyle,
+            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+          },
           visible: true,
           locked: false,
           zIndex: 0,
@@ -244,22 +250,25 @@ export const useDrawing = () => {
           id: generateId(),
           type: DrawingTool.ARROW,
           points: [startPoint.x, startPoint.y, endPoint.x, endPoint.y],
-          style: { ...state.currentStyle },
+          style: { 
+            ...state.currentStyle,
+            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+          },
           visible: true,
           locked: false,
           zIndex: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
-          pointerLength: 10,
-          pointerWidth: 10,
+          pointerLength: 10 / zoomLevel,
+          pointerWidth: 10 / zoomLevel,
         } as ArrowShape;
         break;
 
       case DrawingTool.CALLOUT:
-        // Calculate text box dimensions
-        const textBoxWidth = 120;
-        const textBoxHeight = 40;
-        const padding = 10;
+        // Calculate text box dimensions - compensate for zoom
+        const textBoxWidth = 120 / zoomLevel;
+        const textBoxHeight = 40 / zoomLevel;
+        const padding = 10 / zoomLevel;
         
         // First click is arrow tip (what we're pointing at)
         // End point is where the text box should be
@@ -268,7 +277,7 @@ export const useDrawing = () => {
         
         // Calculate text box position based on drag direction
         // Ensure reasonable distance from arrow tip
-        const minDistance = 100; // Increased minimum distance
+        const minDistance = 100 / zoomLevel; // Adjust for zoom
         const calloutDx = endPoint.x - startPoint.x;
         const calloutDy = endPoint.y - startPoint.y;
         const distance = Math.sqrt(calloutDx * calloutDx + calloutDy * calloutDy);
@@ -315,7 +324,7 @@ export const useDrawing = () => {
           textX: textX,
           textY: textY,
           text: 'Callout',
-          fontSize: 16,
+          fontSize: (state.currentStyle.strokeWidth * 8) / zoomLevel,
           fontFamily: state.currentStyle.fontFamily || 'Arial',
           textWidth: textBoxWidth,
           textHeight: textBoxHeight,
@@ -329,7 +338,10 @@ export const useDrawing = () => {
           curveControl2Y: controlPoints.control2.y,
           backgroundColor: '#ffffff',
           borderRadius: 4,
-          style: { ...state.currentStyle },
+          style: { 
+            ...state.currentStyle,
+            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+          },
           visible: true,
           locked: false,
           zIndex: 0,
@@ -352,7 +364,10 @@ export const useDrawing = () => {
           radius: starRadius,
           innerRadius: starRadius * 0.38, // Golden ratio for nice-looking stars
           points: 5,
-          style: { ...state.currentStyle },
+          style: { 
+            ...state.currentStyle,
+            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+          },
           visible: true,
           locked: false,
           zIndex: 0,

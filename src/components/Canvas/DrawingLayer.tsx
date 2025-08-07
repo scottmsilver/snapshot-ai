@@ -236,7 +236,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       
 
       if (clickedOnEmpty) {
-        startDrawing(adjustedPos, e.evt as any);
+        startDrawing(adjustedPos, e.evt as any, zoomLevel);
       }
     };
 
@@ -267,7 +267,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         }
         // Shape dragging is now handled by Konva's native dragging
       } else if (isDrawing) {
-        continueDrawing(adjustedPos, e.evt as any);
+        continueDrawing(adjustedPos, e.evt as any, zoomLevel);
       }
     };
 
@@ -337,7 +337,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           // Notify parent to show file picker
           onImageToolComplete(bounds);
         } else {
-          finishDrawing(adjustedPos || undefined, e.evt as any);
+          finishDrawing(adjustedPos || undefined, e.evt as any, zoomLevel);
         }
       }
       
@@ -418,6 +418,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   // Render temporary drawing preview
   const renderTempDrawing = () => {
     if (!isDrawing || tempPoints.length === 0) return null;
+    
+    // Debug log for MEASURE tool
+    if (activeTool === DrawingTool.MEASURE) {
+      console.log('[MEASURE Debug] isDrawing:', isDrawing, 'tempPoints:', tempPoints);
+    }
 
     switch (activeTool) {
       case DrawingTool.PEN:
@@ -497,8 +502,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             stroke={currentStyle.stroke}
             strokeWidth={currentStyle.strokeWidth}
             opacity={currentStyle.opacity}
-            pointerLength={10}
-            pointerWidth={10}
+            pointerLength={10 / zoomLevel}
+            pointerWidth={10 / zoomLevel}
             listening={false}
           />
         );
@@ -508,15 +513,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         const calloutStart = tempPoints[0]; // Arrow tip (what we're pointing at)
         const calloutEnd = tempPoints[1];   // Where text box will be
         
-        // Calculate text box dimensions and position
-        const textPadding = 10;
-        const textWidth = 120;
-        const textHeight = 40;
+        // Calculate text box dimensions and position - compensate for zoom
+        const textPadding = 10 / zoomLevel;
+        const textWidth = 120 / zoomLevel;
+        const textHeight = 40 / zoomLevel;
         const bgWidth = textWidth;
         const bgHeight = textHeight;
         
         // Calculate text box position based on drag
-        const minDistance = 50;
+        const minDistance = 50 / zoomLevel;
         const calloutDx = calloutEnd.x - calloutStart.x;
         const calloutDy = calloutEnd.y - calloutStart.y;
         const distance = Math.sqrt(calloutDx * calloutDx + calloutDy * calloutDy);
@@ -594,7 +599,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               x={textX + textPadding}
               y={textY + textPadding}
               text="Callout"
-              fontSize={16}
+              fontSize={16 / zoomLevel}
               fontFamily={currentStyle.fontFamily || 'Arial'}
               fill={currentStyle.stroke}
               width={textWidth - textPadding * 2}
@@ -632,20 +637,33 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (tempPoints.length < 2) return null;
         const measureStart = tempPoints[0];
         const measureEnd = tempPoints[tempPoints.length - 1];
+        
+        // Debug log the actual coordinates
+        console.log('[MEASURE Debug] Start:', measureStart, 'End:', measureEnd);
+        console.log('[MEASURE Debug] Style:', {
+          stroke: currentStyle.stroke,
+          strokeWidth: currentStyle.strokeWidth,
+          opacity: currentStyle.opacity
+        });
+        
         const measureDx = measureEnd.x - measureStart.x;
         const measureDy = measureEnd.y - measureStart.y;
         const measureDistance = Math.sqrt(measureDx * measureDx + measureDy * measureDy);
         const measureAngle = Math.atan2(measureDy, measureDx) * (180 / Math.PI);
         
         return (
-          <Group>
+          <Group listening={false}>
             <Line
               points={[measureStart.x, measureStart.y, measureEnd.x, measureEnd.y]}
-              stroke={currentStyle.stroke}
-              strokeWidth={currentStyle.strokeWidth}
-              opacity={currentStyle.opacity}
+              stroke={currentStyle.stroke || '#000000'}
+              strokeWidth={Math.max(currentStyle.strokeWidth || 2, 2)}
+              opacity={1}
               dash={[5, 5]}
               listening={false}
+              perfectDrawEnabled={false}
+              shadowColor="rgba(0, 0, 0, 0.5)"
+              shadowBlur={2}
+              shadowOffset={{ x: 1, y: 1 }}
             />
             {/* Preview label with background */}
             <Group
@@ -684,7 +702,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                       x={0}
                       y={-26}
                       text={labelText}
-                      fontSize={12}
+                      fontSize={12 / zoomLevel}
                       fontFamily="Arial"
                       fill="#666"
                       align="center"
@@ -761,7 +779,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                       x={0}
                       y={-26}
                       text={labelText}
-                      fontSize={12}
+                      fontSize={12 / zoomLevel}
                       fontFamily="Arial"
                       fill="#4a90e2"
                       align="center"
@@ -1683,7 +1701,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 x={0}
                 y={-26} // 20px above line + 6px for text baseline
                 text={measurementLabel}
-                fontSize={12}
+                fontSize={12 / zoomLevel}
                 fontFamily="Arial"
                 fill={measureShape.isCalibration ? '#4a90e2' : '#333333'}
                 align="center"
@@ -1718,7 +1736,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 x={x1 - 15}
                 y={y1 - 15}
                 text="📐"
-                fontSize={16}
+                fontSize={16 / zoomLevel}
                 listening={false}
               />
             )}
@@ -2432,8 +2450,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       {/* Render all shapes in z-order */}
       {getSortedShapes().map(renderShape)}
       
-      {/* Render temporary drawing preview */}
-      {renderTempDrawing()}
+      {/* Render temporary drawing preview - with high z-index */}
+      <Group listening={false} zIndex={999999}>
+        {renderTempDrawing()}
+      </Group>
       
       {/* Render selection rectangle */}
       {isDragSelecting && selectionBox.visible && (
