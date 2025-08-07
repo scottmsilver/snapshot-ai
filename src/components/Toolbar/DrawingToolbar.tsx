@@ -29,7 +29,7 @@ const tools = [
   { tool: DrawingTool.TEXT, icon: TextIcon, label: 'Text', shortcut: 'T' },
   { tool: DrawingTool.CALLOUT, icon: CalloutIcon, label: 'Callout', shortcut: 'L' },
   { tool: DrawingTool.STAR, icon: StarIcon, label: 'Star', shortcut: 'S' },
-  { tool: DrawingTool.IMAGE, icon: ImageIcon, label: 'Image', shortcut: 'I' },
+  { tool: DrawingTool.IMAGE, icon: ImageIcon, label: 'Image/PDF', shortcut: 'I' },
   { tool: DrawingTool.SCREENSHOT, icon: ScreenshotIcon, label: 'Screenshot', shortcut: 'X' },
   { tool: DrawingTool.MEASURE, icon: MeasureIcon, label: 'Measure', shortcut: 'M' }
 ];

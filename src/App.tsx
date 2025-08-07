@@ -1426,42 +1426,50 @@ function App() {
                     // Create file input and show picker
                     const input = document.createElement('input');
                     input.type = 'file';
-                    input.accept = 'image/*';
+                    input.accept = 'image/*,.pdf,application/pdf';
                     input.onchange = async (e) => {
                       const file = (e.target as HTMLInputElement).files?.[0];
                       if (file) {
                         try {
-                          // Create image shape with original dimensions
-                          const imageShape = await createImageShapeFromFile(file);
-                          
-                          // Calculate dimensions that fit within bounds while maintaining aspect ratio
-                          const imageAspectRatio = imageShape.width / imageShape.height;
-                          const boundsAspectRatio = bounds.width / bounds.height;
-                          
-                          let finalWidth, finalHeight;
-                          
-                          if (imageAspectRatio > boundsAspectRatio) {
-                            // Image is wider than bounds - fit to width
-                            finalWidth = bounds.width;
-                            finalHeight = bounds.width / imageAspectRatio;
+                          // Check if it's a PDF
+                          if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                            // Handle PDF - show PDF viewer
+                            setPdfFile(file);
+                            // Cancel the drawing operation since PDF viewer will handle it
+                            setActiveTool(DrawingTool.SELECT);
                           } else {
-                            // Image is taller than bounds - fit to height
-                            finalHeight = bounds.height;
-                            finalWidth = bounds.height * imageAspectRatio;
+                            // Handle regular image
+                            const imageShape = await createImageShapeFromFile(file);
+                            
+                            // Calculate dimensions that fit within bounds while maintaining aspect ratio
+                            const imageAspectRatio = imageShape.width / imageShape.height;
+                            const boundsAspectRatio = bounds.width / bounds.height;
+                            
+                            let finalWidth, finalHeight;
+                            
+                            if (imageAspectRatio > boundsAspectRatio) {
+                              // Image is wider than bounds - fit to width
+                              finalWidth = bounds.width;
+                              finalHeight = bounds.width / imageAspectRatio;
+                            } else {
+                              // Image is taller than bounds - fit to height
+                              finalHeight = bounds.height;
+                              finalWidth = bounds.height * imageAspectRatio;
+                            }
+                            
+                            // Center the image within the drawn bounds
+                            imageShape.x = bounds.x + (bounds.width - finalWidth) / 2;
+                            imageShape.y = bounds.y + (bounds.height - finalHeight) / 2;
+                            imageShape.width = finalWidth;
+                            imageShape.height = finalHeight;
+                            
+                            // Add to canvas and switch to select tool
+                            addShape(imageShape);
+                            setActiveTool(DrawingTool.SELECT);
+                            selectShape(imageShape.id);
                           }
-                          
-                          // Center the image within the drawn bounds
-                          imageShape.x = bounds.x + (bounds.width - finalWidth) / 2;
-                          imageShape.y = bounds.y + (bounds.height - finalHeight) / 2;
-                          imageShape.width = finalWidth;
-                          imageShape.height = finalHeight;
-                          
-                          // Add to canvas and switch to select tool
-                          addShape(imageShape);
-                          setActiveTool(DrawingTool.SELECT);
-                          selectShape(imageShape.id);
                         } catch (error) {
-                          console.error('Failed to load image:', error);
+                          console.error('Failed to load file:', error);
                         }
                       }
                     };
