@@ -1415,11 +1415,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       case DrawingTool.TEXT:
         const textShape = shape as TextShape;
-        // Estimate text height based on font size and number of lines
-        const lines = textShape.text.split('\n').length;
-        const estimatedHeight = textShape.fontSize * lines * 1.2;
+        // Center rotation point for text
         const textOffsetX = textShape.width ? textShape.width / 2 : 0;
-        const textOffsetY = estimatedHeight / 2;
+        const textOffsetY = textShape.height ? textShape.height / 2 : 0;
         
         return (
           <Text
@@ -1434,8 +1432,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             fontFamily={textShape.fontFamily}
             fontStyle={textShape.fontStyle}
             fill={textShape.style.stroke}
-            align={textShape.align}
+            align={textShape.align || 'left'}
             width={textShape.width}
+            height={textShape.height}
+            wrap="word"
+            ellipsis={true}
             rotation={textShape.rotation || 0}
             onDblClick={(e) => {
               e.cancelBubble = true;
@@ -1617,6 +1618,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               fontFamily={calloutShape.fontFamily}
               fill={calloutShape.style.stroke}
               width={bgWidth - textPadding * 2}
+              height={bgHeight - textPadding * 2}
+              wrap="word"
+              ellipsis={true}
               listening={false}
             />
           </Group>
@@ -2514,11 +2518,35 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           anchorStrokeWidth={2}
           anchorSize={8}
           rotateEnabled={true}
-          resizeEnabled={false}
-          enabledAnchors={[]}
+          resizeEnabled={true}
+          enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
           ignoreStroke={false}
           rotationSnaps={[]}
+          keepRatio={false}
           rotationSnapTolerance={5}
+          boundBoxFunc={(oldBox, newBox) => {
+            // Check if any selected shape is a measurement line
+            const hasMeasurementLine = drawingSelectedShapeIds.some(id => {
+              const shape = shapes.find(s => s.id === id);
+              return shape?.type === DrawingTool.MEASURE;
+            });
+            
+            // If it's a measurement line, prevent resize (only allow rotation/move)
+            if (hasMeasurementLine) {
+              return {
+                ...newBox,
+                width: oldBox.width,
+                height: oldBox.height
+              };
+            }
+            
+            // For other shapes, allow resize but enforce minimum size
+            return {
+              ...newBox,
+              width: Math.max(10, newBox.width),
+              height: Math.max(10, newBox.height)
+            };
+          }}
           onTransformStart={(e) => {
             isTransformingRef.current = true;
             startTransform();
@@ -2543,6 +2571,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             const shiftPressed = (e.evt as KeyboardEvent).shiftKey;
             if (transformerRef.current) {
               transformerRef.current.rotationSnaps(shiftPressed ? SNAP_ANGLES : []);
+              // Also maintain aspect ratio when shift is held during resize
+              transformerRef.current.keepRatio(shiftPressed);
             }
             setIsSnapping(shiftPressed);
             
@@ -2574,9 +2604,13 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             });
             
             nodes.forEach(node => {
-              if (!node || typeof node.rotation !== 'function') return;
+              if (!node) return;
               
               const rotation = node.rotation();
+              const scaleX = node.scaleX();
+              const scaleY = node.scaleY();
+              const x = node.x();
+              const y = node.y();
               
               let shapeId = node.id();
               if (!shapeId) return;
@@ -2597,15 +2631,123 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               
               if (!shape) return;
               
-            
-            // Update only the rotation for all shape types
-            try {
-              updateShape(shapeId, {
+              // Reset scale on node
+              node.scaleX(1);
+              node.scaleY(1);
+              
+              // Build update object based on shape type
+              const updates: any = {
                 rotation: rotation
-              });
-            } catch (error) {
-              console.error('Error updating shape rotation:', error);
-            }
+              };
+              
+              // Handle resize based on shape type
+              if (Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01) {
+                switch (shape.type) {
+                  case DrawingTool.RECTANGLE:
+                  case DrawingTool.IMAGE:
+                    const rectShape = shape as RectShape | ImageShape;
+                    updates.x = x;
+                    updates.y = y;
+                    updates.width = Math.max(10, rectShape.width * scaleX);
+                    updates.height = Math.max(10, rectShape.height * scaleY);
+                    break;
+                    
+                  case DrawingTool.CIRCLE:
+                    const circleShape = shape as CircleShape;
+                    updates.x = x;
+                    updates.y = y;
+                    updates.radiusX = Math.max(5, circleShape.radiusX * scaleX);
+                    updates.radiusY = Math.max(5, circleShape.radiusY * scaleY);
+                    break;
+                    
+                  case DrawingTool.STAR:
+                    const starShape = shape as StarShape;
+                    updates.x = x;
+                    updates.y = y;
+                    updates.radius = Math.max(5, starShape.radius * Math.max(scaleX, scaleY));
+                    if (starShape.innerRadius) {
+                      updates.innerRadius = starShape.innerRadius * Math.max(scaleX, scaleY);
+                    }
+                    break;
+                    
+                  case DrawingTool.TEXT:
+                    const textShape = shape as TextShape;
+                    updates.x = x;
+                    updates.y = y;
+                    // Only update width/height for text reflow, not font size
+                    updates.width = textShape.width ? Math.max(50, textShape.width * scaleX) : Math.max(50, 100 * scaleX);
+                    updates.height = textShape.height ? Math.max(20, textShape.height * scaleY) : Math.max(20, 30 * scaleY);
+                    break;
+                    
+                  case DrawingTool.CALLOUT:
+                    const calloutShape = shape as CalloutShape;
+                    // Handle callout resize - text should reflow, not change font size
+                    const newTextWidth = Math.max(50, (calloutShape.textWidth || 120) * scaleX);
+                    const newTextHeight = Math.max(30, (calloutShape.textHeight || 40) * scaleY);
+                    
+                    // Recalculate arrow base point for new text box dimensions
+                    const newTextBox = {
+                      x: calloutShape.textX,
+                      y: calloutShape.textY,
+                      width: newTextWidth,
+                      height: newTextHeight
+                    };
+                    
+                    const newBasePoint = perimeterOffsetToPoint(newTextBox, calloutShape.perimeterOffset);
+                    const newControlPoints = getOptimalControlPoints(
+                      newBasePoint,
+                      { x: calloutShape.arrowX, y: calloutShape.arrowY },
+                      newTextBox
+                    );
+                    
+                    updates.textWidth = newTextWidth;
+                    updates.textHeight = newTextHeight;
+                    updates.curveControl1X = newControlPoints.control1.x;
+                    updates.curveControl1Y = newControlPoints.control1.y;
+                    updates.curveControl2X = newControlPoints.control2.x;
+                    updates.curveControl2Y = newControlPoints.control2.y;
+                    break;
+                    
+                  case DrawingTool.ARROW:
+                    const arrowShape = shape as ArrowShape;
+                    // Scale arrow points relative to first point
+                    const [x1, y1, x2, y2] = arrowShape.points;
+                    const dx = (x2 - x1) * scaleX;
+                    const dy = (y2 - y1) * scaleY;
+                    updates.points = [x1, y1, x1 + dx, y1 + dy];
+                    break;
+                    
+                  case DrawingTool.PEN:
+                    const penShape = shape as PenShape;
+                    // Scale all points from center
+                    const penPoints = [...penShape.points];
+                    const centerX = penPoints.filter((_, i) => i % 2 === 0).reduce((a, b) => a + b, 0) / (penPoints.length / 2);
+                    const centerY = penPoints.filter((_, i) => i % 2 === 1).reduce((a, b) => a + b, 0) / (penPoints.length / 2);
+                    
+                    const scaledPoints = penPoints.map((point, i) => {
+                      if (i % 2 === 0) {
+                        // X coordinate
+                        return centerX + (point - centerX) * scaleX;
+                      } else {
+                        // Y coordinate
+                        return centerY + (point - centerY) * scaleY;
+                      }
+                    });
+                    updates.points = scaledPoints;
+                    break;
+                    
+                  case DrawingTool.MEASURE:
+                    // Don't allow resizing measurement lines
+                    return;
+                }
+              }
+              
+              // Update shape with rotation and resize
+              try {
+                updateShape(shapeId, updates);
+              } catch (error) {
+                console.error('Error updating shape:', error);
+              }
             });
             
             

@@ -110,6 +110,7 @@ export interface TextShape extends BaseShape {
   fontStyle?: string;
   align?: string;
   width?: number;
+  height?: number;
   rotation?: number;
 }
 
