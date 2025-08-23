@@ -1197,17 +1197,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             const calloutShape = shape as CalloutShape;
             const mode = calloutSelectionModes.get(shape.id) || 'text-only';
             
-            // Get the group node position
-            const groupNode = selectedShapeRefs.current.get(shape.id);
-            if (!groupNode) return;
+            // Get the drag delta directly from the event target
+            const node = e.target;
+            const dx = node.x() / zoomLevel;
+            const dy = node.y() / zoomLevel;
             
-            // Calculate delta from stored start position
-            const currentPos = groupNode.position();
-            const startPos = calloutDragStart.current.get(shape.id) || { x: 0, y: 0 };
-            const dx = (currentPos.x - startPos.x) / zoomLevel;
-            const dy = (currentPos.y - startPos.y) / zoomLevel;
-            
-            console.log('[CALLOUT DELTA]', shape.id, { currentPos, startPos, dx, dy });
+            console.log('[CALLOUT DELTA]', shape.id, { dx, dy });
             
             if (mode === 'whole') {
               // Move entire callout including arrow tip
@@ -1264,12 +1259,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               });
             }
             
-            // Position will be reset in useEffect after shape update completes
-            // Now safe to clear dragging state
+            // Reset node position to origin
+            node.position({ x: 0, y: 0 });
+            
+            // Clear dragging state
             setDraggingCalloutId(null);
             calloutDragStart.current.delete(shape.id);
-            // Reset group position immediately
-            groupNode.position({ x: 0, y: 0 });
           } else {
             const node = e.target;
             const newPos = node.position();
