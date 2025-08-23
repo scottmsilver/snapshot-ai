@@ -123,12 +123,51 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   // Track which control point is being dragged (0 = start, 1 = end)
   const [_draggingControlPointIndex, setDraggingControlPointIndex] = useState<number | null>(null);
   
+  // Track callout selection modes (text-only vs whole)
+  const [calloutSelectionModes, setCalloutSelectionModes] = useState<Map<string, 'text-only' | 'whole'>>(new Map());
+  
+  // Track if we're currently dragging a callout
+  const [draggingCalloutId, setDraggingCalloutId] = useState<string | null>(null);
+  
+  // Track callout drag start position for calculating delta
+  const calloutDragStart = useRef<Map<string, { x: number; y: number }>>(new Map());
+  
   // Snap angles for rotation
   const SNAP_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
 
-  // Log selection changes for debugging
+  // Clean up callout selection modes when selection changes
   useEffect(() => {
+    // Remove modes for shapes that are no longer selected
+    setCalloutSelectionModes(prev => {
+      const newMap = new Map(prev);
+      for (const [id] of newMap) {
+        if (!drawingSelectedShapeIds.includes(id)) {
+          newMap.delete(id);
+        }
+      }
+      return newMap;
+    });
   }, [drawingSelectedShapeIds]);
+  
+  // Reset callout group positions when not dragging
+  useEffect(() => {
+    if (!draggingCalloutId) {
+      // When not dragging, ensure all callout groups are at origin
+      shapes.forEach(shape => {
+        if (shape.type === DrawingTool.CALLOUT) {
+          const groupNode = selectedShapeRefs.current.get(shape.id);
+          if (groupNode) {
+            const pos = groupNode.position();
+            if (pos.x !== 0 || pos.y !== 0) {
+              console.log('[CALLOUT POSITION CLEANUP]', shape.id, pos);
+              groupNode.position({ x: 0, y: 0 });
+            }
+          }
+        }
+      });
+    }
+  }, [draggingCalloutId, shapes]);
+  
 
   // Update transformer when selection changes
   useEffect(() => {
@@ -137,10 +176,21 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       drawingSelectedShapeIds.forEach(id => {
         const shape = shapes.find(s => s.id === id);
         if (shape?.type === DrawingTool.CALLOUT) {
-          // For callouts, only transform the text box rect
-          const rectNode = selectedShapeRefs.current.get(id + '_textbox');
-          if (rectNode) {
-            nodes.push(rectNode);
+          // For callouts, check the selection mode
+          const mode = calloutSelectionModes.get(id) || 'text-only';
+          
+          if (mode === 'text-only') {
+            // Transform only the text box rect
+            const rectNode = selectedShapeRefs.current.get(id + '_textbox');
+            if (rectNode) {
+              nodes.push(rectNode);
+            }
+          } else {
+            // Transform the whole group
+            const groupNode = selectedShapeRefs.current.get(id);
+            if (groupNode) {
+              nodes.push(groupNode);
+            }
           }
         } else if (shape?.type === DrawingTool.MEASURE) {
           // Skip measurement lines - they have their own control points
@@ -156,7 +206,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       transformerRef.current.nodes(nodes);
       transformerRef.current.getLayer()?.batchDraw();
     }
-  }, [drawingSelectedShapeIds, shapes]);
+  }, [drawingSelectedShapeIds, shapes, calloutSelectionModes]);
   
   // Force updates while dragging arrow
   useEffect(() => {
@@ -994,6 +1044,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           setDraggedArrowId(shape.id);
         }
         
+        // Track callout dragging
+        if (shape.type === DrawingTool.CALLOUT) {
+          console.log('[CALLOUT DRAG START]', shape.id);
+          setDraggingCalloutId(shape.id);
+          // Always start from 0,0 since the group is reset after each drag
+          calloutDragStart.current.set(shape.id, { x: 0, y: 0 });
+        }
+        
         // If shape is not selected, select it first
         if (!isSelected) {
           selectShape(shape.id);
@@ -1070,6 +1128,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (shape.type === DrawingTool.ARROW) {
           setDraggedArrowId(null);
         }
+        if (shape.type === DrawingTool.CALLOUT) {
+          console.log('[CALLOUT DRAG END]', shape.id);
+          // Don't clear dragging state yet - we need it for calculating the update
+        }
         
         // Handle multi-shape drag end
         if (drawingSelectedShapeIds.length > 1) {
@@ -1132,52 +1194,81 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         // Handle single shape drag for special shape types
         if (drawingSelectedShapeIds.length === 1 && shape.id === drawingSelectedShapeIds[0]) {
           if (shape.type === DrawingTool.CALLOUT) {
-            // For callouts, only move the text box - arrow tip stays anchored
             const calloutShape = shape as CalloutShape;
+            const mode = calloutSelectionModes.get(shape.id) || 'text-only';
             
             // Get the group node position
             const groupNode = selectedShapeRefs.current.get(shape.id);
             if (!groupNode) return;
             
-            const groupPos = groupNode.position();
-            const dx = groupPos.x / zoomLevel;
-            const dy = groupPos.y / zoomLevel;
+            // Calculate delta from stored start position
+            const currentPos = groupNode.position();
+            const startPos = calloutDragStart.current.get(shape.id) || { x: 0, y: 0 };
+            const dx = (currentPos.x - startPos.x) / zoomLevel;
+            const dy = (currentPos.y - startPos.y) / zoomLevel;
             
-            // Calculate new text box position
-            const newTextX = calloutShape.textX + dx;
-            const newTextY = calloutShape.textY + dy;
+            console.log('[CALLOUT DELTA]', shape.id, { currentPos, startPos, dx, dy });
             
-            // Recalculate optimal control points for the new text box position
-            const newTextBox = {
-              x: newTextX,
-              y: newTextY,
-              width: calloutShape.textWidth || 120,
-              height: calloutShape.textHeight || 40
-            };
+            if (mode === 'whole') {
+              // Move entire callout including arrow tip
+              console.log('[CALLOUT UPDATE - WHOLE]', shape.id, { dx, dy });
+              
+              updateShape(shape.id, {
+                textX: calloutShape.textX + dx,
+                textY: calloutShape.textY + dy,
+                arrowX: calloutShape.arrowX + dx,
+                arrowY: calloutShape.arrowY + dy,
+                // Update control points if they exist
+                ...(calloutShape.curveControl1X !== undefined && {
+                  curveControl1X: calloutShape.curveControl1X + dx,
+                  curveControl1Y: calloutShape.curveControl1Y + dy,
+                }),
+                ...(calloutShape.curveControl2X !== undefined && {
+                  curveControl2X: calloutShape.curveControl2X + dx,
+                  curveControl2Y: calloutShape.curveControl2Y + dy,
+                })
+              });
+            } else {
+              // Text-only mode: only move the text box - arrow tip stays anchored
+              const newTextX = calloutShape.textX + dx;
+              const newTextY = calloutShape.textY + dy;
+              
+              // Recalculate optimal control points for the new text box position
+              const newTextBox = {
+                x: newTextX,
+                y: newTextY,
+                width: calloutShape.textWidth || 120,
+                height: calloutShape.textHeight || 40
+              };
+              
+              const arrowTip = { x: calloutShape.arrowX, y: calloutShape.arrowY };
+              
+              // Recalculate the optimal perimeter offset for the new text box position
+              const newPerimeterOffset = calculateInitialPerimeterOffset(newTextBox, arrowTip);
+              const newBasePoint = perimeterOffsetToPoint(newTextBox, newPerimeterOffset);
+              
+              // Always recalculate control points based on new positions
+              const newControlPoints = getOptimalControlPoints(newBasePoint, arrowTip, newTextBox);
+              
+              console.log('[CALLOUT UPDATE - TEXT]', shape.id, { dx, dy, newTextX, newTextY });
+              
+              updateShape(shape.id, {
+                textX: newTextX,
+                textY: newTextY,
+                // Arrow tip stays the same - only the "string" stretches and adjusts
+                perimeterOffset: newPerimeterOffset,
+                curveControl1X: newControlPoints.control1.x,
+                curveControl1Y: newControlPoints.control1.y,
+                curveControl2X: newControlPoints.control2.x,
+                curveControl2Y: newControlPoints.control2.y
+              });
+            }
             
-            const arrowTip = { x: calloutShape.arrowX, y: calloutShape.arrowY };
-            
-            // Recalculate the optimal perimeter offset for the new text box position
-            // This makes the arrow "string" connect to the best point on the text box
-            const newPerimeterOffset = calculateInitialPerimeterOffset(newTextBox, arrowTip);
-            const newBasePoint = perimeterOffsetToPoint(newTextBox, newPerimeterOffset);
-            
-            // Always recalculate control points based on new positions
-            const newControlPoints = getOptimalControlPoints(newBasePoint, arrowTip, newTextBox);
-            
-            
-            updateShape(shape.id, {
-              textX: newTextX,
-              textY: newTextY,
-              // Arrow tip stays the same - only the "string" stretches and adjusts
-              perimeterOffset: newPerimeterOffset,
-              curveControl1X: newControlPoints.control1.x,
-              curveControl1Y: newControlPoints.control1.y,
-              curveControl2X: newControlPoints.control2.x,
-              curveControl2Y: newControlPoints.control2.y
-            });
-            
-            // Reset group node position since we've updated the shape data
+            // Position will be reset in useEffect after shape update completes
+            // Now safe to clear dragging state
+            setDraggingCalloutId(null);
+            calloutDragStart.current.delete(shape.id);
+            // Reset group position immediately
             groupNode.position({ x: 0, y: 0 });
           } else {
             const node = e.target;
@@ -1457,6 +1548,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       case DrawingTool.CALLOUT:
         const calloutShape = shape as CalloutShape;
         
+        // Get the selection mode for this callout
+        const calloutMode = calloutSelectionModes.get(shape.id) || 'text-only';
+        
         // Calculate text dimensions
         const textPadding = calloutShape.padding;
         const bgWidth = calloutShape.textWidth || 120;
@@ -1464,7 +1558,21 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         
         // Get the current group position (for drag preview)
         const groupNode = selectedShapeRefs.current.get(shape.id);
-        const groupPos = groupNode ? groupNode.position() : { x: 0, y: 0 };
+        // Only use group position while actively dragging to prevent glitches
+        const isDraggingThis = draggingCalloutId === shape.id;
+        const rawGroupPos = groupNode ? groupNode.position() : { x: 0, y: 0 };
+        const groupPos = isDraggingThis ? rawGroupPos : { x: 0, y: 0 };
+        
+        // Debug logging
+        console.log('[CALLOUT RENDER]', shape.id, {
+          rawGroupPos,
+          groupPos,
+          textX: calloutShape.textX,
+          textY: calloutShape.textY,
+          isDragging: isDraggingThis,
+          mode: calloutMode,
+          actualNode: !!groupNode
+        });
         
         
         // Calculate arrow base point from perimeter offset
@@ -1500,13 +1608,26 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           control2 = optimalPoints.control2;
         }
         
+        // Modify commonProps based on selection mode
+        const calloutGroupProps = {
+          ...commonProps,
+          // Group is draggable in both modes (just handles the drag differently)
+          draggable: activeTool === DrawingTool.SELECT && !isDraggingControlPoint,
+        };
+        
         return (
           <Group
             key={shape.id}
-            {...commonProps}
+            {...calloutGroupProps}
+            x={0}
+            y={0}
             ref={(node) => {
               if (node) {
                 selectedShapeRefs.current.set(shape.id, node);
+                // Ensure the group is at origin on initial render
+                if (node.x() !== 0 || node.y() !== 0) {
+                  node.position({ x: 0, y: 0 });
+                }
               } else {
                 selectedShapeRefs.current.delete(shape.id);
               }
@@ -1532,54 +1653,26 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               shadowColor="rgba(0, 0, 0, 0.1)"
               shadowBlur={3}
               shadowOffset={{ x: 1, y: 1 }}
+              listening={activeTool === DrawingTool.SELECT}
+              onClick={(e) => {
+                if (activeTool === DrawingTool.SELECT) {
+                  e.cancelBubble = true;
+                  // Set mode to text-only when clicking text box
+                  setCalloutSelectionModes(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(shape.id, 'text-only');
+                    return newMap;
+                  });
+                  selectShape(shape.id);
+                }
+              }}
+              draggable={false}
               ref={(node) => {
                 if (node) {
                   selectedShapeRefs.current.set(shape.id + '_textbox', node);
                 } else {
                   selectedShapeRefs.current.delete(shape.id + '_textbox');
                 }
-              }}
-              onTransform={(e) => {
-                // When the text box is transformed, update the callout shape
-                const node = e.target;
-                const scaleX = node.scaleX();
-                const scaleY = node.scaleY();
-                
-                // Reset scale on node
-                node.scaleX(1);
-                node.scaleY(1);
-                
-                // Apply scale to shape data
-                const newWidth = Math.max(50, node.width() * scaleX);
-                const newHeight = Math.max(30, node.height() * scaleY);
-                const newX = node.x();
-                const newY = node.y();
-                
-                // Recalculate arrow base point for new text box position
-                const newTextBox = {
-                  x: newX,
-                  y: newY,
-                  width: newWidth,
-                  height: newHeight
-                };
-                
-                const newBasePoint = perimeterOffsetToPoint(newTextBox, calloutShape.perimeterOffset);
-                const newControlPoints = getOptimalControlPoints(
-                  newBasePoint,
-                  { x: calloutShape.arrowX, y: calloutShape.arrowY },
-                  newTextBox
-                );
-                
-                updateShape(shape.id, {
-                  textX: newX,
-                  textY: newY,
-                  textWidth: newWidth,
-                  textHeight: newHeight,
-                  curveControl1X: newControlPoints.control1.x,
-                  curveControl1Y: newControlPoints.control1.y,
-                  curveControl2X: newControlPoints.control2.x,
-                  curveControl2Y: newControlPoints.control2.y
-                });
               }}
             />
             
@@ -1595,7 +1688,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               stroke={calloutShape.style.stroke}
               strokeWidth={calloutShape.style.strokeWidth}
               opacity={calloutShape.style.opacity}
-              listening={false}
+              listening={activeTool === DrawingTool.SELECT}
+              hitStrokeWidth={Math.max(calloutShape.style.strokeWidth * 3, 10)}
+              onClick={(e) => {
+                if (activeTool === DrawingTool.SELECT) {
+                  e.cancelBubble = true;
+                  // Set mode to whole when clicking arrow
+                  setCalloutSelectionModes(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(shape.id, 'whole');
+                    return newMap;
+                  });
+                  selectShape(shape.id);
+                }
+              }}
             />
             
             {/* Arrow head - also subtract group position */}
@@ -1606,7 +1712,19 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               y={arrowTip.y - groupPos.y}
               rotation={calculateArrowHeadRotation(control2, arrowTip)}
               fill={calloutShape.style.stroke}
-              listening={false}
+              listening={activeTool === DrawingTool.SELECT}
+              onClick={(e) => {
+                if (activeTool === DrawingTool.SELECT) {
+                  e.cancelBubble = true;
+                  // Set mode to whole when clicking arrowhead
+                  setCalloutSelectionModes(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(shape.id, 'whole');
+                    return newMap;
+                  });
+                  selectShape(shape.id);
+                }
+              }}
             />
             
             {/* Text */}
@@ -2518,7 +2636,18 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           anchorStrokeWidth={2}
           anchorSize={8}
           rotateEnabled={true}
-          resizeEnabled={true}
+          resizeEnabled={(() => {
+            // Check if we have a callout in whole mode
+            if (drawingSelectedShapeIds.length === 1) {
+              const shape = shapes.find(s => s.id === drawingSelectedShapeIds[0]);
+              if (shape?.type === DrawingTool.CALLOUT) {
+                const mode = calloutSelectionModes.get(shape.id) || 'text-only';
+                // Disable resize in whole mode
+                return mode === 'text-only';
+              }
+            }
+            return true;
+          })()}
           enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
           ignoreStroke={false}
           rotationSnaps={[]}
@@ -2615,18 +2744,60 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               let shapeId = node.id();
               if (!shapeId) return;
               
-              // Handle callout textbox nodes
+              // Handle callout textbox nodes specially
               let shape;
+              let isCalloutTextbox = false;
               if (shapeId.endsWith('_textbox')) {
                 // Extract the actual shape ID
                 shapeId = shapeId.replace('_textbox', '');
                 shape = shapes.find(s => s.id === shapeId);
-                // Skip callouts as they have special handling
-                if (shape?.type === DrawingTool.CALLOUT) {
-                  return;
-                }
+                isCalloutTextbox = shape?.type === DrawingTool.CALLOUT;
               } else {
                 shape = shapes.find(s => s.id === shapeId);
+              }
+              
+              // Handle callout textbox transformation
+              if (isCalloutTextbox && shape?.type === DrawingTool.CALLOUT) {
+                const calloutShape = shape as CalloutShape;
+                
+                // Get the transformed dimensions
+                const newWidth = Math.max(50, node.width() * scaleX);
+                const newHeight = Math.max(30, node.height() * scaleY);
+                const newX = x / zoomLevel;  // Convert to canvas coordinates
+                const newY = y / zoomLevel;
+                
+                // Reset the node's scale and position
+                node.scaleX(1);
+                node.scaleY(1);
+                node.position({ x: newX * zoomLevel, y: newY * zoomLevel });
+                
+                // Recalculate arrow base point for new text box
+                const newTextBox = {
+                  x: newX,
+                  y: newY,
+                  width: newWidth,
+                  height: newHeight
+                };
+                
+                const newBasePoint = perimeterOffsetToPoint(newTextBox, calloutShape.perimeterOffset);
+                const newControlPoints = getOptimalControlPoints(
+                  newBasePoint,
+                  { x: calloutShape.arrowX, y: calloutShape.arrowY },
+                  newTextBox
+                );
+                
+                // Update the shape data
+                updateShape(shapeId, {
+                  textX: newX,
+                  textY: newY,
+                  textWidth: newWidth,
+                  textHeight: newHeight,
+                  curveControl1X: newControlPoints.control1.x,
+                  curveControl1Y: newControlPoints.control1.y,
+                  curveControl2X: newControlPoints.control2.x,
+                  curveControl2Y: newControlPoints.control2.y
+                });
+                return;
               }
               
               if (!shape) return;
@@ -2680,33 +2851,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                     break;
                     
                   case DrawingTool.CALLOUT:
-                    const calloutShape = shape as CalloutShape;
-                    // Handle callout resize - text should reflow, not change font size
-                    const newTextWidth = Math.max(50, (calloutShape.textWidth || 120) * scaleX);
-                    const newTextHeight = Math.max(30, (calloutShape.textHeight || 40) * scaleY);
-                    
-                    // Recalculate arrow base point for new text box dimensions
-                    const newTextBox = {
-                      x: calloutShape.textX,
-                      y: calloutShape.textY,
-                      width: newTextWidth,
-                      height: newTextHeight
-                    };
-                    
-                    const newBasePoint = perimeterOffsetToPoint(newTextBox, calloutShape.perimeterOffset);
-                    const newControlPoints = getOptimalControlPoints(
-                      newBasePoint,
-                      { x: calloutShape.arrowX, y: calloutShape.arrowY },
-                      newTextBox
-                    );
-                    
-                    updates.textWidth = newTextWidth;
-                    updates.textHeight = newTextHeight;
-                    updates.curveControl1X = newControlPoints.control1.x;
-                    updates.curveControl1Y = newControlPoints.control1.y;
-                    updates.curveControl2X = newControlPoints.control2.x;
-                    updates.curveControl2Y = newControlPoints.control2.y;
-                    break;
+                    // Skip - callouts are handled specially below
+                    return;
                     
                   case DrawingTool.ARROW:
                     const arrowShape = shape as ArrowShape;
