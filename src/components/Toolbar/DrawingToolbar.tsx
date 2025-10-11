@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { motion } from 'framer-motion';
 import { useDrawing } from '@/hooks/useDrawing';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import { DrawingTool, type Shape, type TextShape, type CalloutShape, type DrawingStyle } from '@/types/drawing';
@@ -49,7 +48,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
   
   // Close dropdown when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent): void => {
       if (measureDropdownRef.current && !measureDropdownRef.current.contains(event.target as Node)) {
         setShowMeasureDropdown(false);
       }
@@ -85,7 +84,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
   const showTextOptions = toolOrShapeType === DrawingTool.TEXT || toolOrShapeType === DrawingTool.CALLOUT;
 
   // Handle property updates for both selected shapes and default style
-  const handlePropertyChange = (updates: Partial<DrawingStyle>) => {
+  const handlePropertyChange = (updates: Partial<DrawingStyle>): void => {
     // Update selected shapes
     if (hasSelection) {
       selectedShapes.forEach(shape => {
@@ -100,12 +99,12 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
   };
 
   // Handle text-specific property updates
-  const handleTextPropertyChange = (updates: Partial<Pick<TextShape, 'fontSize' | 'fontFamily' | 'text' | 'align'>>) => {
+  const handleTextPropertyChange = (updates: Partial<Pick<TextShape, 'fontSize' | 'fontFamily' | 'text' | 'align'>>): void => {
     // Update selected text shapes
     if (hasSelection) {
       selectedShapes.forEach(shape => {
         if (shape.type === DrawingTool.TEXT) {
-          const shapeUpdates: any = {
+          const shapeUpdates: Partial<TextShape> = {
             ...updates,
             updatedAt: Date.now()
           };
@@ -122,16 +121,18 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
           
           updateShape(shape.id, shapeUpdates);
         } else if (shape.type === DrawingTool.CALLOUT) {
-          const shapeUpdates: any = {
-            ...updates,
-            updatedAt: Date.now()
+          const { text, fontSize, fontFamily } = updates;
+          const shapeUpdates: Partial<CalloutShape> = {
+            updatedAt: Date.now(),
+            ...(text !== undefined ? { text } : {}),
+            ...(fontSize !== undefined ? { fontSize } : {}),
+            ...(fontFamily !== undefined ? { fontFamily } : {}),
           };
-          
-          // If text content or font properties change, reset text width to allow reflow
-          if (updates.text !== undefined || updates.fontSize || updates.fontFamily) {
+
+          if (text !== undefined || fontSize !== undefined || fontFamily !== undefined) {
             shapeUpdates.textWidth = undefined;
           }
-          
+
           updateShape(shape.id, shapeUpdates);
         }
       });

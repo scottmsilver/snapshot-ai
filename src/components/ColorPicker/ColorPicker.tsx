@@ -41,7 +41,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   }, [fillColor]);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent): void => {
       if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
         setShowPicker(false);
       }
@@ -56,7 +56,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
     };
   }, [showPicker]);
 
-  const handleColorSelect = (color: string) => {
+  const handleColorSelect = (color: string): void => {
     if (color === 'transparent') {
       if (activeType === 'fill') {
         setLocalFill(undefined);

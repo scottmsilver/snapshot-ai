@@ -2,15 +2,18 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MoreHorizontal } from 'lucide-react';
 import { CompactColorPicker } from './CompactColorPicker';
-import { DrawingTool, type Shape, type TextShape, type CalloutShape } from '@/types/drawing';
+import {
+  DrawingTool,
+  type DrawingStyle,
+  type Shape,
+} from '@/types/drawing';
 
 interface PropertiesSectionProps {
   activeTool: DrawingTool;
-  currentStyle: any;
+  currentStyle: DrawingStyle;
   selectedShapes: Shape[];
-  onStyleChange: (updates: any) => void;
-  onTextPropertyChange?: (updates: any) => void;
-  updateShape?: (id: string, updates: any) => void;
+  onStyleChange: (updates: Partial<DrawingStyle>) => void;
+  updateShape?: (id: string, updates: Partial<Shape>) => void;
 }
 
 // Compact stroke width selector
@@ -23,7 +26,7 @@ const StrokeWidthSelector: React.FC<{
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent): void => {
       if (ref.current && !ref.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
@@ -178,7 +181,6 @@ export const PropertiesSection: React.FC<PropertiesSectionProps> = ({
   currentStyle,
   selectedShapes,
   onStyleChange,
-  onTextPropertyChange,
   updateShape,
 }) => {
   const [showOverflow, setShowOverflow] = useState(false);
@@ -201,10 +203,8 @@ export const PropertiesSection: React.FC<PropertiesSectionProps> = ({
                         toolOrShapeType === DrawingTool.CIRCLE || 
                         toolOrShapeType === DrawingTool.STAR;
   const showStrokeWidth = toolOrShapeType !== DrawingTool.TEXT;
-  const showTextOptions = toolOrShapeType === DrawingTool.TEXT || toolOrShapeType === DrawingTool.CALLOUT;
-
   // Handle property updates
-  const handlePropertyChange = (updates: any) => {
+  const handlePropertyChange = (updates: Partial<DrawingStyle>): void => {
     if (hasSelection && updateShape) {
       selectedShapes.forEach(shape => {
         updateShape(shape.id, { 
@@ -218,7 +218,7 @@ export const PropertiesSection: React.FC<PropertiesSectionProps> = ({
 
   // Calculate available space
   useEffect(() => {
-    const calculateSpace = () => {
+    const calculateSpace = (): void => {
       if (containerRef.current) {
         setAvailableWidth(containerRef.current.offsetWidth);
       }
@@ -231,7 +231,7 @@ export const PropertiesSection: React.FC<PropertiesSectionProps> = ({
 
   // Close overflow menu when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent): void => {
       if (overflowRef.current && !overflowRef.current.contains(event.target as Node)) {
         setShowOverflow(false);
       }

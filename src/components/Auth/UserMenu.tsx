@@ -1,14 +1,11 @@
 import React, { useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useOptionalAuth } from '@/contexts/AuthContext';
 
 export const UserMenu: React.FC = () => {
-  // Try to use auth context, but handle case where it's not available
-  let authContext;
-  try {
-    authContext = useAuth();
-  } catch (error) {
-    console.error('❌ UserMenu: Failed to get auth context:', error);
-    // Auth context not available (Google OAuth not configured)
+  const [showDropdown, setShowDropdown] = useState(false);
+  const authContext = useOptionalAuth();
+  if (!authContext) {
+    console.error('❌ UserMenu: Auth context unavailable');
     return (
       <div style={{
         padding: '0.25rem 0.75rem',
@@ -24,7 +21,6 @@ export const UserMenu: React.FC = () => {
   }
   
   const { user, isAuthenticated, login, logout } = authContext;
-  const [showDropdown, setShowDropdown] = useState(false);
 
   if (!isAuthenticated) {
     return (

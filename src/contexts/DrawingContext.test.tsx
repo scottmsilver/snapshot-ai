@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import React from 'react';
-import { DrawingProvider, useDrawingContext } from './DrawingContext';
+import { DrawingProvider } from './DrawingProvider';
+import { useDrawingContext } from './DrawingContext';
 import { DrawingTool } from '@/types/drawing';
 
 describe('DrawingContext - Measurement Features', () => {
-  const wrapper = ({ children }: { children: React.ReactNode }) => (
+  const wrapper = ({ children }: { children: React.ReactNode }): JSX.Element => (
     <DrawingProvider>{children}</DrawingProvider>
   );
 

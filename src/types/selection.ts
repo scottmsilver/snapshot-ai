@@ -1,5 +1,7 @@
 // Selection state machine types
 
+import type { Point } from '@/types/drawing';
+
 export const SelectionState = {
   IDLE: 'idle',
   HOVER: 'hover',
@@ -21,6 +23,10 @@ export interface SelectionBox {
   visible: boolean;
 }
 
+export interface SelectionShapeSnapshot {
+  points?: number[];
+}
+
 export interface SelectionContext {
   state: SelectionState;
   hoveredShapeId: string | null;
@@ -29,8 +35,8 @@ export interface SelectionContext {
   isDragging: boolean;
   dragStartPoint: { x: number; y: number } | null;
   draggedShapeIds: string[];
-  initialShapePositions: Map<string, { x: number; y: number }>;
-  initialShapeData: Map<string, any>; // Store full shape data for complex shapes
+  initialShapePositions: Map<string, Point>;
+  initialShapeData: Map<string, SelectionShapeSnapshot>; // Store data for complex shapes
 }
 
 // Selection actions

@@ -25,7 +25,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({ isOpen, fileId, onClos
     }
   }, [isOpen, fileId]);
 
-  const handleShare = async () => {
+  const handleShare = async (): Promise<void> => {
     if (!fileId) return;
 
     setIsSharing(true);
@@ -50,7 +50,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({ isOpen, fileId, onClos
     }
   };
 
-  const handleCopyLink = async () => {
+  const handleCopyLink = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(shareLink);
       setCopiedToClipboard(true);

@@ -4,7 +4,7 @@ export const CredentialsChecker: React.FC = () => {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
   
-  const checkCredentials = () => {
+  const checkCredentials = (): void => {
     console.log('🔐 Checking credentials:');
     console.log('Client ID:', clientId);
     console.log('Client ID length:', clientId?.length);

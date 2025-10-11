@@ -28,6 +28,8 @@ interface Bounds {
 
 // Check if a shape intersects with the screenshot bounds
 function shapeIntersectsBounds(shape: Shape, bounds: Bounds): boolean {
+  void shape;
+  void bounds;
   // This is a simplified check - you might need more sophisticated intersection logic
   // For now, we'll render all shapes and let Konva clip them
   return true;

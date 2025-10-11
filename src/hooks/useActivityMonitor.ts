@@ -10,11 +10,15 @@ interface UseActivityMonitorOptions {
 /**
  * Monitor user activity and extend session when active
  */
+interface UseActivityMonitorResult {
+  lastActivity: number;
+}
+
 export function useActivityMonitor({
   enabled,
   onSessionExpiring,
   onSessionExpired
-}: UseActivityMonitorOptions) {
+}: UseActivityMonitorOptions): UseActivityMonitorResult {
   const lastActivityRef = useRef<number>(Date.now());
   const hasNotifiedExpiringRef = useRef<boolean>(false);
   
@@ -32,7 +36,7 @@ export function useActivityMonitor({
     ];
     
     // Update last activity time
-    const updateActivity = () => {
+    const updateActivity = (): void => {
       lastActivityRef.current = Date.now();
     };
     

@@ -1,10 +1,43 @@
 import type { Shape } from '@/types/drawing';
 
-declare const gapi: any;
+interface DrivePermissionResource {
+  type: ShareOptions['type'];
+  role: ShareOptions['role'];
+  emailAddress?: string;
+}
+
+interface DriveFilesResource {
+  get<T = unknown>(params: { fileId: string; fields?: string; alt?: string }): Promise<{ result: T }>;
+  list(params: { q: string; fields: string; orderBy: string; pageSize: number }): Promise<{ result: { files?: ProjectFile[] } }>;
+  delete(params: { fileId: string }): Promise<void>;
+}
+
+interface DrivePermissionsResource {
+  create(params: { fileId: string; resource: DrivePermissionResource }): Promise<{ result: { id: string } }>;
+}
+
+interface GapiClient {
+  init(config: { apiKey: string | undefined; discoveryDocs: string[] }): Promise<void>;
+  drive: {
+    files: DriveFilesResource;
+    permissions: DrivePermissionsResource;
+  };
+}
+
+interface Gapi {
+  load(libraries: string, callback: () => void): void;
+  auth: {
+    setToken(token: { access_token: string }): void;
+    getToken(): { access_token: string };
+  };
+  client: GapiClient;
+}
+
+declare const gapi: Gapi;
 
 declare global {
   interface Window {
-    gapi: any;
+    gapi?: Gapi;
   }
 }
 
@@ -209,7 +242,7 @@ class GoogleDriveService {
   }
 
   async shareProject(fileId: string, options: ShareOptions): Promise<ShareResult> {
-    const permission: any = {
+    const permission: DrivePermissionResource = {
       type: options.type,
       role: options.role,
     };

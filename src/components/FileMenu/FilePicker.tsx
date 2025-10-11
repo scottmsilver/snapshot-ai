@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { googleDriveService, type ProjectFile } from '@/services/googleDrive';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -14,13 +14,7 @@ export const FilePicker: React.FC<FilePickerProps> = ({ isOpen, onClose, onSelec
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      loadFiles();
-    }
-  }, [isOpen]);
-
-  const loadFiles = async () => {
+  const loadFiles = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     setError(null);
     
@@ -37,7 +31,13 @@ export const FilePicker: React.FC<FilePickerProps> = ({ isOpen, onClose, onSelec
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [getAccessToken]);
+
+  useEffect(() => {
+    if (isOpen) {
+      loadFiles();
+    }
+  }, [isOpen, loadFiles]);
 
   if (!isOpen) return null;
 

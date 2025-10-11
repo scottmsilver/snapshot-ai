@@ -1,5 +1,3 @@
-import type { MeasurementLineShape } from '@/types/drawing';
-
 export type MeasurementUnit = 'mm' | 'cm' | 'm' | 'in' | 'ft';
 
 export const MEASUREMENT_UNITS: Record<MeasurementUnit, string> = {
@@ -70,21 +68,6 @@ export function pixelsToMeasurement(
  * Format a measurement value with appropriate precision
  */
 export function formatMeasurement(value: number, unit: MeasurementUnit): string {
-  // Special formatting for feet - show as "X ft Y in"
-  if (unit === 'ft') {
-    const totalInches = value * 12;
-    const feet = Math.floor(value);
-    const inches = Math.round(totalInches % 12);
-    
-    if (feet === 0) {
-      return `${inches}"`;
-    } else if (inches === 0) {
-      return `${feet}'`;
-    } else {
-      return `${feet}' ${inches}"`;
-    }
-  }
-  
   // Determine decimal places based on unit and value
   let decimals: number;
   
@@ -100,6 +83,9 @@ export function formatMeasurement(value: number, unit: MeasurementUnit): string 
       break;
     case 'in':
       decimals = value < 1 ? 3 : 2;
+      break;
+    case 'ft':
+      decimals = 2;
       break;
     default:
       decimals = 2;

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useOptionalAuth } from '@/contexts/AuthContext';
 import { googleDriveService, type ProjectData } from '@/services/googleDrive';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import { useImage } from '@/hooks/useImage';
@@ -7,13 +7,14 @@ import { useAutoSave } from '@/hooks/useAutoSave';
 import { FilePicker } from './FilePicker';
 import { ShareDialog } from './ShareDialog';
 import Konva from 'konva';
+import type { ImageData } from '@/types/canvas';
 
 interface FileMenuProps {
   stageRef: React.RefObject<Konva.Stage | null>;
-  imageData: any | null;
+  imageData: ImageData | null;
   onProjectLoad?: (data: ProjectData, fileName: string) => void;
   initialFileId?: string | null;
-  onSaveStatusChange?: (status: 'saved' | 'saving' | 'unsaved' | 'error', lastSaved: Date | null) => void;
+  onSaveStatusChange?: (status: 'saved' | 'saving' | 'unsaved' | 'error') => void;
   onNew?: () => void;
   onExport?: () => void;
   showGrid?: boolean;
@@ -24,15 +25,7 @@ interface FileMenuProps {
 }
 
 export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId, onSaveStatusChange, onNew, onExport, showGrid, onToggleGrid, canvasBackground, onChangeBackground, documentName }) => {
-  // Try to use auth context, but handle case where it's not available
-  let authContext;
-  try {
-    authContext = useAuth();
-  } catch (error) {
-    return null;
-  }
-  
-  const { isAuthenticated, user, getAccessToken } = authContext;
+  const authContext = useOptionalAuth();
   const { state: drawingState, setShapes } = useDrawingContext();
   const { loadImageFromData } = useImage();
   const [showDropdown, setShowDropdown] = useState(false);
@@ -44,9 +37,12 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
   const [hasWritePermission, setHasWritePermission] = useState<boolean | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const isAuthenticated = authContext?.isAuthenticated ?? false;
+  const currentUser = authContext?.user ?? null;
+
   // Close dropdown when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent): void => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setShowDropdown(false);
       }
@@ -61,7 +57,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
   // Initialize Google Drive API when authenticated
   React.useEffect(() => {
     if (isAuthenticated && !isInitialized) {
-      const token = getAccessToken();
+      const token = authContext?.getAccessToken?.();
       if (token) {
         googleDriveService.initialize(token)
           .then(() => {
@@ -72,7 +68,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
           });
       }
     }
-  }, [isAuthenticated, getAccessToken, isInitialized]);
+  }, [isAuthenticated, authContext, isInitialized]);
 
   // Update currentFileId when initialFileId changes
   React.useEffect(() => {
@@ -84,9 +80,9 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
   // Check write permissions when we have a file ID
   React.useEffect(() => {
     if (currentFileId && isInitialized && isAuthenticated) {
-      const checkPermissions = async () => {
+      const checkPermissions = async (): Promise<void> => {
         try {
-          const token = getAccessToken();
+          const token = authContext?.getAccessToken?.();
           if (!token) return;
           
           // Get file metadata to check permissions
@@ -113,10 +109,10 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
       
       checkPermissions();
     }
-  }, [currentFileId, isInitialized, isAuthenticated, getAccessToken]);
+  }, [currentFileId, isInitialized, isAuthenticated, authContext]);
 
   // Auto-save hook
-  const { saveStatus, lastSaved, save: autoSave } = useAutoSave({
+  const { saveStatus, save: autoSave } = useAutoSave({
     fileId: currentFileId,
     imageData,
     hasWritePermission,
@@ -130,9 +126,9 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
   // Report save status changes to parent
   React.useEffect(() => {
     if (onSaveStatusChange) {
-      onSaveStatusChange(saveStatus, lastSaved);
+      onSaveStatusChange(saveStatus);
     }
-  }, [saveStatus, lastSaved, onSaveStatusChange]);
+  }, [saveStatus, onSaveStatusChange]);
 
   // Auto-save when image is loaded and no fileId exists
   React.useEffect(() => {
@@ -141,7 +137,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
       return;
     }
     
-    const performInitialSave = async () => {
+    const performInitialSave = async (): Promise<void> => {
       if (!currentFileId && isAuthenticated && isInitialized && drawingState.shapes.length > 0) {
         // Use the autoSave function which will handle onFileIdChange
         await autoSave();
@@ -151,7 +147,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
     performInitialSave();
   }, [currentFileId, isAuthenticated, isInitialized, autoSave, drawingState.shapes]);
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<void> => {
     if (!isAuthenticated || !stageRef.current) return;
 
     // If we have a file ID but no write permission, do Save As instead
@@ -162,7 +158,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
 
     setIsSaving(true);
     try {
-      const token = getAccessToken();
+      const token = authContext?.getAccessToken?.();
       if (!token) throw new Error('No access token');
 
       await googleDriveService.initialize(token);
@@ -174,7 +170,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
         metadata: {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          author: user?.email || 'unknown',
+          author: currentUser?.email || 'unknown',
           version: '2.0',
         },
       };
@@ -188,10 +184,10 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
       } else {
         alert('Project saved successfully!');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to save project:', error);
-      if (error.body) {
-        console.error('Error details:', error.body);
+      if (error && typeof error === 'object' && 'body' in error) {
+        console.error('Error details:', (error as { body: unknown }).body);
       }
       alert('Failed to save project. Please try again.');
     } finally {
@@ -199,7 +195,7 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
     }
   };
 
-  const handleSaveAs = async () => {
+  const handleSaveAs = async (): Promise<void> => {
     // Reset current file ID to force creating a new file
     const oldFileId = currentFileId;
     setCurrentFileId(null);
@@ -210,13 +206,13 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
     }
   };
 
-  const handleOpen = () => {
+  const handleOpen = (): void => {
     setShowFilePicker(true);
   };
 
-  const handleFileSelect = async (fileId: string) => {
+  const handleFileSelect = async (fileId: string): Promise<void> => {
     try {
-      const token = getAccessToken();
+      const token = authContext?.getAccessToken?.();
       if (!token) throw new Error('No access token');
 
       const { projectData, fileName } = await googleDriveService.loadProject(fileId);

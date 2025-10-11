@@ -1,16 +1,21 @@
-import { SelectionState, SelectionAction } from '@/types/selection';
+import { SelectionState, SelectionAction, type SelectionContext } from '@/types/selection';
+
+export interface SelectionStateEvent {
+  type: SelectionAction;
+  payload?: unknown;
+}
 
 // State machine configuration
 export interface StateTransition {
   action: SelectionAction;
   target: SelectionState;
-  condition?: (context: any) => boolean;
-  effect?: (context: any, event: any) => void;
+  condition?: (context: SelectionContext) => boolean;
+  effect?: (context: SelectionContext, event: SelectionStateEvent) => void;
 }
 
 export interface StateConfig {
-  onEnter?: (context: any) => void;
-  onExit?: (context: any) => void;
+  onEnter?: (context: SelectionContext) => void;
+  onExit?: (context: SelectionContext) => void;
   transitions: StateTransition[];
 }
 
@@ -255,7 +260,7 @@ export const selectionStateMachine: Record<SelectionState, StateConfig> = {
 export function getNextState(
   currentState: SelectionState,
   action: SelectionAction,
-  context: any
+  context: SelectionContext
 ): SelectionState | null {
   const stateConfig = selectionStateMachine[currentState];
   if (!stateConfig) return null;

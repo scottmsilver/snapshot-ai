@@ -28,7 +28,7 @@ export const CalibrationDialog: React.FC<CalibrationDialogProps> = ({
     }
   }, [isOpen]);
   
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
     
     const numValue = parseFloat(value);

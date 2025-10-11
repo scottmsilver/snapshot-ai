@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, Star, RegularPolygon, Image } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
@@ -12,7 +12,6 @@ import {
   calculateArrowHeadRotation, 
   pointToPerimeterOffset, 
   calculateInitialPerimeterOffset,
-  autoAdjustControlPoint,
   isValidControlPoint,
   getOptimalControlPoints
 } from '@/utils/calloutGeometry';
@@ -26,10 +25,26 @@ interface DrawingLayerProps {
   onImageToolComplete?: (bounds: { x: number; y: number; width: number; height: number }) => void;
 }
 
+type ShapeCommonProps = {
+  id: string;
+  opacity: number;
+  visible: boolean;
+  listening: boolean;
+  draggable: boolean;
+  onClick: (e: Konva.KonvaEventObject<MouseEvent>) => void;
+  onTap: (e: Konva.KonvaEventObject<MouseEvent>) => void;
+  onMouseUp: (e: Konva.KonvaEventObject<MouseEvent>) => void;
+  onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => void;
+  onMouseEnter: (e: Konva.KonvaEventObject<MouseEvent>) => void;
+  onMouseLeave: (e: Konva.KonvaEventObject<MouseEvent>) => void;
+};
+
 // Component for rendering image shapes
 const ImageShapeComponent: React.FC<{
   shape: ImageShape;
-  commonProps: any;
+  commonProps: ShapeCommonProps;
   onRef: (node: Konva.Node | null) => void;
 }> = ({ shape, commonProps, onRef }) => {
   const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
@@ -121,7 +136,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   const [isSnapping, setIsSnapping] = useState(false);
   
   // Track which control point is being dragged (0 = start, 1 = end)
-  const [_draggingControlPointIndex, setDraggingControlPointIndex] = useState<number | null>(null);
+  const setDraggingControlPointIndex = useState<number | null>(null)[1];
   
   // Track callout selection modes (text-only vs whole)
   const [calloutSelectionModes, setCalloutSelectionModes] = useState<Map<string, 'text-only' | 'whole'>>(new Map());
@@ -213,7 +228,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     if (!draggedArrowId) return;
     
     let animationId: number;
-    const updateFrame = () => {
+    const updateFrame = (): void => {
       forceUpdate({});
       animationId = requestAnimationFrame(updateFrame);
     };
@@ -230,7 +245,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     const stage = stageRef.current;
     if (!stage) return;
 
-    const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>): void => {
       // Use Konva's built-in pointer position which handles all transformations
       const pos = stage.getPointerPosition();
       
@@ -290,11 +305,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       
 
       if (clickedOnEmpty) {
-        startDrawing(adjustedPos, e.evt as any, zoomLevel);
+        startDrawing(adjustedPos);
       }
     };
 
-    const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>): void => {
       // Use Konva's built-in pointer position which handles all transformations
       const pos = stage.getPointerPosition();
       
@@ -321,11 +336,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         }
         // Shape dragging is now handled by Konva's native dragging
       } else if (isDrawing) {
-        continueDrawing(adjustedPos, e.evt as any, zoomLevel);
+        continueDrawing(adjustedPos);
       }
     };
 
-    const handleMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    const handleMouseUp = (e: Konva.KonvaEventObject<MouseEvent>): void => {
       
       // Check if we clicked on transformer anchors or control points
       const target = e.target;
@@ -391,7 +406,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           // Notify parent to show file picker
           onImageToolComplete(bounds);
         } else {
-          finishDrawing(adjustedPos || undefined, e.evt as any, zoomLevel);
+          finishDrawing(adjustedPos || undefined, zoomLevel);
         }
       }
       
@@ -404,7 +419,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     stage.on('mouseup touchend', handleMouseUp);
     
     // Keyboard handler for escape and delete
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       // Don't handle if user is typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
@@ -467,10 +482,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     clearSelection,
     selectedShapeIds,
     selectMultiple,
+    zoomLevel,
   ]);
 
   // Render temporary drawing preview
-  const renderTempDrawing = () => {
+  const renderTempDrawing = (): React.ReactNode => {
     if (!isDrawing || tempPoints.length === 0) return null;
     
     // Debug log for MEASURE tool
@@ -927,11 +943,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   };
 
   // Render a shape based on its type
-  const renderShape = (shape: Shape) => {
+  const renderShape = (shape: Shape): React.ReactNode => {
     const isSelected = drawingSelectedShapeIds.includes(shape.id);
     const isHovered = hoveredShapeId === shape.id && activeTool === DrawingTool.SELECT;
     
-    const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
+    const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>): void => {
       const node = e.target;
       const newPosition = node.position();
       
@@ -961,8 +977,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         }
       } else if (shape.type === DrawingTool.CALLOUT) {
         // For callout shapes, only update text position - arrow tip stays anchored
-        const calloutShape = shape as CalloutShape;
-        
         // This will be handled in the onDragEnd of commonProps
         // Don't reset position here - we need it in the second handler
       } else if (shape.type === DrawingTool.RECTANGLE) {
@@ -990,7 +1004,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       }
     };
     
-    const commonProps = {
+    const commonProps: ShapeCommonProps = {
       id: shape.id,
       opacity: shape.style.opacity,
       visible: shape.visible,
@@ -1024,7 +1038,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           }
         }
       },
-      onTap: (_e: Konva.KonvaEventObject<MouseEvent>) => {
+      onTap: () => {
         // Don't cancel bubble - let it reach stage mousedown handler
       },
       onMouseUp: (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -1280,7 +1294,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 
                 // For measurement lines, also update the measurement value if calibrated
                 if (shape.type === DrawingTool.MEASURE && drawingState.measurementCalibration.pixelsPerUnit) {
-                  const measureShape = shape as MeasurementLineShape;
                   const pixelDistance = Math.sqrt(
                     Math.pow(newPoints[2] - newPoints[0], 2) + 
                     Math.pow(newPoints[3] - newPoints[1], 2)
@@ -1913,7 +1926,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   };
 
   // Render measurement control points
-  const renderMeasurementControlPoints = () => {
+  const renderMeasurementControlPoints = (): React.ReactNode => {
     if (activeTool !== DrawingTool.SELECT || drawingSelectedShapeIds.length !== 1) {
       return null;
     }
@@ -1942,7 +1955,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     const actualX2 = x2 + nodePos.x;
     const actualY2 = y2 + nodePos.y;
 
-    const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>) => {
+    const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
       const pos = e.target.position();
       const newPoints: [number, number, number, number] = [...measureShape.points];
       
@@ -1986,7 +1999,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       }
     };
     
-    const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>) => {
+    const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
       e.cancelBubble = true;
       setTimeout(() => {
         isDraggingControlPointRef.current = false;
@@ -2086,7 +2099,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   };
 
   // Render arrow control points
-  const renderArrowControlPoints = () => {
+  const renderArrowControlPoints = (): React.ReactNode => {
     
     if (activeTool !== DrawingTool.SELECT || drawingSelectedShapeIds.length !== 1) {
       return null;
@@ -2120,7 +2133,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     const actualX2 = x2 + nodePos.x;
     const actualY2 = y2 + nodePos.y;
 
-    const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>) => {
+    const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
       const pos = e.target.position();
       const newPoints: [number, number, number, number] = [...arrowShape.points];
       
@@ -2142,7 +2155,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       updateShape(arrowShape.id, { points: newPoints });
     };
     
-    const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>) => {
+    const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
       e.cancelBubble = true;
       setTimeout(() => {
         isDraggingControlPointRef.current = false;
@@ -2260,7 +2273,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   };
 
   // Render callout control points
-  const renderCalloutControlPoints = () => {
+  const renderCalloutControlPoints = (): React.ReactNode => {
     if (activeTool !== DrawingTool.SELECT || drawingSelectedShapeIds.length !== 1) {
       return null;
     }
@@ -2476,7 +2489,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             e.cancelBubble = true;
             isDraggingControlPointRef.current = true;
           }}
-          onDragMove={(e) => {
+          onDragMove={() => {
             // Don't update shape during drag to avoid double rendering
             // The draggable circle will move on its own
           }}
@@ -2526,7 +2539,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             e.cancelBubble = true;
             isDraggingControlPointRef.current = true;
           }}
-          onDragMove={(e) => {
+          onDragMove={() => {
             // Don't update shape during drag to avoid double rendering
           }}
           onDragEnd={(e) => {
@@ -2708,7 +2721,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               });
             }
           }}
-          onTransformEnd={(_e) => {
+          onTransformEnd={() => {
             // Reset snapping state
             setIsSnapping(false);
             
@@ -2802,8 +2815,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               node.scaleY(1);
               
               // Build update object based on shape type
-              const updates: any = {
-                rotation: rotation
+              const updates: Partial<Shape> = {
+                rotation,
               };
               
               // Handle resize based on shape type

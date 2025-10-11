@@ -22,7 +22,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<UploadError | null>(null);
 
-  const validateFile = (file: File): UploadError | null => {
+  const validateFile = useCallback((file: File): UploadError | null => {
     // Check file type
     const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type as FileType);
     const isPDF = ACCEPTED_PDF_TYPES.includes(file.type);
@@ -44,9 +44,9 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     }
 
     return null;
-  };
+  }, [maxSizeMB]);
 
-  const handleFile = useCallback((file: File) => {
+  const handleFile = useCallback((file: File): void => {
     const error = validateFile(file);
     if (error) {
       setError(error);
@@ -68,38 +68,38 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     } else {
       onImageUpload(file);
     }
-  }, [onImageUpload, onPDFUpload, maxSizeMB]);
+  }, [onImageUpload, onPDFUpload, validateFile]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const file = e.target.files?.[0];
     if (file) {
       handleFile(file);
     }
   };
 
-  const handleClick = () => {
+  const handleClick = (): void => {
     fileInputRef.current?.click();
   };
 
   // Drag and drop handlers
-  const handleDragEnter = (e: React.DragEvent) => {
+  const handleDragEnter = (e: React.DragEvent): void => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(true);
   };
 
-  const handleDragLeave = (e: React.DragEvent) => {
+  const handleDragLeave = (e: React.DragEvent): void => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: React.DragEvent): void => {
     e.preventDefault();
     e.stopPropagation();
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent): void => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
@@ -111,7 +111,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   };
 
   // Enhanced paste handler
-  const handlePaste = useCallback(async (e: ClipboardEvent) => {
+  const handlePaste = useCallback(async (e: ClipboardEvent): Promise<void> => {
     e.preventDefault();
     e.stopPropagation();
     
@@ -149,13 +149,13 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                 });
                 handleFile(file);
                 return;
-              } catch (err) {
+              } catch {
                 // Silently fail for individual type errors
               }
             }
           }
         }
-      } catch (err) {
+      } catch {
         // Silently fail if clipboard API is not available
       }
     }
@@ -178,7 +178,9 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     }
 
     // Add paste listener to both container and document
-    const pasteHandler = (e: Event) => handlePaste(e as ClipboardEvent);
+    const pasteHandler = (e: Event): void => {
+      handlePaste(e as ClipboardEvent);
+    };
     
     // Try to capture paste events at multiple levels
     document.addEventListener('paste', pasteHandler, true); // Capture phase
@@ -226,7 +228,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                 }
               }
             }
-          } catch (err) {
+          } catch {
             // Fallback: try to trigger a paste event manually
             const pasteEvent = new ClipboardEvent('paste', {
               bubbles: true,

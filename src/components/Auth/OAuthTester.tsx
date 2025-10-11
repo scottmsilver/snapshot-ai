@@ -1,7 +1,7 @@
 import React from 'react';
 
 export const OAuthTester: React.FC = () => {
-  const testDirectOAuth = () => {
+  const testDirectOAuth = (): void => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
     const redirectUri = window.location.origin;
     const scope = 'openid email profile https://www.googleapis.com/auth/drive.file';

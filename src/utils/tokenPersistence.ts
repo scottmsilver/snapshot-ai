@@ -7,10 +7,31 @@ const SESSION_KEY = 'google_session_id';
 
 interface StoredSession {
   token: string;
-  user: any;
+  user: StoredUser;
   expiry: number;
   sessionId: string;
 }
+
+export interface StoredUser {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+}
+
+const isStoredUser = (value: unknown): value is StoredUser => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.email === 'string' &&
+    typeof candidate.name === 'string' &&
+    (candidate.picture === undefined || typeof candidate.picture === 'string')
+  );
+};
 
 /**
  * Generate a unique session ID
@@ -22,7 +43,7 @@ function generateSessionId(): string {
 /**
  * Store authentication session
  */
-export function storeSession(token: string, user: any, expiresIn: number): void {
+export function storeSession(token: string, user: StoredUser, expiresIn: number): void {
   const sessionId = generateSessionId();
   const expiryTime = Date.now() + (expiresIn * 1000);
   
@@ -50,12 +71,15 @@ export function getStoredSession(): StoredSession | null {
   }
   
   try {
-    const user = JSON.parse(userStr);
+    const rawUser = JSON.parse(userStr) as unknown;
+    if (!isStoredUser(rawUser)) {
+      return null;
+    }
     const expiry = parseInt(expiryStr);
     
     return {
       token,
-      user,
+      user: rawUser,
       expiry,
       sessionId
     };

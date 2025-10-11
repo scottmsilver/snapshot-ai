@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useCallback, type ReactNode } from 'react';
+import { createContext, useContext } from 'react';
 import {
   DrawingTool,
   DrawingMode,
@@ -8,8 +8,7 @@ import {
   type Point,
   LayerOperation,
   getNextZIndex,
-  reorderShapes,
-  sortShapesByZIndex
+  reorderShapes
 } from '@/types/drawing';
 
 // Action types
@@ -66,7 +65,7 @@ type DrawingAction =
   | { type: DrawingActionType.PASTE_SHAPES; offset?: Point };
 
 // Initial state
-const initialState: DrawingState = {
+export const initialState: DrawingState = {
   activeTool: DrawingTool.SELECT,
   drawingMode: DrawingMode.NONE,
   currentStyle: {
@@ -88,14 +87,14 @@ const initialState: DrawingState = {
   maxZIndex: 0,
   measurementCalibration: {
     pixelsPerUnit: null,
-    unit: 'ft',
+    unit: 'cm',
     calibrationLineId: null,
   },
   clipboard: [],
 };
 
 // Reducer
-const drawingReducer = (state: DrawingState, action: DrawingAction): DrawingState => {
+export const drawingReducer = (state: DrawingState, action: DrawingAction): DrawingState => {
   switch (action.type) {
     case DrawingActionType.SET_TOOL:
       return {
@@ -277,7 +276,7 @@ const drawingReducer = (state: DrawingState, action: DrawingAction): DrawingStat
 };
 
 // Context type
-interface DrawingContextType {
+export interface DrawingContextType {
   state: DrawingState;
   dispatch: React.Dispatch<DrawingAction>;
   
@@ -323,151 +322,9 @@ interface DrawingContextType {
 }
 
 // Create context
-const DrawingContext = createContext<DrawingContextType | undefined>(undefined);
+export const DrawingContext = createContext<DrawingContextType | undefined>(undefined);
 
-// Provider component
-export const DrawingProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(drawingReducer, initialState);
-
-  // Tool management
-  const setActiveTool = useCallback((tool: DrawingTool) => {
-    dispatch({ type: DrawingActionType.SET_TOOL, tool });
-  }, []);
-
-  // Style management
-  const updateStyle = useCallback((style: Partial<DrawingStyle>) => {
-    dispatch({ type: DrawingActionType.UPDATE_STYLE, style });
-  }, []);
-
-  // Shape management
-  const setShapes = useCallback((shapes: Shape[]) => {
-    dispatch({ type: DrawingActionType.SET_SHAPES, shapes });
-  }, []);
-
-  const addShape = useCallback((shape: Omit<Shape, 'zIndex'>) => {
-    const fullShape: Shape = {
-      ...shape,
-      zIndex: getNextZIndex(state.shapes),
-    } as Shape;
-    dispatch({ type: DrawingActionType.ADD_SHAPE, shape: fullShape });
-  }, [state.shapes]);
-
-  const updateShape = useCallback((id: string, updates: Partial<Shape>) => {
-    dispatch({ type: DrawingActionType.UPDATE_SHAPE, id, updates });
-  }, []);
-
-  const deleteShape = useCallback((id: string) => {
-    dispatch({ type: DrawingActionType.DELETE_SHAPE, id });
-  }, []);
-
-  const deleteSelected = useCallback(() => {
-    state.selectedShapeIds.forEach(id => {
-      dispatch({ type: DrawingActionType.DELETE_SHAPE, id });
-    });
-  }, [state.selectedShapeIds]);
-
-  // Selection
-  const selectShape = useCallback((id: string, multi?: boolean) => {
-    dispatch({ type: DrawingActionType.SELECT_SHAPE, id, multi });
-  }, []);
-
-  const selectMultiple = useCallback((ids: string[]) => {
-    dispatch({ type: DrawingActionType.SELECT_MULTIPLE, ids });
-  }, []);
-
-  const clearSelection = useCallback(() => {
-    dispatch({ type: DrawingActionType.CLEAR_SELECTION });
-  }, []);
-
-  // Drawing state
-  const setDrawingState = useCallback((
-    isDrawing: boolean, 
-    startPoint?: Point | null, 
-    lastPoint?: Point | null
-  ) => {
-    dispatch({ 
-      type: DrawingActionType.SET_DRAWING_STATE, 
-      isDrawing, 
-      startPoint, 
-      lastPoint 
-    });
-  }, []);
-
-  const setTempPoints = useCallback((points: Point[]) => {
-    dispatch({ type: DrawingActionType.SET_TEMP_POINTS, points });
-  }, []);
-
-  const setActiveShape = useCallback((shape: Shape | null) => {
-    dispatch({ type: DrawingActionType.SET_ACTIVE_SHAPE, shape });
-  }, []);
-
-  // Z-order
-  const reorderShape = useCallback((id: string, operation: LayerOperation) => {
-    dispatch({ type: DrawingActionType.REORDER_SHAPE, id, operation });
-  }, []);
-
-  // Measurement
-  const setMeasurementCalibration = useCallback((calibration: {
-    pixelsPerUnit: number | null;
-    unit: string;
-    calibrationLineId: string | null;
-  }) => {
-    dispatch({ type: DrawingActionType.SET_MEASUREMENT_CALIBRATION, calibration });
-  }, []);
-
-  // Helpers
-  const getSortedShapes = useCallback(() => {
-    return sortShapesByZIndex(state.shapes);
-  }, [state.shapes]);
-
-  // Clipboard operations
-  const copySelectedShapes = useCallback(() => {
-    const selectedShapes = state.shapes.filter(shape => 
-      state.selectedShapeIds.includes(shape.id)
-    );
-    if (selectedShapes.length > 0) {
-      dispatch({ type: DrawingActionType.COPY_SHAPES, shapes: selectedShapes });
-    }
-  }, [state.shapes, state.selectedShapeIds]);
-
-  const pasteShapes = useCallback((offset?: Point) => {
-    if (state.clipboard.length > 0) {
-      dispatch({ type: DrawingActionType.PASTE_SHAPES, offset });
-    }
-  }, [state.clipboard]);
-
-  const value: DrawingContextType = {
-    state,
-    dispatch,
-    setActiveTool,
-    updateStyle,
-    setShapes,
-    addShape,
-    updateShape,
-    deleteShape,
-    deleteSelected,
-    selectShape,
-    selectMultiple,
-    clearSelection,
-    setDrawingState,
-    setTempPoints,
-    setActiveShape,
-    reorderShape,
-    setMeasurementCalibration,
-    getSortedShapes,
-    copySelectedShapes,
-    pasteShapes,
-  };
-
-  return (
-    <DrawingContext.Provider value={value}>
-      {children}
-    </DrawingContext.Provider>
-  );
-};
-
-// Hook to use the context
-export const useDrawingContext = () => {
+export const useDrawingContext = (): DrawingContextType => {
   const context = useContext(DrawingContext);
   if (!context) {
     throw new Error('useDrawingContext must be used within a DrawingProvider');

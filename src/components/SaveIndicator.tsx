@@ -4,10 +4,9 @@ type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
 
 interface SaveIndicatorProps {
   status: SaveStatus;
-  lastSaved: Date | null;
 }
 
-export const SaveIndicator: React.FC<SaveIndicatorProps> = ({ status, lastSaved }) => {
+export const SaveIndicator: React.FC<SaveIndicatorProps> = ({ status }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
 
@@ -41,7 +40,7 @@ export const SaveIndicator: React.FC<SaveIndicatorProps> = ({ status, lastSaved 
     return null;
   }
 
-  const getMessage = () => {
+  const getMessage = (): string => {
     switch (status) {
       case 'saving':
         return 'Saving...';
@@ -54,7 +53,7 @@ export const SaveIndicator: React.FC<SaveIndicatorProps> = ({ status, lastSaved 
     }
   };
 
-  const getColor = () => {
+  const getColor = (): string => {
     switch (status) {
       case 'saving':
         return '#999';

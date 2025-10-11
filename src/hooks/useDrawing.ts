@@ -12,10 +12,36 @@ import {
   type CalloutShape,
   type StarShape,
   type MeasurementLineShape,
+  type DrawingStyle,
 } from '@/types/drawing';
 import { calculateInitialPerimeterOffset, perimeterOffsetToPoint, getOptimalControlPoints } from '@/utils/calloutGeometry';
 
-export const useDrawing = () => {
+interface UseDrawingResult {
+  activeTool: DrawingTool;
+  currentStyle: DrawingStyle;
+  isDrawing: boolean;
+  shapes: Shape[];
+  selectedShapeIds: string[];
+  tempPoints: Point[];
+  setActiveTool: (tool: DrawingTool) => void;
+  updateStyle: (style: Partial<DrawingStyle>) => void;
+  startDrawing: (point: Point, zoomLevel?: number) => void;
+  continueDrawing: (point: Point, zoomLevel?: number) => void;
+  finishDrawing: (point?: Point, zoomLevel?: number) => void;
+  cancelDrawing: () => void;
+  addShape: (shape: Omit<Shape, 'zIndex'>) => void;
+  updateShape: (id: string, updates: Partial<Shape>) => void;
+  deleteShape: (id: string) => void;
+  deleteSelected: () => void;
+  selectShape: (id: string, multi?: boolean) => void;
+  selectMultiple: (ids: string[]) => void;
+  clearSelection: () => void;
+  reorderShape: (id: string, operation: LayerOperation) => void;
+  getSortedShapes: () => Shape[];
+  handleKeyPress: (event: KeyboardEvent) => void;
+}
+
+export const useDrawing = (): UseDrawingResult => {
   const {
     state,
     setActiveTool,
@@ -42,7 +68,7 @@ export const useDrawing = () => {
   const updateIntervalRef = useRef<number | null>(null);
 
   // Generate unique ID for shapes
-  const generateId = () => `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const generateId = (): string => `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   // Effect to handle batched point updates at 60fps
   useEffect(() => {
@@ -75,7 +101,7 @@ export const useDrawing = () => {
 
 
   // Start drawing based on current tool
-  const startDrawing = useCallback((point: Point, _event?: React.MouseEvent, zoomLevel: number = 1) => {
+  const startDrawing = useCallback((point: Point): void => {
     if (state.activeTool === DrawingTool.SELECT) {
       // Handle selection logic
       return;
@@ -114,7 +140,7 @@ export const useDrawing = () => {
   }, [state.activeTool, setDrawingState, setTempPoints]);
 
   // Continue drawing (mouse move)
-  const continueDrawing = useCallback((point: Point, _event?: React.MouseEvent, zoomLevel: number = 1) => {
+  const continueDrawing = useCallback((point: Point): void => {
     if (!isDrawingRef.current || !state.isDrawing) return;
 
     const startPoint = state.startPoint;
@@ -126,7 +152,6 @@ export const useDrawing = () => {
       case DrawingTool.PEN:
         // Hybrid optimization: collect points without immediate React update
         const now = Date.now();
-        const timeSinceLastPoint = now - lastUpdateTimeRef.current;
         
         // Optional: throttle point collection to reduce density (uncomment if needed)
         // if (timeSinceLastPoint < 8) return; // 125Hz max
@@ -148,10 +173,10 @@ export const useDrawing = () => {
         setTempPoints([startPoint, point]);
         break;
     }
-  }, [state.activeTool, state.isDrawing, state.startPoint, state.tempPoints, setDrawingState, setTempPoints]);
+  }, [state.activeTool, state.isDrawing, state.startPoint, setDrawingState, setTempPoints]);
 
   // Finish drawing (mouse up)
-  const finishDrawing = useCallback((point?: Point, _event?: React.MouseEvent, zoomLevel: number = 1) => {
+  const finishDrawing = useCallback((point?: Point, zoomLevel: number = 1): void => {
     if (!isDrawingRef.current || !state.isDrawing) return;
 
     const startPoint = state.startPoint;
@@ -159,6 +184,8 @@ export const useDrawing = () => {
 
     const endPoint = point || state.lastPoint;
     if (!endPoint) return;
+
+    const effectiveZoom = zoomLevel || 1;
 
     let newShape: Shape | null = null;
 
@@ -206,7 +233,7 @@ export const useDrawing = () => {
           height: Math.abs(height),
           style: { 
             ...state.currentStyle,
-            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+            strokeWidth: state.currentStyle.strokeWidth / effectiveZoom 
           },
           visible: true,
           locked: false,
@@ -235,7 +262,7 @@ export const useDrawing = () => {
           radiusY: radius,
           style: { 
             ...state.currentStyle,
-            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+            strokeWidth: state.currentStyle.strokeWidth / effectiveZoom 
           },
           visible: true,
           locked: false,
@@ -252,23 +279,23 @@ export const useDrawing = () => {
           points: [startPoint.x, startPoint.y, endPoint.x, endPoint.y],
           style: { 
             ...state.currentStyle,
-            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+            strokeWidth: state.currentStyle.strokeWidth / effectiveZoom 
           },
           visible: true,
           locked: false,
           zIndex: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
-          pointerLength: 10 / zoomLevel,
-          pointerWidth: 10 / zoomLevel,
+          pointerLength: 10 / effectiveZoom,
+          pointerWidth: 10 / effectiveZoom,
         } as ArrowShape;
         break;
 
       case DrawingTool.CALLOUT:
         // Calculate text box dimensions - compensate for zoom
-        const textBoxWidth = 120 / zoomLevel;
-        const textBoxHeight = 40 / zoomLevel;
-        const padding = 10 / zoomLevel;
+        const textBoxWidth = 120 / effectiveZoom;
+        const textBoxHeight = 40 / effectiveZoom;
+        const padding = 10 / effectiveZoom;
         
         // First click is arrow tip (what we're pointing at)
         // End point is where the text box should be
@@ -277,7 +304,7 @@ export const useDrawing = () => {
         
         // Calculate text box position based on drag direction
         // Ensure reasonable distance from arrow tip
-        const minDistance = 100 / zoomLevel; // Adjust for zoom
+        const minDistance = 100 / effectiveZoom; // Adjust for zoom
         const calloutDx = endPoint.x - startPoint.x;
         const calloutDy = endPoint.y - startPoint.y;
         const distance = Math.sqrt(calloutDx * calloutDx + calloutDy * calloutDy);
@@ -324,7 +351,7 @@ export const useDrawing = () => {
           textX: textX,
           textY: textY,
           text: 'Callout',
-          fontSize: (state.currentStyle.strokeWidth * 8) / zoomLevel,
+          fontSize: (state.currentStyle.strokeWidth * 8) / effectiveZoom,
           fontFamily: state.currentStyle.fontFamily || 'Arial',
           textWidth: textBoxWidth,
           textHeight: textBoxHeight,
@@ -340,7 +367,7 @@ export const useDrawing = () => {
           borderRadius: 4,
           style: { 
             ...state.currentStyle,
-            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+            strokeWidth: state.currentStyle.strokeWidth / effectiveZoom 
           },
           visible: true,
           locked: false,
@@ -366,7 +393,7 @@ export const useDrawing = () => {
           points: 5,
           style: { 
             ...state.currentStyle,
-            strokeWidth: state.currentStyle.strokeWidth / zoomLevel 
+            strokeWidth: state.currentStyle.strokeWidth / effectiveZoom 
           },
           visible: true,
           locked: false,
@@ -481,7 +508,7 @@ export const useDrawing = () => {
   ]);
 
   // Cancel current drawing operation
-  const cancelDrawing = useCallback(() => {
+  const cancelDrawing = useCallback((): void => {
     isDrawingRef.current = false;
     setDrawingState(false, null, null);
     setTempPoints([]);
@@ -491,7 +518,7 @@ export const useDrawing = () => {
   }, [setDrawingState, setTempPoints, setActiveShape]);
 
   // Handle keyboard shortcuts for tools
-  const handleKeyPress = useCallback((e: KeyboardEvent) => {
+  const handleKeyPress = useCallback((e: KeyboardEvent): void => {
     // Don't handle if user is typing in an input
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
       return;

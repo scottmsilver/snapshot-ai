@@ -1,5 +1,5 @@
 import { useCallback, useReducer } from 'react';
-import { SelectionState, SelectionAction, type SelectionContext } from '@/types/selection';
+import { SelectionState, SelectionAction, type SelectionContext, type SelectionShapeSnapshot } from '@/types/selection';
 import { selectionStateMachine, getNextState } from '@/config/selectionStateMachine';
 import type { Shape, Point } from '@/types/drawing';
 
@@ -18,8 +18,8 @@ const initialContext: SelectionContext = {
   isDragging: false,
   dragStartPoint: null,
   draggedShapeIds: [],
-  initialShapePositions: new Map(),
-  initialShapeData: new Map(),
+  initialShapePositions: new Map<string, Point>(),
+  initialShapeData: new Map<string, SelectionShapeSnapshot>(),
 };
 
 // Action types
@@ -36,7 +36,7 @@ type Action =
   | { type: typeof SelectionAction.START_DRAG_SELECT; point: Point }
   | { type: typeof SelectionAction.UPDATE_DRAG_SELECT; point: Point }
   | { type: typeof SelectionAction.END_DRAG_SELECT }
-  | { type: typeof SelectionAction.START_DRAG_SHAPE; point: Point; shapePositions: Map<string, Point>; shapeData: Map<string, any> }
+  | { type: typeof SelectionAction.START_DRAG_SHAPE; point: Point; shapePositions: Map<string, Point>; shapeData: Map<string, SelectionShapeSnapshot> }
   | { type: typeof SelectionAction.UPDATE_DRAG_SHAPE; point: Point }
   | { type: typeof SelectionAction.END_DRAG_SHAPE }
   | { type: typeof SelectionAction.CANCEL_DRAG }
@@ -47,7 +47,7 @@ type Action =
 
 // Reducer that uses the state machine configuration
 function selectionReducer(context: SelectionContext, action: Action): SelectionContext {
-  let newContext = { ...context };
+  const newContext = { ...context };
 
   // First, apply the action's effects on the context
   switch (action.type) {
@@ -136,16 +136,16 @@ function selectionReducer(context: SelectionContext, action: Action): SelectionC
     case SelectionAction.END_DRAG_SHAPE:
       newContext.dragStartPoint = null;
       newContext.draggedShapeIds = [];
-      newContext.initialShapePositions = new Map();
-      newContext.initialShapeData = new Map();
+      newContext.initialShapePositions = new Map<string, Point>();
+      newContext.initialShapeData = new Map<string, SelectionShapeSnapshot>();
       break;
 
     case SelectionAction.CANCEL_DRAG:
       newContext.dragStartPoint = null;
       newContext.selectionBox.visible = false;
       newContext.draggedShapeIds = [];
-      newContext.initialShapePositions = new Map();
-      newContext.initialShapeData = new Map();
+      newContext.initialShapePositions = new Map<string, Point>();
+      newContext.initialShapeData = new Map<string, SelectionShapeSnapshot>();
       break;
       
     case SelectionAction.START_TRANSFORM:
@@ -188,11 +188,43 @@ function selectionReducer(context: SelectionContext, action: Action): SelectionC
   return newContext;
 }
 
-export function useSelectionMachine() {
+interface UseSelectionMachineResult {
+  context: SelectionContext;
+  isIdle: boolean;
+  isHovering: boolean;
+  isSingleSelected: boolean;
+  isMultiSelected: boolean;
+  isDragSelecting: boolean;
+  isDraggingShape: boolean;
+  isTransforming: boolean;
+  isDraggingControlPoint: boolean;
+  handleShapeHover: (shapeId: string | null) => void;
+  handleShapeClick: (shapeId: string, modifiers: { ctrlKey: boolean; shiftKey: boolean }) => void;
+  handleEmptyClick: () => void;
+  startDragSelection: (point: Point) => void;
+  updateDragSelection: (point: Point, shapes: Shape[]) => void;
+  endDragSelection: () => void;
+  startDragShape: (point: Point, shapes: Shape[]) => void;
+  updateDragShape: (point: Point) => void;
+  endDragShape: () => void;
+  cancelDrag: () => void;
+  selectShapes: (shapeIds: string[]) => void;
+  clearSelection: () => void;
+  startTransform: () => void;
+  endTransform: () => void;
+  startControlPointDrag: () => void;
+  endControlPointDrag: () => void;
+  hoveredShapeId: string | null;
+  selectedShapeIds: string[];
+  selectionBox: SelectionContext['selectionBox'];
+}
+
+export function useSelectionMachine(): UseSelectionMachineResult {
   const [context, dispatch] = useReducer(selectionReducer, initialContext);
+  const { selectionBox, selectedShapeIds, hoveredShapeId } = context;
 
   // Check if a shape intersects with selection box
-  const shapeIntersectsBox = useCallback((shape: Shape, box: typeof context.selectionBox) => {
+  const shapeIntersectsBox = useCallback((shape: Shape, box: typeof selectionBox): boolean => {
     if (!box.visible || box.width === 0 || box.height === 0) return false;
 
     // Simple bounding box check
@@ -252,17 +284,17 @@ export function useSelectionMachine() {
   }, []);
 
   // Action creators
-  const handleShapeHover = useCallback((shapeId: string | null) => {
-    if (shapeId !== context.hoveredShapeId) {
+  const handleShapeHover = useCallback((shapeId: string | null): void => {
+    if (shapeId !== hoveredShapeId) {
       if (shapeId) {
         dispatch({ type: SelectionAction.SET_HOVERED_SHAPE, shapeId });
       } else {
         dispatch({ type: SelectionAction.CLEAR_HOVER });
       }
     }
-  }, [context.hoveredShapeId]);
+  }, [hoveredShapeId]);
 
-  const handleShapeClick = useCallback((shapeId: string, modifiers: { ctrlKey: boolean; shiftKey: boolean }) => {
+  const handleShapeClick = useCallback((shapeId: string, modifiers: { ctrlKey: boolean; shiftKey: boolean }): void => {
     if (modifiers.ctrlKey || modifiers.shiftKey) {
       dispatch({ type: SelectionAction.TOGGLE_SELECTION, shapeId });
     } else {
@@ -270,36 +302,36 @@ export function useSelectionMachine() {
     }
   }, []);
 
-  const handleEmptyClick = useCallback(() => {
+  const handleEmptyClick = useCallback((): void => {
     dispatch({ type: SelectionAction.CLEAR_SELECTION });
   }, []);
 
-  const startDragSelection = useCallback((point: Point) => {
+  const startDragSelection = useCallback((point: Point): void => {
     dispatch({ type: SelectionAction.START_DRAG_SELECT, point });
   }, []);
 
-  const updateDragSelection = useCallback((point: Point, shapes: Shape[]) => {
+  const updateDragSelection = useCallback((point: Point, shapes: Shape[]): void => {
     dispatch({ type: SelectionAction.UPDATE_DRAG_SELECT, point });
     
     // Update selected shapes based on intersection
-    if (context.selectionBox.visible) {
+    if (selectionBox.visible) {
       const intersectingShapeIds = shapes
-        .filter(shape => shapeIntersectsBox(shape, context.selectionBox))
+        .filter(shape => shapeIntersectsBox(shape, selectionBox))
         .map(shape => shape.id);
       
       dispatch({ type: SelectionAction.SELECT_SHAPES, shapeIds: intersectingShapeIds });
     }
-  }, [context.selectionBox, shapeIntersectsBox]);
+  }, [selectionBox, shapeIntersectsBox]);
 
-  const endDragSelection = useCallback(() => {
+  const endDragSelection = useCallback((): void => {
     dispatch({ type: SelectionAction.END_DRAG_SELECT });
   }, []);
 
-  const startDragShape = useCallback((point: Point, shapes: Shape[]) => {
+  const startDragShape = useCallback((point: Point, shapes: Shape[]): void => {
     const shapePositions = new Map<string, Point>();
-    const shapeData = new Map<string, any>();
+    const shapeData = new Map<string, SelectionShapeSnapshot>();
     
-    context.selectedShapeIds.forEach(id => {
+    selectedShapeIds.forEach(id => {
       const shape = shapes.find(s => s.id === id);
       if (shape) {
         // Store full shape data for complex shapes
@@ -317,42 +349,42 @@ export function useSelectionMachine() {
     });
     
     dispatch({ type: SelectionAction.START_DRAG_SHAPE, point, shapePositions, shapeData });
-  }, [context.selectedShapeIds]);
+  }, [selectedShapeIds]);
 
-  const updateDragShape = useCallback((point: Point) => {
+  const updateDragShape = useCallback((point: Point): void => {
     dispatch({ type: SelectionAction.UPDATE_DRAG_SHAPE, point });
   }, []);
 
-  const endDragShape = useCallback(() => {
+  const endDragShape = useCallback((): void => {
     dispatch({ type: SelectionAction.END_DRAG_SHAPE });
   }, []);
 
-  const cancelDrag = useCallback(() => {
+  const cancelDrag = useCallback((): void => {
     dispatch({ type: SelectionAction.CANCEL_DRAG });
   }, []);
 
   // Direct selection actions
-  const selectShapes = useCallback((shapeIds: string[]) => {
+  const selectShapes = useCallback((shapeIds: string[]): void => {
     dispatch({ type: SelectionAction.SELECT_SHAPES, shapeIds });
   }, []);
 
-  const clearSelection = useCallback(() => {
+  const clearSelection = useCallback((): void => {
     dispatch({ type: SelectionAction.CLEAR_SELECTION });
   }, []);
 
-  const startTransform = useCallback(() => {
+  const startTransform = useCallback((): void => {
     dispatch({ type: SelectionAction.START_TRANSFORM });
   }, []);
 
-  const endTransform = useCallback(() => {
+  const endTransform = useCallback((): void => {
     dispatch({ type: SelectionAction.END_TRANSFORM });
   }, []);
 
-  const startControlPointDrag = useCallback(() => {
+  const startControlPointDrag = useCallback((): void => {
     dispatch({ type: SelectionAction.START_CONTROL_POINT_DRAG });
   }, []);
 
-  const endControlPointDrag = useCallback(() => {
+  const endControlPointDrag = useCallback((): void => {
     dispatch({ type: SelectionAction.END_CONTROL_POINT_DRAG });
   }, []);
 
@@ -389,8 +421,8 @@ export function useSelectionMachine() {
     endControlPointDrag,
     
     // Direct state access
-    hoveredShapeId: context.hoveredShapeId,
-    selectedShapeIds: context.selectedShapeIds,
-    selectionBox: context.selectionBox,
+    hoveredShapeId,
+    selectedShapeIds,
+    selectionBox,
   };
 }

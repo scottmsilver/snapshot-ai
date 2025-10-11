@@ -1,5 +1,4 @@
 import React from 'react';
-import { formatMeasurement } from '@/utils/measurementUtils';
 import type { MeasurementUnit } from '@/utils/measurementUtils';
 
 interface CalibrationStatusProps {

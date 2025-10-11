@@ -6,7 +6,6 @@ interface TextInputDialogProps {
   initialText?: string;
   initialFontSize?: number;
   initialFontFamily?: string;
-  position?: { x: number; y: number };
   onSubmit: (text: string, fontSize: number, fontFamily: string) => void;
   onCancel: () => void;
 }
@@ -16,7 +15,6 @@ export const TextInputDialog: React.FC<TextInputDialogProps> = ({
   initialText = '',
   initialFontSize = 16,
   initialFontFamily = 'Arial',
-  position,
   onSubmit,
   onCancel,
 }) => {
@@ -38,19 +36,21 @@ export const TextInputDialog: React.FC<TextInputDialogProps> = ({
     setFontFamily(initialFontFamily);
   }, [initialText, initialFontSize, initialFontFamily]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
     if (text.trim()) {
       onSubmit(text, fontSize, fontFamily);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === 'Escape') {
       onCancel();
     } else if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit(e as any);
+      if (text.trim()) {
+        onSubmit(text, fontSize, fontFamily);
+      }
     }
   };
 

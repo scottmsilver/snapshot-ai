@@ -1,5 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 
 // Use locally served worker from public directory
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/pdf.worker.min.js';
@@ -29,6 +29,7 @@ export async function loadPDFDocument(file: File): Promise<PDFDocumentProxy> {
     
     // Add progress tracking
     loadingTask.onProgress = function(progress: { loaded: number; total: number }) {
+      void progress;
       // Progress tracking available here
     };
     

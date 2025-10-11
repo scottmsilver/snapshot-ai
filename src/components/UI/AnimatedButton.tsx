@@ -80,6 +80,7 @@ export const AnimatedButton: React.FC<AnimatedButtonProps> = ({
       className={className}
       title={title}
       type={type}
+      {...otherProps}
     >
       {children}
     </motion.button>

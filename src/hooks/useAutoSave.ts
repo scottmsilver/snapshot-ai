@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { googleDriveService, type ProjectData } from '@/services/googleDrive';
-import { useAuth } from '@/contexts/AuthContext';
+import { useOptionalAuth } from '@/contexts/AuthContext';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import type { ImageData } from '@/types/canvas';
 
@@ -37,17 +37,12 @@ export const useAutoSave = ({
   const lastSavedDataRef = useRef<string>('');
   
   // Get auth context - try/catch in case it's not available
-  let authContext: ReturnType<typeof useAuth> | null = null;
-  try {
-    authContext = useAuth();
-  } catch (error) {
-    // Auth context not available
-  }
+  const authContext = useOptionalAuth();
   
   const { state: drawingState } = useDrawingContext();
 
   // Manual save function
-  const save = useCallback(async () => {
+  const save = useCallback(async (): Promise<void> => {
     if (!authContext?.isAuthenticated || !authContext?.getAccessToken) {
       return;
     }
@@ -96,7 +91,7 @@ export const useAutoSave = ({
   }, [authContext, drawingState.shapes, fileId, hasWritePermission, onFileIdChange, documentName]);
 
   // Mark as unsaved
-  const markAsUnsaved = useCallback(() => {
+  const markAsUnsaved = useCallback((): void => {
     setSaveStatus('unsaved');
   }, []);
 
@@ -138,11 +133,11 @@ export const useAutoSave = ({
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [drawingState.shapes, fileId, hasWritePermission, save, debounceMs, authContext?.isAuthenticated]);
+  }, [drawingState.shapes, fileId, hasWritePermission, save, debounceMs, authContext?.isAuthenticated, imageData]);
 
   // Warn before leaving with unsaved changes
   useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent): string | void => {
       if (saveStatus === 'unsaved' || saveStatus === 'saving') {
         e.preventDefault();
         e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';

@@ -1,12 +1,8 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Stage, Layer, Rect, Line } from 'react-konva'
 import Konva from 'konva'
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Undo2, Redo2, Copy, Download, FileText, 
-  Palette, Ruler, ZoomIn, ZoomOut, RefreshCw,
-  AlertTriangle
-} from 'lucide-react'
+import { motion } from 'framer-motion'
+import { Copy, Palette, ZoomIn, ZoomOut } from 'lucide-react'
 import { ImageUploader } from '@/components/ImageUploader'
 import { DrawingToolbar } from '@/components/Toolbar'
 import { PropertiesSection } from '@/components/Toolbar/PropertiesSection'
@@ -20,17 +16,17 @@ import { PDFViewer } from '@/components/PDFViewer/PDFViewer'
 import { useHistory } from '@/hooks/useHistory'
 import { useDrawing } from '@/hooks/useDrawing'
 import { useDrawingContext } from '@/contexts/DrawingContext'
-import { useAuth } from '@/contexts/AuthContext'
+import { useOptionalAuth } from '@/contexts/AuthContext'
 import { useMeasurement } from '@/hooks/useMeasurement'
 import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils'
 import { DrawingTool, type Point, type TextShape, type CalloutShape, type MeasurementLineShape, type ImageShape } from '@/types/drawing'
-import { googleDriveService, type ProjectData } from '@/services/googleDrive'
+import { googleDriveService } from '@/services/googleDrive'
 import { CalibrationDialog } from '@/components/Tools/CalibrationDialog'
 import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurementUtils'
 import type { MeasurementUnit } from '@/utils/measurementUtils'
 import { calculateScaledDimensions, ImageSource, isPDFSourcedImage, isLikelyScreenshot } from '@/utils/imageScaling'
 
-function App() {
+function App(): JSX.Element {
   const CANVAS_PADDING = 100
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null)
   const [isCanvasInitialized, setIsCanvasInitialized] = useState(false)
@@ -44,7 +40,6 @@ function App() {
   const [sharedFileError, setSharedFileError] = useState<string | null>(null)
   const [loadedFileId, setLoadedFileId] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved')
-  const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [documentName, setDocumentName] = useState('Untitled')
   const [isEditingName, setIsEditingName] = useState(false)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -58,7 +53,7 @@ function App() {
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
   
   // Handle editing existing text shapes
-  const handleTextShapeEdit = (shapeId: string) => {
+  const handleTextShapeEdit = (shapeId: string): void => {
     const shape = shapes.find(s => s.id === shapeId);
     if (shape && (shape.type === DrawingTool.TEXT || shape.type === DrawingTool.CALLOUT)) {
       setEditingTextId(shapeId);
@@ -78,6 +73,7 @@ function App() {
   // PDF state
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [pdfPageInfo, setPdfPageInfo] = useState<{ current: number; total: number } | null>(null)
+  void pdfPageInfo;
   
   const { 
     canUndo, 
@@ -89,17 +85,10 @@ function App() {
     currentIndex 
   } = useHistory()
   
-  // Get auth context - try/catch in case it's not available
-  let authContext: ReturnType<typeof useAuth> | null = null;
-  try {
-    authContext = useAuth();
-  } catch (error) {
-    console.error('❌ App: Failed to get auth context:', error);
-    // Auth context not available
-  }
+  const authContext = useOptionalAuth();
 
   // Helper function to create IMAGE shape from file
-  const createImageShapeFromFile = async (file: File, source?: ImageSource): Promise<ImageShape> => {
+  const createImageShapeFromFile = useCallback(async (file: File, source?: ImageSource): Promise<ImageShape> => {
     const dataURL = await new Promise<string>((resolve) => {
       const reader = new FileReader()
       reader.onload = (e) => resolve(e.target?.result as string)
@@ -208,7 +197,7 @@ function App() {
     }
     
     return imageShape
-  }
+  }, [canvasSize, isCanvasInitialized, setCanvasSize, setIsCanvasInitialized])
 
   // Handle shared file loading from URL parameters
   useEffect(() => {
@@ -285,10 +274,10 @@ function App() {
           });
       }
     }
-  }, [authContext?.isAuthenticated, authContext?.getAccessToken, setShapes]);
+  }, [authContext, setShapes]);
 
 
-  const handleImageUpload = async (file: File) => {
+  const handleImageUpload = async (file: File): Promise<void> => {
     try {
       const imageShape = await createImageShapeFromFile(file)
       setPdfFile(null) // Clear any PDF state
@@ -302,11 +291,12 @@ function App() {
     }
   }
   
-  const handlePDFUpload = (file: File) => {
+  const handlePDFUpload = (file: File): void => {
     setPdfFile(file)
   }
   
-  const handlePDFPageLoad = async (image: HTMLImageElement, pageInfo: { current: number; total: number }) => {
+  const handlePDFPageLoad = async (image: HTMLImageElement, pageInfo: { current: number; total: number }): Promise<void> => {
+    setPdfPageInfo(pageInfo);
     
     try {
       // Convert the selected page to an image file
@@ -337,7 +327,7 @@ function App() {
   const lastShapesRef = useRef<string>('')
 
   // Export functions
-  const handleCopyToClipboard = async () => {
+  const handleCopyToClipboard = async (): Promise<void> => {
     if (!stageRef.current) return;
     
     try {
@@ -365,14 +355,14 @@ function App() {
     }
   };
 
-  const handleDownloadImage = () => {
+  const handleDownloadImage = (): void => {
     if (!stageRef.current) return;
     
     const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
     downloadCanvasAsImage(stageRef.current, `markup-${timestamp}.png`);
   };
 
-  const handleCalibrationConfirm = (value: number, unit: MeasurementUnit) => {
+  const handleCalibrationConfirm = (value: number, unit: MeasurementUnit): void => {
     if (pendingCalibrationLine) {
       const [x1, y1, x2, y2] = pendingCalibrationLine.points;
       const pixelDistance = calculatePixelDistance(x1, y1, x2, y2);
@@ -402,7 +392,7 @@ function App() {
     setPendingCalibrationLine(null);
   };
 
-  const handleCalibrationCancel = () => {
+  const handleCalibrationCancel = (): void => {
     // Delete the pending calibration line
     if (pendingCalibrationLine) {
       const updatedShapes = shapes.filter(s => s.id !== pendingCalibrationLine.id);
@@ -414,11 +404,11 @@ function App() {
   };
 
   // Generate unique ID for shapes
-  const generateId = () => `shape-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const generateId = (): string => `shape-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   // Handle screenshot area selection
   useEffect(() => {
-    const handleScreenshotAreaSelected = async (event: Event) => {
+    const handleScreenshotAreaSelected = async (event: Event): Promise<void> => {
       const bounds = (event as CustomEvent).detail;
       if (!stageRef.current || bounds.width < 10 || bounds.height < 10 || !canvasSize) return;
 
@@ -479,7 +469,7 @@ function App() {
 
   // Handle keyboard shortcuts
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       // Ctrl/Cmd + Z for undo
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault()
@@ -559,7 +549,7 @@ function App() {
     if (getCurrentState() === null) {
       pushState(JSON.stringify({ shapes: [] }), 'Initial state')
     }
-  }, [])
+  }, [getCurrentState, pushState])
 
   // Save shapes to history when they change (but not on history navigation)
   useEffect(() => {
@@ -600,7 +590,7 @@ function App() {
 
   // Handle paste events for images
   useEffect(() => {
-    const handlePaste = async (e: ClipboardEvent) => {
+    const handlePaste = async (e: ClipboardEvent): Promise<void> => {
       // Don't handle paste if user is typing in an input
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
@@ -666,7 +656,7 @@ function App() {
     return () => {
       window.removeEventListener('paste', handlePaste);
     };
-  }, [isCanvasInitialized, shapes, addShape, setActiveTool]);
+  }, [isCanvasInitialized, shapes, addShape, setActiveTool, createImageShapeFromFile]);
   
   // Handle new measurement and calibration lines
   useEffect(() => {
@@ -700,7 +690,7 @@ function App() {
       const updatedShapes = measurement.updateMeasurementLabels(shapes)
       setShapes(updatedShapes)
     }
-  }, [shapes, measurement, updateShape, setShapes, setActiveTool])
+  }, [shapes, measurement, setShapes, setActiveTool])
   
   // Update measurement lines when calibration or unit changes
   useEffect(() => {
@@ -712,7 +702,7 @@ function App() {
         setShapes(updatedShapes);
       }
     }
-  }, [measurement.calibration.pixelsPerUnit, measurement.calibration.unit, measurement.isCalibrated])
+  }, [measurement, shapes, setShapes])
 
   // Show loading screen while checking authentication
   if (!authContext || authContext.isLoading) {
@@ -874,7 +864,7 @@ function App() {
                   {documentName}
                 </h1>
               )}
-              <SaveIndicator status={saveStatus} lastSaved={lastSaved} />
+              <SaveIndicator status={saveStatus} />
             </div>
           </div>
 
@@ -890,9 +880,8 @@ function App() {
               imageData={null} 
               initialFileId={loadedFileId}
               documentName={documentName}
-              onSaveStatusChange={(status, saved) => {
+              onSaveStatusChange={(status) => {
                 setSaveStatus(status);
-                setLastSaved(saved);
               }}
               onProjectLoad={(projectData, fileName) => {
                 // Clear any existing canvas state

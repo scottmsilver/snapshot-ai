@@ -10,7 +10,6 @@ import {
   calculateLineAngle,
   shouldFlipText,
   calculateTextPosition,
-  type MeasurementUnit
 } from './measurementUtils';
 
 describe('measurementUtils', () => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { loadPDFDocument, pdfPageToImageElement, getPDFInfo } from '@/utils/pdfUtils';
 import type { PDFDocumentInfo } from '@/utils/pdfUtils';
@@ -21,12 +21,28 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [rotation, setRotation] = useState(0); // Rotation in degrees (0, 90, 180, 270)
 
+  const loadPreview = useCallback(async (pageNum: number): Promise<void> => {
+    if (!pdf || !pdfInfo) return;
+    
+    try {
+      setLoadingPreview(true);
+      // Use lower scale for preview with rotation
+      const previewImage = await pdfPageToImageElement(pdf, pageNum, 1, rotation);
+      setPreviewUrl(previewImage.src);
+    } catch (err) {
+      console.error('Error loading preview:', err);
+    } finally {
+      setLoadingPreview(false);
+    }
+  }, [pdf, pdfInfo, rotation]);
+
   // Load PDF document
   useEffect(() => {
     let mounted = true;
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: NodeJS.Timeout | undefined;
+    let loadedPdf: PDFDocumentProxy | null = null;
 
-    const loadPDF = async () => {
+    const loadPDF = async (): Promise<void> => {
       try {
         console.log('Loading PDF:', file.name);
         setLoading(true);
@@ -47,6 +63,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
         clearTimeout(timeoutId);
         
         setPdf(pdfDoc);
+        loadedPdf = pdfDoc;
         
         const info = await getPDFInfo(pdfDoc);
         setPdfInfo(info);
@@ -68,44 +85,28 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
       }
     };
 
-    loadPDF();
+    void loadPDF();
 
     return () => {
       mounted = false;
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      if (pdf) {
-        pdf.destroy();
+      if (loadedPdf) {
+        loadedPdf.destroy();
       }
     };
-  }, [file]);
+  }, [file, onError]);
 
   // Load preview when PDF is ready, page changes, or rotation changes
   useEffect(() => {
     if (pdf && pdfInfo) {
-      loadPreview(currentPage);
+      void loadPreview(currentPage);
     }
-  }, [pdf, pdfInfo, currentPage, rotation]);
-
-  // Load preview for current page
-  const loadPreview = async (pageNum: number) => {
-    if (!pdf || !pdfInfo) return;
-    
-    try {
-      setLoadingPreview(true);
-      // Use lower scale for preview with rotation
-      const previewImage = await pdfPageToImageElement(pdf, pageNum, 1, rotation);
-      setPreviewUrl(previewImage.src);
-    } catch (err) {
-      console.error('Error loading preview:', err);
-    } finally {
-      setLoadingPreview(false);
-    }
-  };
+  }, [pdf, pdfInfo, currentPage, loadPreview]);
 
   // Load and use a specific page
-  const loadAndUsePage = async () => {
+  const loadAndUsePage = async (): Promise<void> => {
     if (!pdf || !pdfInfo) return;
     
     try {
@@ -121,38 +122,38 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPageLoad, onError 
   };
 
   // Navigation handlers
-  const goToPage = (pageNum: number) => {
+  const goToPage = (pageNum: number): void => {
     if (!pdf || !pdfInfo || pageNum < 1 || pageNum > pdfInfo.numPages) return;
     setCurrentPage(pageNum);
   };
 
-  const nextPage = () => {
+  const nextPage = (): void => {
     if (currentPage < (pdfInfo?.numPages || 0)) {
       goToPage(currentPage + 1);
     }
   };
 
-  const prevPage = () => {
+  const prevPage = (): void => {
     if (currentPage > 1) {
       goToPage(currentPage - 1);
     }
   };
 
   // Handle scale changes
-  const changeScale = (newScale: number) => {
+  const changeScale = (newScale: number): void => {
     setRenderScale(newScale);
   };
   
   // Rotation handlers
-  const rotateLeft = () => {
+  const rotateLeft = (): void => {
     setRotation((prev) => (prev - 90 + 360) % 360);
   };
   
-  const rotateRight = () => {
+  const rotateRight = (): void => {
     setRotation((prev) => (prev + 90) % 360);
   };
   
-  const resetRotation = () => {
+  const resetRotation = (): void => {
     setRotation(0);
   };
 

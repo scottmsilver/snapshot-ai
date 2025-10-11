@@ -138,9 +138,6 @@ export function calculateOptimalCubicControlPoints(
     const centerY = textBox.y + textBox.height / 2;
     
     // Determine which side to go around
-    const baseAngle = Math.atan2(basePoint.y - centerY, basePoint.x - centerX);
-    const tipAngle = Math.atan2(arrowTip.y - centerY, arrowTip.x - centerX);
-    
     // Create control points that go around the chosen side
     let bypassX: number, bypassY: number;
     

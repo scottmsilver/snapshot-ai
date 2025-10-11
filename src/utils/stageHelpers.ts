@@ -1,5 +1,25 @@
 import Konva from 'konva';
 
+interface SerializedStageState {
+  width: number;
+  height: number;
+  layers: string[];
+}
+
+const isSerializedStageState = (value: unknown): value is SerializedStageState => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.width === 'number' &&
+    typeof candidate.height === 'number' &&
+    Array.isArray(candidate.layers) &&
+    candidate.layers.every(layer => typeof layer === 'string')
+  );
+};
+
 export const saveStageState = (stage: Konva.Stage): string => {
   // Get all layers except the background image layer
   const layers = stage.getLayers();
@@ -17,7 +37,10 @@ export const saveStageState = (stage: Konva.Stage): string => {
 
 export const restoreStageState = (stage: Konva.Stage, stateJson: string): void => {
   try {
-    const state = JSON.parse(stateJson);
+    const parsed = JSON.parse(stateJson) as unknown;
+    if (!isSerializedStageState(parsed)) {
+      throw new Error('Invalid stage state payload');
+    }
     
     // Remove all layers except the background image layer
     const layers = stage.getLayers();
@@ -26,12 +49,10 @@ export const restoreStageState = (stage: Konva.Stage, stateJson: string): void =
     }
     
     // Restore drawing layers
-    if (state.layers && Array.isArray(state.layers)) {
-      state.layers.forEach((layerData: any) => {
-        const layer = Konva.Node.create(layerData);
-        stage.add(layer);
-      });
-    }
+    parsed.layers.forEach(layerData => {
+      const layer = Konva.Node.create(layerData);
+      stage.add(layer);
+    });
     
     stage.draw();
   } catch (error) {
