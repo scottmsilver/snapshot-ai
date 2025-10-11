@@ -91,6 +91,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     cancelDrawing,
     getSortedShapes,
     updateShape,
+    updateShapes,
     deleteSelected,
     selectMultiple,
     selectedShapeIds: drawingSelectedShapeIds,
@@ -472,6 +473,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     drawingSelectedShapeIds,
     selectionContext,
     updateShape,
+    updateShapes,
     deleteSelected,
     isDraggingControlPoint,
     startControlPointDrag,
@@ -947,60 +949,117 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     const isSelected = drawingSelectedShapeIds.includes(shape.id);
     const isHovered = hoveredShapeId === shape.id && activeTool === DrawingTool.SELECT;
     
-    const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>): void => {
-      const node = e.target;
-      const newPosition = node.position();
-      
-      // Since the layer is scaled, we need to adjust the position
+    const computeShapeUpdateFromNode = (
+      targetShape: Shape,
+      node: Konva.Node,
+    ): { updates: Partial<Shape>; resetNode?: boolean } | null => {
+      const nodePosition = node.position();
       const adjustedPosition = {
-        x: newPosition.x / zoomLevel,
-        y: newPosition.y / zoomLevel
+        x: nodePosition.x / zoomLevel,
+        y: nodePosition.y / zoomLevel,
       };
-      
-      // Update shape position based on its type
-      if (shape.type === DrawingTool.PEN || shape.type === DrawingTool.ARROW) {
-        // For pen and arrow shapes, we need to update the points array
-        const dx = adjustedPosition.x;
-        const dy = adjustedPosition.y;
-        
-        if ('points' in shape && Array.isArray(shape.points)) {
-          const newPoints = [...shape.points];
-          // Update all points by the drag offset
+
+      if (targetShape.type === DrawingTool.PEN || targetShape.type === DrawingTool.ARROW || targetShape.type === DrawingTool.MEASURE) {
+        if ('points' in targetShape && Array.isArray(targetShape.points)) {
+          const newPoints = [...targetShape.points];
           for (let i = 0; i < newPoints.length; i += 2) {
-            newPoints[i] += dx;
-            newPoints[i + 1] += dy;
+            newPoints[i] += adjustedPosition.x;
+            newPoints[i + 1] += adjustedPosition.y;
           }
-          updateShape(shape.id, { points: newPoints });
-          
-          // Reset the node position since we updated the points
-          node.position({ x: 0, y: 0 });
+
+          const updates: Partial<Shape> = { points: newPoints };
+
+          if (
+            targetShape.type === DrawingTool.MEASURE &&
+            drawingState.measurementCalibration.pixelsPerUnit
+          ) {
+            const pixelDistance = Math.sqrt(
+              Math.pow(newPoints[2] - newPoints[0], 2) +
+              Math.pow(newPoints[3] - newPoints[1], 2),
+            );
+            const value = pixelsToMeasurement(
+              pixelDistance,
+              drawingState.measurementCalibration.pixelsPerUnit,
+              drawingState.measurementCalibration.unit as MeasurementUnit,
+            );
+
+            (updates as Partial<MeasurementLineShape>).measurement = {
+              value,
+              unit: drawingState.measurementCalibration.unit,
+              pixelDistance,
+            };
+          }
+
+          return { updates, resetNode: true };
         }
-      } else if (shape.type === DrawingTool.CALLOUT) {
-        // For callout shapes, only update text position - arrow tip stays anchored
-        // This will be handled in the onDragEnd of commonProps
-        // Don't reset position here - we need it in the second handler
-      } else if (shape.type === DrawingTool.RECTANGLE) {
-        // For rectangles with center offset, adjust the position
-        const rectShape = shape as RectShape;
-        updateShape(shape.id, { 
-          x: adjustedPosition.x - rectShape.width / 2, 
-          y: adjustedPosition.y - rectShape.height / 2
-        });
-      } else if (shape.type === DrawingTool.TEXT) {
-        // For text with center offset, adjust the position
-        const textShape = shape as TextShape;
+        return null;
+      }
+
+      if (targetShape.type === DrawingTool.CALLOUT) {
+        const calloutShape = targetShape as CalloutShape;
+        const updates: Partial<CalloutShape> = {
+          textX: calloutShape.textX + adjustedPosition.x,
+          textY: calloutShape.textY + adjustedPosition.y,
+          arrowX: calloutShape.arrowX + adjustedPosition.x,
+          arrowY: calloutShape.arrowY + adjustedPosition.y,
+        };
+
+        if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined) {
+          updates.curveControl1X = calloutShape.curveControl1X + adjustedPosition.x;
+          updates.curveControl1Y = calloutShape.curveControl1Y + adjustedPosition.y;
+        }
+        if (calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
+          updates.curveControl2X = calloutShape.curveControl2X + adjustedPosition.x;
+          updates.curveControl2Y = calloutShape.curveControl2Y + adjustedPosition.y;
+        }
+
+        return { updates, resetNode: true };
+      }
+
+      if (targetShape.type === DrawingTool.RECTANGLE) {
+        const rectShape = targetShape as RectShape;
+        return {
+          updates: {
+            x: adjustedPosition.x - rectShape.width / 2,
+            y: adjustedPosition.y - rectShape.height / 2,
+          },
+        };
+      }
+
+      if (targetShape.type === DrawingTool.TEXT) {
+        const textShape = targetShape as TextShape;
         const lines = textShape.text.split('\n').length;
         const estimatedHeight = textShape.fontSize * lines * 1.2;
-        updateShape(shape.id, { 
-          x: adjustedPosition.x - (textShape.width || 0) / 2, 
-          y: adjustedPosition.y - estimatedHeight / 2
-        });
-      } else {
-        // For other shapes (circles, stars), update x/y position directly
-        updateShape(shape.id, { 
-          x: adjustedPosition.x, 
-          y: adjustedPosition.y 
-        });
+        return {
+          updates: {
+            x: adjustedPosition.x - (textShape.width || 0) / 2,
+            y: adjustedPosition.y - estimatedHeight / 2,
+          },
+        };
+      }
+
+      return {
+        updates: {
+          x: adjustedPosition.x,
+          y: adjustedPosition.y,
+        },
+      };
+    };
+
+    const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>): void => {
+      if (shape.type === DrawingTool.CALLOUT) {
+        // Callout drag updates are handled in the shared drag-end logic below
+        return;
+      }
+
+      const result = computeShapeUpdateFromNode(shape, e.target);
+      if (!result) {
+        return;
+      }
+
+      updateShape(shape.id, result.updates);
+      if (result.resetNode) {
+        e.target.position({ x: 0, y: 0 });
       }
     };
     
@@ -1129,8 +1188,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         // Prevent the event from bubbling to stage
         e.cancelBubble = true;
         
-        handleDragEnd(e);
-        
+        const isMultiDrag = drawingSelectedShapeIds.length > 1;
+
+        if (!isMultiDrag) {
+          handleDragEnd(e);
+        }
+
         // Set flag to prevent deselection on mouse up
         justFinishedDraggingRef.current = true;
         setTimeout(() => {
@@ -1146,67 +1209,36 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           console.log('[CALLOUT DRAG END]', shape.id);
           // Don't clear dragging state yet - we need it for calculating the update
         }
-        
-        // Handle multi-shape drag end
-        if (drawingSelectedShapeIds.length > 1) {
-          const dx = (e.target.x() - (e.target.attrs._dragStartX || e.target.x())) / zoomLevel;
-          const dy = (e.target.y() - (e.target.attrs._dragStartY || e.target.y())) / zoomLevel;
-          
-          // Update positions for all other selected shapes
+
+        if (isMultiDrag) {
+          const batchUpdates: Array<{ id: string; updates: Partial<Shape> }> = [];
+
           drawingSelectedShapeIds.forEach(id => {
-            if (id !== shape.id) {
-              const otherShape = shapes.find(s => s.id === id);
-              const otherNode = selectedShapeRefs.current.get(id);
-              
-              if (otherShape && otherNode) {
-                if (otherShape.type === DrawingTool.PEN || otherShape.type === DrawingTool.ARROW) {
-                  // For pen and arrow shapes, update points
-                  if ('points' in otherShape && Array.isArray(otherShape.points)) {
-                    const newPoints = [...otherShape.points];
-                    for (let i = 0; i < newPoints.length; i += 2) {
-                      newPoints[i] += dx;
-                      newPoints[i + 1] += dy;
-                    }
-                    updateShape(id, { points: newPoints });
-                    otherNode.position({ x: 0, y: 0 });
-                  }
-                } else if (otherShape.type === DrawingTool.CALLOUT) {
-                  // For callout shapes in multi-selection, move everything including arrow tip
-                  const calloutShape = otherShape as CalloutShape;
-                  const updates: Partial<CalloutShape> = {
-                    textX: calloutShape.textX + dx,
-                    textY: calloutShape.textY + dy,
-                    arrowX: calloutShape.arrowX + dx,
-                    arrowY: calloutShape.arrowY + dy
-                  };
-                  
-                  // Update control points if they exist
-                  if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined) {
-                    updates.curveControl1X = calloutShape.curveControl1X + dx;
-                    updates.curveControl1Y = calloutShape.curveControl1Y + dy;
-                  }
-                  if (calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
-                    updates.curveControl2X = calloutShape.curveControl2X + dx;
-                    updates.curveControl2Y = calloutShape.curveControl2Y + dy;
-                  }
-                  
-                  updateShape(id, updates);
-                  otherNode.position({ x: 0, y: 0 });
-                } else {
-                  // For other shapes, update position
-                  const newPos = otherNode.position();
-                  updateShape(id, { 
-                    x: newPos.x / zoomLevel, 
-                    y: newPos.y / zoomLevel 
-                  });
-                }
-              }
+            const targetShape = shapes.find(s => s.id === id);
+            const nodeRef = id === shape.id ? e.target : selectedShapeRefs.current.get(id);
+
+            if (!targetShape || !nodeRef) {
+              return;
+            }
+
+            const result = computeShapeUpdateFromNode(targetShape, nodeRef);
+            if (!result) {
+              return;
+            }
+
+            batchUpdates.push({ id, updates: result.updates });
+            if (result.resetNode) {
+              nodeRef.position({ x: 0, y: 0 });
             }
           });
+
+          if (batchUpdates.length > 0) {
+            updateShapes(batchUpdates);
+          }
         }
-        
+
         // Handle single shape drag for special shape types
-        if (drawingSelectedShapeIds.length === 1 && shape.id === drawingSelectedShapeIds[0]) {
+        if (!isMultiDrag && drawingSelectedShapeIds.length === 1 && shape.id === drawingSelectedShapeIds[0]) {
           if (shape.type === DrawingTool.CALLOUT) {
             const calloutShape = shape as CalloutShape;
             const mode = calloutSelectionModes.get(shape.id) || 'text-only';
