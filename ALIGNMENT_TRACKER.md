@@ -15,16 +15,17 @@
   - `npm run lint` currently fails on longstanding hook ordering and unused variable errors in existing files; needs follow-up remediation before QA sign-off.
 
 ### 2. Component Decomposition & Separation of Concerns
-- [ ] Agent: Refactor `App.tsx` into focused containers/hooks.
-- [ ] Agent: Extract shared logic to hooks/services with tests.
+- [x] Agent: Refactor `App.tsx` into focused containers/hooks.
+- [x] Agent: Extract shared logic to hooks/services with tests.
 - (QA) Manual regression test of drawing flows; reviewer approval.
 - Notes:
 
 ### 3. React & Konva Best Practices
-- [ ] Agent: Route shape mutations through contexts, guard refs, batch updates.
+- [x] Agent: Route shape mutations through contexts, guard refs, batch updates.
 - [ ] Agent: Validate transformer/z-index handling and add safeguards.
 - (QA) Human executes drawing/editing smoke test; confirm no console errors.
 - Notes:
+  - Added `updateShapes`/`deleteShapes` context helpers; measurement flows now apply batched updates via context.
 
 ### 4. Styling & UI Consistency
 - [ ] Agent: Centralize reused inline styles/animation settings.

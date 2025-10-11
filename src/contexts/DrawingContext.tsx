@@ -5,11 +5,39 @@ import {
   type DrawingStyle,
   type DrawingState,
   type Shape,
+  type MeasurementLineShape,
   type Point,
   LayerOperation,
   getNextZIndex,
   reorderShapes
 } from '@/types/drawing';
+
+const cloneStyle = (style: DrawingStyle): DrawingStyle => ({
+  ...style,
+  dash: style.dash ? [...style.dash] : undefined,
+});
+
+const cloneShape = (shape: Shape): Shape => {
+  const cloned = {
+    ...shape,
+    style: cloneStyle(shape.style),
+  } as Shape;
+
+  if ('points' in cloned && Array.isArray((shape as { points?: number[] }).points)) {
+    cloned.points = [
+      ...((shape as { points?: number[] }).points ?? []),
+    ] as typeof cloned.points;
+  }
+
+  if (shape.type === DrawingTool.MEASURE) {
+    const measurementShape = shape as MeasurementLineShape;
+    if (measurementShape.measurement) {
+      (cloned as MeasurementLineShape).measurement = { ...measurementShape.measurement };
+    }
+  }
+
+  return cloned;
+};
 
 // Action types
 export enum DrawingActionType {
@@ -30,6 +58,8 @@ export enum DrawingActionType {
   SET_MEASUREMENT_CALIBRATION = 'SET_MEASUREMENT_CALIBRATION',
   COPY_SHAPES = 'COPY_SHAPES',
   PASTE_SHAPES = 'PASTE_SHAPES',
+  DELETE_SHAPES = 'DELETE_SHAPES',
+  UPDATE_SHAPES = 'UPDATE_SHAPES',
 }
 
 // Action definitions
@@ -62,7 +92,9 @@ type DrawingAction =
       };
     }
   | { type: DrawingActionType.COPY_SHAPES; shapes: Shape[] }
-  | { type: DrawingActionType.PASTE_SHAPES; offset?: Point };
+  | { type: DrawingActionType.PASTE_SHAPES; offset?: Point }
+  | { type: DrawingActionType.DELETE_SHAPES; ids: string[] }
+  | { type: DrawingActionType.UPDATE_SHAPES; updates: Array<{ id: string; updates: Partial<Shape> }> };
 
 // Initial state
 export const initialState: DrawingState = {
@@ -215,7 +247,7 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
     case DrawingActionType.COPY_SHAPES:
       return {
         ...state,
-        clipboard: action.shapes.map(shape => ({ ...shape })), // Deep copy shapes
+        clipboard: action.shapes.map(cloneShape),
       };
 
     case DrawingActionType.PASTE_SHAPES: {
@@ -224,6 +256,7 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
         const newId = `shape_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const newShape = {
           ...shape,
+          style: cloneStyle(shape.style),
           id: newId,
           zIndex: getNextZIndex(state.shapes) + state.clipboard.indexOf(shape),
           createdAt: Date.now(),
@@ -270,6 +303,57 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
       };
     }
 
+    case DrawingActionType.DELETE_SHAPES: {
+      const idsToDelete = new Set(action.ids);
+      if (idsToDelete.size === 0) {
+        return state;
+      }
+
+      const remainingShapes = state.shapes.filter(shape => !idsToDelete.has(shape.id));
+      const remainingSelectedIds = state.selectedShapeIds.filter(id => !idsToDelete.has(id));
+      const maxZIndex = remainingShapes.length > 0 ? Math.max(0, ...remainingShapes.map(shape => shape.zIndex)) : 0;
+
+      const activeShape = state.activeShape && idsToDelete.has(state.activeShape.id) ? null : state.activeShape;
+
+      return {
+        ...state,
+        shapes: remainingShapes,
+        selectedShapeIds: remainingSelectedIds,
+        activeShape,
+        maxZIndex,
+      };
+    }
+
+    case DrawingActionType.UPDATE_SHAPES: {
+      if (action.updates.length === 0) {
+        return state;
+      }
+
+      const updateMap = new Map(action.updates.map(item => [item.id, item.updates]));
+      const timestamp = Date.now();
+
+      const updatedShapes = state.shapes.map(shape => {
+        const updates = updateMap.get(shape.id);
+        if (!updates) {
+          return shape;
+        }
+
+        return {
+          ...shape,
+          ...updates,
+          updatedAt: 'updatedAt' in updates ? (updates as Partial<Shape> & { updatedAt?: number }).updatedAt ?? timestamp : timestamp,
+        } as Shape;
+      });
+
+      const maxZIndex = updatedShapes.length > 0 ? Math.max(0, ...updatedShapes.map(shape => shape.zIndex)) : 0;
+
+      return {
+        ...state,
+        shapes: updatedShapes,
+        maxZIndex,
+      };
+    }
+
     default:
       return state;
   }
@@ -290,7 +374,9 @@ export interface DrawingContextType {
   setShapes: (shapes: Shape[]) => void;
   addShape: (shape: Omit<Shape, 'zIndex'>) => void;
   updateShape: (id: string, updates: Partial<Shape>) => void;
+  updateShapes: (updates: Array<{ id: string; updates: Partial<Shape> }>) => void;
   deleteShape: (id: string) => void;
+  deleteShapes: (ids: string[]) => void;
   deleteSelected: () => void;
   
   // Selection

@@ -31,7 +31,9 @@ interface UseDrawingResult {
   cancelDrawing: () => void;
   addShape: (shape: Omit<Shape, 'zIndex'>) => void;
   updateShape: (id: string, updates: Partial<Shape>) => void;
+  updateShapes: (updates: Array<{ id: string; updates: Partial<Shape> }>) => void;
   deleteShape: (id: string) => void;
+  deleteShapes: (ids: string[]) => void;
   deleteSelected: () => void;
   selectShape: (id: string, multi?: boolean) => void;
   selectMultiple: (ids: string[]) => void;
@@ -48,7 +50,9 @@ export const useDrawing = (): UseDrawingResult => {
     updateStyle,
     addShape,
     updateShape,
+    updateShapes,
     deleteShape,
+    deleteShapes,
     deleteSelected,
     selectShape,
     selectMultiple,
@@ -623,7 +627,9 @@ export const useDrawing = (): UseDrawingResult => {
     // Shape management
     addShape,
     updateShape,
+    updateShapes,
     deleteShape,
+    deleteShapes,
     deleteSelected,
     
     // Selection

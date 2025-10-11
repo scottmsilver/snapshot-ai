@@ -296,4 +296,44 @@ describe('useMeasurement', () => {
       expect(updated).toEqual(shapes);
     });
   });
+
+  describe('getMeasurementUpdates', () => {
+    it('should produce updates for measurement lines when calibrated', () => {
+      const calibrationLine = createMeasurementLine('cal-1', [0, 0, 100, 0], true);
+      const measurementLine = createMeasurementLine('measure-1', [0, 100, 100, 100], false);
+      const shapes: Shape[] = [calibrationLine, measurementLine];
+
+      const onUpdateShapes = vi.fn();
+      const { result } = renderHook(() => useMeasurement(shapes, onUpdateShapes));
+
+      act(() => {
+        result.current.setCalibration(100, 10, 'cm', 'cal-1');
+      });
+
+      const updates = result.current.getMeasurementUpdates(shapes);
+
+      expect(updates).toEqual([
+        {
+          id: 'measure-1',
+          updates: {
+            measurement: {
+              value: 10,
+              unit: 'cm',
+              pixelDistance: 100,
+            },
+          },
+        },
+      ]);
+    });
+
+    it('should return empty array when not calibrated', () => {
+      const measurementLine = createMeasurementLine('measure-1', [0, 0, 50, 0], false);
+      const shapes: Shape[] = [measurementLine];
+
+      const { result } = renderHook(() => useMeasurement(shapes));
+
+      const updates = result.current.getMeasurementUpdates(shapes);
+      expect(updates).toEqual([]);
+    });
+  });
 });

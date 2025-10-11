@@ -47,15 +47,27 @@ export const DrawingProvider: React.FC<DrawingProviderProps> = ({ children }) =>
     dispatch({ type: DrawingActionType.UPDATE_SHAPE, id, updates });
   }, []);
 
+  const updateShapes = useCallback((updates: Array<{ id: string; updates: Partial<Shape> }>) => {
+    if (updates.length === 0) {
+      return;
+    }
+    dispatch({ type: DrawingActionType.UPDATE_SHAPES, updates });
+  }, []);
+
   const deleteShape = useCallback((id: string) => {
     dispatch({ type: DrawingActionType.DELETE_SHAPE, id });
   }, []);
 
+  const deleteShapes = useCallback((ids: string[]) => {
+    if (ids.length === 0) {
+      return;
+    }
+    dispatch({ type: DrawingActionType.DELETE_SHAPES, ids });
+  }, []);
+
   const deleteSelected = useCallback(() => {
-    state.selectedShapeIds.forEach(id => {
-      dispatch({ type: DrawingActionType.DELETE_SHAPE, id });
-    });
-  }, [state.selectedShapeIds]);
+    deleteShapes(state.selectedShapeIds);
+  }, [deleteShapes, state.selectedShapeIds]);
 
   const selectShape = useCallback((id: string, multi?: boolean) => {
     dispatch({ type: DrawingActionType.SELECT_SHAPE, id, multi });
@@ -127,7 +139,9 @@ export const DrawingProvider: React.FC<DrawingProviderProps> = ({ children }) =>
     setShapes,
     addShape,
     updateShape,
+    updateShapes,
     deleteShape,
+    deleteShapes,
     deleteSelected,
     selectShape,
     selectMultiple,

@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
+import { DrawingTool } from '@/types/drawing';
 import { 
   calculatePixelDistance, 
   calculatePixelsPerUnit, 
@@ -31,6 +32,7 @@ export interface UseMeasurementReturn {
   calculateMeasurement: (x1: number, y1: number, x2: number, y2: number) => string | null;
   getMeasurementLabel: (shape: MeasurementLineShape) => string;
   updateMeasurementLabels: (shapes: Shape[]) => Shape[];
+  getMeasurementUpdates: (shapes: Shape[]) => Array<{ id: string; updates: Partial<Shape> }>;
 }
 
 export function useMeasurement(
@@ -58,33 +60,77 @@ export function useMeasurement(
   
   const isCalibrated = calibration.pixelsPerUnit !== null;
 
+  const getMeasurementUpdates = useCallback((shapesToUpdate: Shape[]): Array<{ id: string; updates: Partial<Shape> }> => {
+    if (!isCalibrated || !calibration.pixelsPerUnit) return [];
+
+    const updates: Array<{ id: string; updates: Partial<Shape> }> = [];
+
+    shapesToUpdate.forEach(shape => {
+      if (shape.type !== DrawingTool.MEASURE) {
+        return;
+      }
+
+      const measureShape = shape as MeasurementLineShape;
+      if (measureShape.isCalibration) {
+        return;
+      }
+
+      const [x1, y1, x2, y2] = measureShape.points;
+      const pixelDistance = calculatePixelDistance(x1, y1, x2, y2);
+      const value = pixelsToMeasurement(
+        pixelDistance,
+        calibration.pixelsPerUnit!,
+        calibration.unit as MeasurementUnit
+      );
+
+      const existingMeasurement = measureShape.measurement;
+      if (
+        !existingMeasurement ||
+        existingMeasurement.value !== value ||
+        existingMeasurement.unit !== calibration.unit ||
+        existingMeasurement.pixelDistance !== pixelDistance
+      ) {
+        updates.push({
+          id: measureShape.id,
+          updates: {
+            measurement: {
+              value,
+              unit: calibration.unit,
+              pixelDistance,
+            },
+          },
+        });
+      }
+    });
+
+    return updates;
+  }, [isCalibrated, calibration]);
+
   // Update all measurement line labels
   const updateMeasurementLabels = useCallback((shapesToUpdate: Shape[]): Shape[] => {
     if (!isCalibrated || !calibration.pixelsPerUnit) return shapesToUpdate;
-    
+
+    const updates = getMeasurementUpdates(shapesToUpdate);
+    if (updates.length === 0) {
+      return shapesToUpdate;
+    }
+
+    const updateMap = new Map(updates.map(update => [update.id, update.updates]));
+    const timestamp = Date.now();
+
     return shapesToUpdate.map(shape => {
-      if (shape.type === 'measure' && !shape.isCalibration) {
-        const measureShape = shape as MeasurementLineShape;
-        const [x1, y1, x2, y2] = measureShape.points;
-        const pixelDistance = calculatePixelDistance(x1, y1, x2, y2);
-        const value = pixelsToMeasurement(
-          pixelDistance,
-          calibration.pixelsPerUnit!,
-          calibration.unit as MeasurementUnit
-        );
-        
-        return {
-          ...measureShape,
-          measurement: {
-            value,
-            unit: calibration.unit,
-            pixelDistance,
-          },
-        } as MeasurementLineShape;
+      const updatesForShape = updateMap.get(shape.id);
+      if (!updatesForShape) {
+        return shape;
       }
-      return shape;
+
+      return {
+        ...shape,
+        ...updatesForShape,
+        updatedAt: timestamp,
+      } as Shape;
     });
-  }, [isCalibrated, calibration]);
+  }, [calibration, getMeasurementUpdates, isCalibrated]);
   
   // Start calibration mode
   const startCalibration = useCallback(() => {
@@ -203,5 +249,6 @@ export function useMeasurement(
     calculateMeasurement,
     getMeasurementLabel,
     updateMeasurementLabels,
+    getMeasurementUpdates,
   };
 }
