@@ -59,7 +59,7 @@ const ImageShapeComponent: React.FC<{
       img.src = shape.imageData;
     }
   }, [shape.imageData]);
-  
+
   if (!loadedImage) return null;
   
   return (
@@ -136,6 +136,29 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   const justFinishedDraggingRef = useRef(false);
   const [isSnapping, setIsSnapping] = useState(false);
   
+  // Drag session tracking
+  const dragSessionRef = useRef<{ id: string; session: string; oldPoints: number[] } | null>(null);
+  const positionSessionRef = useRef<{ id: string; session: string; oldPos: { x: number; y: number } } | null>(null);
+
+  const postDragSessionRef = useRef<{
+    id: string;
+    session: string;
+    oldPoints: number[];
+    newPoints: number[];
+    seenNewPoints: boolean;
+    reapplied: boolean;
+  } | null>(null);
+  const postDragPositionRef = useRef<{
+    id: string;
+    session: string;
+    oldPos: { x: number; y: number };
+    newPos: { x: number; y: number };
+    seenNew: boolean;
+    reapplied: boolean;
+  } | null>(null);
+
+  const pendingNodeResetRef = useRef<{ id: string; node: Konva.Node } | null>(null);
+  
   // Track which control point is being dragged (0 = start, 1 = end)
   const setDraggingControlPointIndex = useState<number | null>(null)[1];
   
@@ -150,6 +173,62 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   
   // Snap angles for rotation
   const SNAP_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
+
+  const pointsEqual = (a?: number[], b?: number[]): boolean => {
+    if (!a || !b || a.length !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const positionsEqual = (a: { x: number; y: number }, b: { x: number; y: number }): boolean => a.x === b.x && a.y === b.y;
+
+  const monitorPostDragPosition = (shapeId: string, current: { x: number; y: number }): { x: number; y: number } => {
+    const applyPendingReset = (): void => {
+      const pending = pendingNodeResetRef.current;
+      if (pending && pending.id === shapeId) {
+        const pos = pending.node.position();
+        if (pos.x !== 0 || pos.y !== 0) {
+          pending.node.position({ x: 0, y: 0 });
+          pending.node.getLayer()?.batchDraw();
+        }
+        pendingNodeResetRef.current = null;
+      }
+    };
+
+    const session = postDragPositionRef.current;
+    if (!session || session.id !== shapeId) {
+      applyPendingReset();
+      return current;
+    }
+
+    if (positionsEqual(current, session.newPos)) {
+      session.seenNew = true;
+      applyPendingReset();
+      return current;
+    }
+
+    if (session.seenNew && positionsEqual(current, session.oldPos)) {
+      if (!session.reapplied) {
+        session.reapplied = true;
+        requestAnimationFrame(() => {
+          const currentSession = postDragPositionRef.current;
+          if (currentSession && currentSession.session === session.session) {
+            updateShape(session.id, { x: session.newPos.x, y: session.newPos.y });
+            postDragPositionRef.current = null;
+          }
+        });
+      }
+      return session.newPos;
+    }
+
+    return current;
+  };
 
   // Clean up callout selection modes when selection changes
   useEffect(() => {
@@ -175,7 +254,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           if (groupNode) {
             const pos = groupNode.position();
             if (pos.x !== 0 || pos.y !== 0) {
-              console.log('[CALLOUT POSITION CLEANUP]', shape.id, pos);
               groupNode.position({ x: 0, y: 0 });
             }
           }
@@ -193,7 +271,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         const shape = shapes.find(s => s.id === id);
         if (shape?.type === DrawingTool.CALLOUT) {
           // For callouts, check the selection mode
-          const mode = calloutSelectionModes.get(id) || 'text-only';
+          const mode = calloutSelectionModes.get(id) || 'whole';
           
           if (mode === 'text-only') {
             // Transform only the text box rect
@@ -491,11 +569,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   const renderTempDrawing = (): React.ReactNode => {
     if (!isDrawing || tempPoints.length === 0) return null;
     
-    // Debug log for MEASURE tool
-    if (activeTool === DrawingTool.MEASURE) {
-      console.log('[MEASURE Debug] isDrawing:', isDrawing, 'tempPoints:', tempPoints);
-    }
-
     switch (activeTool) {
       case DrawingTool.PEN:
         if (tempPoints.length < 2) return null;
@@ -709,14 +782,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (tempPoints.length < 2) return null;
         const measureStart = tempPoints[0];
         const measureEnd = tempPoints[tempPoints.length - 1];
-        
-        // Debug log the actual coordinates
-        console.log('[MEASURE Debug] Start:', measureStart, 'End:', measureEnd);
-        console.log('[MEASURE Debug] Style:', {
-          stroke: currentStyle.stroke,
-          strokeWidth: currentStyle.strokeWidth,
-          opacity: currentStyle.opacity
-        });
         
         const measureDx = measureEnd.x - measureStart.x;
         const measureDy = measureEnd.y - measureStart.y;
@@ -1057,9 +1122,71 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         return;
       }
 
+      // Set up post-drag session for arrows to prevent bounce
+      if (shape.type === DrawingTool.ARROW && dragSessionRef.current && dragSessionRef.current.id === shape.id) {
+        const updatesWithPoints = result.updates as Partial<ArrowShape>;
+        const newPoints = Array.isArray(updatesWithPoints.points) ? [...updatesWithPoints.points] : null;
+        if (newPoints) {
+          postDragSessionRef.current = {
+            id: shape.id,
+            session: dragSessionRef.current.session,
+            oldPoints: dragSessionRef.current.oldPoints,
+            newPoints,
+            seenNewPoints: false,
+            reapplied: false
+          };
+
+          // Auto-clear session after a timeout to prevent getting stuck
+          const sessionToCheck = dragSessionRef.current.session;
+          setTimeout(() => {
+            if (postDragSessionRef.current && postDragSessionRef.current.session === sessionToCheck) {
+              postDragSessionRef.current = null;
+            }
+          }, 500); // Clear after 500ms if still stuck
+        }
+        dragSessionRef.current = null;
+      }
+
       updateShape(shape.id, result.updates);
+
       if (result.resetNode) {
-        e.target.position({ x: 0, y: 0 });
+        const node = e.target;
+        if (shape.type === DrawingTool.ARROW) {
+          pendingNodeResetRef.current = { id: shape.id, node };
+        } else {
+          pendingNodeResetRef.current = { id: shape.id, node };
+        }
+      } else {
+        const updates = result.updates as Record<string, unknown>;
+        if (('x' in updates || 'y' in updates) && shape.type !== DrawingTool.CALLOUT) {
+          const node = e.target;
+          pendingNodeResetRef.current = { id: shape.id, node };
+        }
+      }
+
+      if (positionSessionRef.current && positionSessionRef.current.id === shape.id) {
+        const { session, oldPos } = positionSessionRef.current;
+        const updates = result.updates as Partial<{ x: number; y: number }>;
+        const newPos = {
+          x: typeof updates.x === 'number' ? updates.x : oldPos.x,
+          y: typeof updates.y === 'number' ? updates.y : oldPos.y,
+        };
+        if (newPos.x !== oldPos.x || newPos.y !== oldPos.y) {
+          postDragPositionRef.current = {
+            id: shape.id,
+            session,
+            oldPos,
+            newPos,
+            seenNew: false,
+            reapplied: false,
+          };
+          setTimeout(() => {
+            if (postDragPositionRef.current && postDragPositionRef.current.session === session) {
+              postDragPositionRef.current = null;
+            }
+          }, 500);
+        }
+        positionSessionRef.current = null;
       }
     };
     
@@ -1111,18 +1238,45 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         
         // Set currently dragging shape
         setCurrentlyDraggingShapeId(shape.id);
-        
+        pendingNodeResetRef.current = null;
+
         // Track arrow dragging
         if (shape.type === DrawingTool.ARROW) {
           setDraggedArrowId(shape.id);
+          // Clear any existing post-drag session when starting a new drag
+          if (postDragSessionRef.current && postDragSessionRef.current.id === shape.id) {
+            postDragSessionRef.current = null;
+          }
+          // Create drag session to prevent bounce
+          const arrowShape = shape as ArrowShape;
+          const sessionId = `drag-${Date.now()}-${Math.random()}`;
+          dragSessionRef.current = { 
+            id: shape.id, 
+            session: sessionId,
+            oldPoints: [...arrowShape.points]  // Store the original points
+          };
         }
-        
+
         // Track callout dragging
         if (shape.type === DrawingTool.CALLOUT) {
-          console.log('[CALLOUT DRAG START]', shape.id);
           setDraggingCalloutId(shape.id);
           // Always start from 0,0 since the group is reset after each drag
           calloutDragStart.current.set(shape.id, { x: 0, y: 0 });
+        }
+
+        if ('x' in shape && 'y' in shape && shape.type !== DrawingTool.CALLOUT) {
+          const sessionId = `pos-${Date.now()}-${Math.random()}`;
+          const startX = (shape as { x?: number }).x ?? 0;
+          const startY = (shape as { y?: number }).y ?? 0;
+          positionSessionRef.current = {
+            id: shape.id,
+            session: sessionId,
+            oldPos: { x: startX, y: startY },
+          };
+          // Clear any lingering post-drag state for this shape
+          if (postDragPositionRef.current && postDragPositionRef.current.id === shape.id) {
+            postDragPositionRef.current = null;
+          }
         }
         
         // If shape is not selected, select it first
@@ -1184,7 +1338,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         }
       },
       onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
-        
         // Prevent the event from bubbling to stage
         e.cancelBubble = true;
         
@@ -1206,7 +1359,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           setDraggedArrowId(null);
         }
         if (shape.type === DrawingTool.CALLOUT) {
-          console.log('[CALLOUT DRAG END]', shape.id);
           // Don't clear dragging state yet - we need it for calculating the update
         }
 
@@ -1241,19 +1393,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (!isMultiDrag && drawingSelectedShapeIds.length === 1 && shape.id === drawingSelectedShapeIds[0]) {
           if (shape.type === DrawingTool.CALLOUT) {
             const calloutShape = shape as CalloutShape;
-            const mode = calloutSelectionModes.get(shape.id) || 'text-only';
+            const mode = calloutSelectionModes.get(shape.id) || 'whole';
             
             // Get the drag delta directly from the event target
             const node = e.target;
             const dx = node.x() / zoomLevel;
             const dy = node.y() / zoomLevel;
             
-            console.log('[CALLOUT DELTA]', shape.id, { dx, dy });
-            
             if (mode === 'whole') {
               // Move entire callout including arrow tip
-              console.log('[CALLOUT UPDATE - WHOLE]', shape.id, { dx, dy });
-              
               updateShape(shape.id, {
                 textX: calloutShape.textX + dx,
                 textY: calloutShape.textY + dy,
@@ -1291,8 +1439,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               // Always recalculate control points based on new positions
               const newControlPoints = getOptimalControlPoints(newBasePoint, arrowTip, newTextBox);
               
-              console.log('[CALLOUT UPDATE - TEXT]', shape.id, { dx, dy, newTextX, newTextY });
-              
               updateShape(shape.id, {
                 textX: newTextX,
                 textY: newTextY,
@@ -1311,52 +1457,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             // Clear dragging state
             setDraggingCalloutId(null);
             calloutDragStart.current.delete(shape.id);
-          } else {
-            const node = e.target;
-            const newPos = node.position();
-            
-            if (shape.type === DrawingTool.PEN || shape.type === DrawingTool.ARROW || shape.type === DrawingTool.MEASURE) {
-              // For pen, arrow, and measurement shapes, update points
-              if ('points' in shape && Array.isArray(shape.points)) {
-                const newPoints = [...shape.points];
-                for (let i = 0; i < newPoints.length; i += 2) {
-                  newPoints[i] += newPos.x;
-                  newPoints[i + 1] += newPos.y;
-                }
-                
-                // For measurement lines, also update the measurement value if calibrated
-                if (shape.type === DrawingTool.MEASURE && drawingState.measurementCalibration.pixelsPerUnit) {
-                  const pixelDistance = Math.sqrt(
-                    Math.pow(newPoints[2] - newPoints[0], 2) + 
-                    Math.pow(newPoints[3] - newPoints[1], 2)
-                  );
-                  const value = pixelsToMeasurement(
-                    pixelDistance,
-                    drawingState.measurementCalibration.pixelsPerUnit,
-                    drawingState.measurementCalibration.unit as MeasurementUnit
-                  );
-                  
-                  updateShape(shape.id, {
-                    points: newPoints,
-                    measurement: {
-                      value,
-                      unit: drawingState.measurementCalibration.unit,
-                      pixelDistance
-                    }
-                  });
-                } else {
-                  updateShape(shape.id, { points: newPoints });
-                }
-                node.position({ x: 0, y: 0 });
-              }
-            } else {
-              // For other shapes (rect, circle, text), just update position
-              updateShape(shape.id, { x: newPos.x, y: newPos.y });
-              node.position({ x: 0, y: 0 });
-            }
           }
         }
-        
+
         if (isDraggingShape) {
           endDragShape();
         }
@@ -1437,21 +1540,26 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       case DrawingTool.RECTANGLE:
         const rectShape = shape as RectShape;
+        const monitoredRectPos = monitorPostDragPosition(shape.id, { x: rectShape.x, y: rectShape.y });
+        const rectRenderShape =
+          monitoredRectPos.x === rectShape.x && monitoredRectPos.y === rectShape.y
+            ? rectShape
+            : { ...rectShape, x: monitoredRectPos.x, y: monitoredRectPos.y };
         return (
           <Rect
             key={shape.id}
             {...commonProps}
-            x={rectShape.x + rectShape.width / 2}
-            y={rectShape.y + rectShape.height / 2}
-            width={rectShape.width}
-            height={rectShape.height}
-            offsetX={rectShape.width / 2}
-            offsetY={rectShape.height / 2}
-            stroke={rectShape.style.stroke}
-            strokeWidth={rectShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
-            fill={rectShape.style.fill}
-            cornerRadius={rectShape.cornerRadius}
-            rotation={rectShape.rotation || 0}
+            x={rectRenderShape.x + rectRenderShape.width / 2}
+            y={rectRenderShape.y + rectRenderShape.height / 2}
+            width={rectRenderShape.width}
+            height={rectRenderShape.height}
+            offsetX={rectRenderShape.width / 2}
+            offsetY={rectRenderShape.height / 2}
+            stroke={rectRenderShape.style.stroke}
+            strokeWidth={rectRenderShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
+            fill={rectRenderShape.style.fill}
+            cornerRadius={rectRenderShape.cornerRadius}
+            rotation={rectRenderShape.rotation || 0}
             perfectDrawEnabled={false}
             shadowForStrokeEnabled={false}
             ref={(node) => {
@@ -1466,17 +1574,22 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       case DrawingTool.CIRCLE:
         const circleShape = shape as CircleShape;
+        const monitoredCirclePos = monitorPostDragPosition(shape.id, { x: circleShape.x, y: circleShape.y });
+        const circleRenderShape =
+          monitoredCirclePos.x === circleShape.x && monitoredCirclePos.y === circleShape.y
+            ? circleShape
+            : { ...circleShape, x: monitoredCirclePos.x, y: monitoredCirclePos.y };
         return (
           <Circle
             key={shape.id}
             {...commonProps}
-            x={circleShape.x}
-            y={circleShape.y}
-            radius={circleShape.radiusX} // Use radiusX as the radius (they should be equal for circles)
-            stroke={circleShape.style.stroke}
-            strokeWidth={circleShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
-            fill={circleShape.style.fill}
-            rotation={circleShape.rotation || 0}
+            x={circleRenderShape.x}
+            y={circleRenderShape.y}
+            radius={circleRenderShape.radiusX} // Use radiusX as the radius (they should be equal for circles)
+            stroke={circleRenderShape.style.stroke}
+            strokeWidth={circleRenderShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
+            fill={circleRenderShape.style.fill}
+            rotation={circleRenderShape.rotation || 0}
             perfectDrawEnabled={false}
             shadowForStrokeEnabled={false}
             ref={(node) => {
@@ -1491,9 +1604,40 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       case DrawingTool.ARROW:
         const arrowShape = shape as ArrowShape;
-        // Get current points - either from dragging or from shape data
-        const currentPoints = arrowShape.points;
-        
+        let currentPoints = arrowShape.points;
+
+        const activeSession = postDragSessionRef.current;
+        if (activeSession && activeSession.id === shape.id) {
+          const pointsMatchNew = pointsEqual(currentPoints, activeSession.newPoints);
+          const pointsMatchOld = pointsEqual(currentPoints, activeSession.oldPoints);
+
+          if (pointsMatchNew) {
+            if (pendingNodeResetRef.current && pendingNodeResetRef.current.id === shape.id) {
+              const pendingNode = pendingNodeResetRef.current.node;
+              const pendingPos = pendingNode.position();
+              if (pendingPos.x !== 0 || pendingPos.y !== 0) {
+                pendingNode.position({ x: 0, y: 0 });
+                pendingNode.getLayer()?.batchDraw();
+              }
+              pendingNodeResetRef.current = null;
+            }
+            activeSession.seenNewPoints = true;
+          } else if (activeSession.seenNewPoints && pointsMatchOld) {
+            currentPoints = activeSession.newPoints;
+
+            if (!activeSession.reapplied) {
+              activeSession.reapplied = true;
+              requestAnimationFrame(() => {
+                const currentSession = postDragSessionRef.current;
+                if (currentSession && currentSession.session === activeSession.session) {
+                  updateShape(activeSession.id, { points: activeSession.newPoints });
+                  postDragSessionRef.current = null;
+                }
+              });
+            }
+          }
+        }
+
         return (
           <Arrow
             key={shape.id}
@@ -1512,30 +1656,31 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                   if (!points || points.length < 4) {
                     return { x: 0, y: 0, width: 0, height: 0 };
                   }
-                  
-                  let minX = Infinity, minY = Infinity;
-                  let maxX = -Infinity, maxY = -Infinity;
-                  
+
+                  let minX = Infinity;
+                  let minY = Infinity;
+                  let maxX = -Infinity;
+                  let maxY = -Infinity;
+
                   for (let i = 0; i < points.length; i += 2) {
                     minX = Math.min(minX, points[i]);
                     maxX = Math.max(maxX, points[i]);
                     minY = Math.min(minY, points[i + 1]);
                     maxY = Math.max(maxY, points[i + 1]);
                   }
-                  
-                  // Add padding for the arrow head
+
                   const pointerLength = this.pointerLength() || 10;
                   const pointerWidth = this.pointerWidth() || 10;
                   const padding = Math.max(pointerLength, pointerWidth);
-                  
+
                   return {
                     x: minX - padding,
                     y: minY - padding,
                     width: maxX - minX + padding * 2,
-                    height: maxY - minY + padding * 2
+                    height: maxY - minY + padding * 2,
                   };
                 };
-                
+
                 selectedShapeRefs.current.set(shape.id, node);
               } else {
                 selectedShapeRefs.current.delete(shape.id);
@@ -1546,29 +1691,34 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       case DrawingTool.TEXT:
         const textShape = shape as TextShape;
+        const monitoredTextPos = monitorPostDragPosition(shape.id, { x: textShape.x, y: textShape.y });
+        const textRenderShape =
+          monitoredTextPos.x === textShape.x && monitoredTextPos.y === textShape.y
+            ? textShape
+            : { ...textShape, x: monitoredTextPos.x, y: monitoredTextPos.y };
         // Center rotation point for text
-        const textOffsetX = textShape.width ? textShape.width / 2 : 0;
-        const textOffsetY = textShape.height ? textShape.height / 2 : 0;
-        
+        const textOffsetX = textRenderShape.width ? textRenderShape.width / 2 : 0;
+        const textOffsetY = textRenderShape.height ? textRenderShape.height / 2 : 0;
+
         return (
           <Text
             key={shape.id}
             {...commonProps}
-            x={textShape.x + textOffsetX}
-            y={textShape.y + textOffsetY}
+            x={textRenderShape.x + textOffsetX}
+            y={textRenderShape.y + textOffsetY}
             offsetX={textOffsetX}
             offsetY={textOffsetY}
-            text={textShape.text}
-            fontSize={textShape.fontSize}
-            fontFamily={textShape.fontFamily}
-            fontStyle={textShape.fontStyle}
-            fill={textShape.style.stroke}
-            align={textShape.align || 'left'}
-            width={textShape.width}
-            height={textShape.height}
+            text={textRenderShape.text}
+            fontSize={textRenderShape.fontSize}
+            fontFamily={textRenderShape.fontFamily}
+            fontStyle={textRenderShape.fontStyle}
+            fill={textRenderShape.style.stroke}
+            align={textRenderShape.align || 'left'}
+            width={textRenderShape.width}
+            height={textRenderShape.height}
             wrap="word"
             ellipsis={true}
-            rotation={textShape.rotation || 0}
+            rotation={textRenderShape.rotation || 0}
             onDblClick={(e) => {
               e.cancelBubble = true;
               if (onTextShapeEdit) {
@@ -1587,10 +1737,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       case DrawingTool.CALLOUT:
         const calloutShape = shape as CalloutShape;
-        
-        // Get the selection mode for this callout
-        const calloutMode = calloutSelectionModes.get(shape.id) || 'text-only';
-        
         // Calculate text dimensions
         const textPadding = calloutShape.padding;
         const bgWidth = calloutShape.textWidth || 120;
@@ -1602,18 +1748,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         const isDraggingThis = draggingCalloutId === shape.id;
         const rawGroupPos = groupNode ? groupNode.position() : { x: 0, y: 0 };
         const groupPos = isDraggingThis ? rawGroupPos : { x: 0, y: 0 };
-        
-        // Debug logging
-        console.log('[CALLOUT RENDER]', shape.id, {
-          rawGroupPos,
-          groupPos,
-          textX: calloutShape.textX,
-          textY: calloutShape.textY,
-          isDragging: isDraggingThis,
-          mode: calloutMode,
-          actualNode: !!groupNode
-        });
-        
         
         // Calculate arrow base point from perimeter offset
         // Account for group position during drag
@@ -1786,20 +1920,25 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       case DrawingTool.STAR:
         const starShape = shape as StarShape;
+        const monitoredStarPos = monitorPostDragPosition(shape.id, { x: starShape.x, y: starShape.y });
+        const starRenderShape =
+          monitoredStarPos.x === starShape.x && monitoredStarPos.y === starShape.y
+            ? starShape
+            : { ...starShape, x: monitoredStarPos.x, y: monitoredStarPos.y };
         return (
           <Star
             key={shape.id}
             {...commonProps}
-            x={starShape.x}
-            y={starShape.y}
-            numPoints={starShape.points || 5}
-            outerRadius={starShape.radius}
-            innerRadius={starShape.innerRadius || starShape.radius * 0.4}
-            stroke={starShape.style.stroke}
-            strokeWidth={starShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
-            fill={starShape.style.fill}
-            opacity={starShape.style.opacity}
-            rotation={starShape.rotation || -18}
+            x={starRenderShape.x}
+            y={starRenderShape.y}
+            numPoints={starRenderShape.points || 5}
+            outerRadius={starRenderShape.radius}
+            innerRadius={starRenderShape.innerRadius || starRenderShape.radius * 0.4}
+            stroke={starRenderShape.style.stroke}
+            strokeWidth={starRenderShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
+            fill={starRenderShape.style.fill}
+            opacity={starRenderShape.style.opacity}
+            rotation={starRenderShape.rotation || -18}
             ref={(node) => {
               if (node) {
                 selectedShapeRefs.current.set(shape.id, node);
@@ -1937,10 +2076,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         
       case DrawingTool.IMAGE:
         const imageShape = shape as ImageShape;
+        const monitoredImagePos = monitorPostDragPosition(shape.id, { x: imageShape.x, y: imageShape.y });
+        const imageRenderShape =
+          monitoredImagePos.x === imageShape.x && monitoredImagePos.y === imageShape.y
+            ? imageShape
+            : { ...imageShape, x: monitoredImagePos.x, y: monitoredImagePos.y };
         return (
           <ImageShapeComponent
             key={shape.id}
-            shape={imageShape}
+            shape={imageRenderShape}
             commonProps={commonProps}
             onRef={(node) => {
               if (node) {
@@ -2147,16 +2291,31 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       return null;
     }
     
-    // Force update when arrow is being dragged
-    // This ensures control points follow the arrow
-
     const arrowShape = selectedShape as ArrowShape;
+    let arrowPoints = arrowShape.points;
+
+    const postDragSession = postDragSessionRef.current;
+    if (
+      postDragSession &&
+      postDragSession.id === arrowShape.id &&
+      postDragSession.seenNewPoints &&
+      pointsEqual(arrowShape.points, postDragSession.oldPoints)
+    ) {
+      arrowPoints = postDragSession.newPoints;
+    }
+
+    // Don't show control points if the arrow itself is being dragged
+    // This prevents control points from updating with stale data
+    if (draggedArrowId === arrowShape.id || currentlyDraggingShapeId === arrowShape.id) {
+      return null;
+    }
+
     const arrowNode = selectedShapeRefs.current.get(arrowShape.id);
     if (!arrowNode) return null;
-    
+
     // Get the arrow's current position (changes during drag)
     const nodePos = arrowNode.position();
-    const [x1, y1, x2, y2] = arrowShape.points;
+    const [x1, y1, x2, y2] = arrowPoints;
     
     
     // Add the node's current position to get actual control point positions
@@ -2681,7 +2840,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             if (drawingSelectedShapeIds.length === 1) {
               const shape = shapes.find(s => s.id === drawingSelectedShapeIds[0]);
               if (shape?.type === DrawingTool.CALLOUT) {
-                const mode = calloutSelectionModes.get(shape.id) || 'text-only';
+                const mode = calloutSelectionModes.get(shape.id) || 'whole';
                 // Disable resize in whole mode
                 return mode === 'text-only';
               }
