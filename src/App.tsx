@@ -625,12 +625,7 @@ function App(): React.ReactElement {
 
         // Call API service
         const service = createGenerativeService(apiKey || undefined);
-
-        // Use mock only if no API key is configured
-        const useMock = !apiKey && !import.meta.env.VITE_GEMINI_API_KEY && !import.meta.env.VITE_GENERATIVE_API_KEY;
-        const resultImageData = useMock
-          ? await service.mockInpaint(sourceImageData, maskExport.maskImageData, prompt)
-          : await service.inpaint(sourceImageData, maskExport.maskImageData, prompt);
+        const resultImageData = await service.inpaint(sourceImageData, maskExport.maskImageData, prompt);
 
         // Convert result to base64
         const resultCanvas = document.createElement('canvas');

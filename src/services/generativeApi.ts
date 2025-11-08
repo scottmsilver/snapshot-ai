@@ -58,7 +58,7 @@ export class GenerativeInpaintService {
     const maskBase64 = imageDataToBase64(maskImage);
 
     // Build the edit instruction prompt for inpainting
-    const editPrompt = `Edit this architectural image. ${prompt}
+    const editPrompt = `${prompt}
 
 Make SIGNIFICANT, VISIBLE changes to create the requested modification. The result should look clearly different from the original in the edited area.`;
 
