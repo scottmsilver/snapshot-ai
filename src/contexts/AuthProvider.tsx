@@ -155,7 +155,7 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
         console.error('Full error object:', JSON.stringify(error, null, 2));
       }
     },
-    scope: 'openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
+    scope: 'openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/cloud-platform',
     flow: 'implicit',
   });
 

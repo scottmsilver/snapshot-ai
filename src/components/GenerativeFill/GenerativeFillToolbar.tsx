@@ -10,6 +10,7 @@ interface GenerativeFillToolbarProps {
   onBrushWidthChange: (width: number) => void;
   onComplete: () => void;
   onCancel: () => void;
+  onSkipToConversational?: () => void;
 }
 
 export const GenerativeFillToolbar: React.FC<GenerativeFillToolbarProps> = ({
@@ -20,6 +21,7 @@ export const GenerativeFillToolbar: React.FC<GenerativeFillToolbarProps> = ({
   onBrushWidthChange,
   onComplete,
   onCancel,
+  onSkipToConversational,
 }) => {
   const toolButtonStyle = (isActive: boolean): React.CSSProperties => ({
     padding: '8px 12px',
@@ -169,6 +171,30 @@ export const GenerativeFillToolbar: React.FC<GenerativeFillToolbarProps> = ({
           borderLeft: '1px solid #e5e5e5',
         }}
       >
+        {onSkipToConversational && (
+          <button
+            onClick={onSkipToConversational}
+            style={{
+              padding: '6px 14px',
+              border: '1px solid #9b59b6',
+              borderRadius: '4px',
+              backgroundColor: 'white',
+              color: '#9b59b6',
+              fontSize: '13px',
+              fontWeight: '500',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#f3e5f7';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'white';
+            }}
+          >
+            💬 Conversational
+          </button>
+        )}
         <button
           onClick={onCancel}
           style={{

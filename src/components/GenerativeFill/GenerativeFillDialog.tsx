@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 interface GenerativeFillDialogProps {
   isOpen: boolean;
   isGenerating: boolean;
+  mode?: 'inpainting' | 'text-only';
   onSubmit: (prompt: string) => void;
   onCancel: () => void;
   sourceImagePreview?: string; // Base64 PNG of source image
@@ -13,6 +14,7 @@ interface GenerativeFillDialogProps {
 export const GenerativeFillDialog: React.FC<GenerativeFillDialogProps> = ({
   isOpen,
   isGenerating,
+  mode = 'inpainting',
   onSubmit,
   onCancel,
   sourceImagePreview,
@@ -54,13 +56,29 @@ export const GenerativeFillDialog: React.FC<GenerativeFillDialogProps> = ({
 
   if (!isOpen) return null;
 
-  const examplePrompts = [
-    'Extend the window to fill this selected area',
-    'Replace with a wooden door maintaining architectural style',
-    'Add a balcony with glass railings',
-    'Remove the window and fill with brick wall',
-    'Change the material to brushed metal'
-  ];
+  const examplePrompts = mode === 'text-only'
+    ? [
+        'Make the sky more dramatic with sunset colors',
+        'Add a person walking in the foreground',
+        'Change the season to winter with snow',
+        'Make it look like a painting in Van Gogh style',
+        'Add reflections in the water'
+      ]
+    : [
+        'Extend the window to fill this selected area',
+        'Replace with a wooden door maintaining architectural style',
+        'Add a balcony with glass railings',
+        'Remove the window and fill with brick wall',
+        'Change the material to brushed metal'
+      ];
+
+  const dialogTitle = mode === 'text-only' ? 'AI Edit - Text Only' : 'AI Fill Prompt';
+  const promptLabel = mode === 'text-only'
+    ? 'How should the AI edit the entire image?'
+    : 'What should the AI do with the selected area?';
+  const promptPlaceholder = mode === 'text-only'
+    ? 'e.g., Add dramatic sunset, Make it look like a painting...'
+    : 'e.g., Extend the window, Replace with door, Add balcony...';
 
   const dialogContent = (
     <div
@@ -99,7 +117,7 @@ export const GenerativeFillDialog: React.FC<GenerativeFillDialogProps> = ({
             color: '#333',
           }}
         >
-          AI Fill Prompt
+          {dialogTitle}
         </h3>
 
         <form onSubmit={handleSubmit}>
@@ -113,14 +131,14 @@ export const GenerativeFillDialog: React.FC<GenerativeFillDialogProps> = ({
                 color: '#555',
               }}
             >
-              What should the AI do with the selected area?
+              {promptLabel}
             </label>
             <textarea
               ref={textareaRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="e.g., Extend the window, Replace with door, Add balcony..."
+              placeholder={promptPlaceholder}
               disabled={isGenerating}
               style={{
                 width: '100%',

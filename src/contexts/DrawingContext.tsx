@@ -106,7 +106,7 @@ type DrawingAction =
   | { type: DrawingActionType.PASTE_SHAPES; offset?: Point }
   | { type: DrawingActionType.DELETE_SHAPES; ids: string[] }
   | { type: DrawingActionType.UPDATE_SHAPES; updates: Array<{ id: string; updates: Partial<Shape> }> }
-  | { type: DrawingActionType.START_GENERATIVE_FILL }
+  | { type: DrawingActionType.START_GENERATIVE_FILL; mode?: 'inpainting' | 'text-only' }
   | { type: DrawingActionType.SET_GENERATIVE_FILL_SELECTION_TOOL; selectionTool: GenerativeFillSelectionTool }
   | { type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION; points?: Point[]; rectangle?: Rectangle | null; brushWidth?: number }
   | { type: DrawingActionType.COMPLETE_GENERATIVE_FILL_SELECTION; sourceImage: string; maskImage: string }
@@ -375,23 +375,26 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
       };
     }
 
-    case DrawingActionType.START_GENERATIVE_FILL:
+    case DrawingActionType.START_GENERATIVE_FILL: {
+      const mode = action.mode || 'inpainting';
       return {
         ...state,
         activeTool: DrawingTool.GENERATIVE_FILL,
         generativeFillMode: {
           isActive: true,
-          selectionTool: GenerativeFillSelectionTool.BRUSH,
+          mode,
+          selectionTool: mode === 'inpainting' ? GenerativeFillSelectionTool.BRUSH : null,
           selectionPoints: [],
           selectionRectangle: null,
           brushWidth: 20,
-          showPromptDialog: false,
+          showPromptDialog: mode === 'text-only', // Show dialog immediately for text-only
           promptInput: '',
           isGenerating: false,
           generatedResult: null,
           previewImages: null,
         },
       };
+    }
 
     case DrawingActionType.SET_GENERATIVE_FILL_SELECTION_TOOL:
       if (!state.generativeFillMode) return state;

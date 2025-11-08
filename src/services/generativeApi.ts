@@ -34,13 +34,211 @@ function imageDataToBlob(imageData: ImageData): Promise<Blob> {
 /**
  * Service for AI-powered inpainting using external APIs
  */
+export type AIModel = 'gemini' | 'imagen';
+
 export class GenerativeInpaintService {
   private apiKey: string;
   private apiEndpoint: string;
+  private model: AIModel;
+  private googleCloudProjectId?: string;
+  private inpaintingModel?: AIModel;
+  private textOnlyModel?: AIModel;
 
-  constructor(apiKey: string, apiEndpoint: string) {
+  constructor(
+    apiKey: string,
+    apiEndpoint: string,
+    model: AIModel = 'gemini',
+    googleCloudProjectId?: string,
+    inpaintingModel?: AIModel,
+    textOnlyModel?: AIModel
+  ) {
     this.apiKey = apiKey;
     this.apiEndpoint = apiEndpoint;
+    this.model = model; // Fallback/legacy model
+    this.googleCloudProjectId = googleCloudProjectId;
+    this.inpaintingModel = inpaintingModel;
+    this.textOnlyModel = textOnlyModel;
+  }
+
+  /**
+   * Perform text-only editing with Gemini (no mask)
+   */
+  async textOnlyWithGemini(
+    sourceImage: ImageData,
+    prompt: string
+  ): Promise<ImageData> {
+    const ai = new GoogleGenAI({ apiKey: this.apiKey });
+
+    // Convert ImageData to base64
+    const sourceBase64 = imageDataToBase64(sourceImage);
+
+    console.log('🔍 DEBUG: Gemini text-only - Source image size:', sourceImage.width, 'x', sourceImage.height);
+    console.log('🔍 DEBUG: Gemini text-only - Prompt:', prompt);
+
+    const editPrompt = `${prompt}
+
+Make SIGNIFICANT, VISIBLE changes to create the requested modification. The result should look clearly different from the original.`;
+
+    try {
+      const result = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: 'SOURCE IMAGE:' },
+              {
+                inlineData: {
+                  mimeType: 'image/png',
+                  data: sourceBase64.split(',')[1],
+                },
+              },
+              { text: editPrompt },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ['image'],
+        } as Record<string, unknown>,
+      } as Parameters<typeof ai.models.generateContent>[0]);
+
+      // Extract image from response
+      if (result.candidates && result.candidates.length > 0) {
+        const candidate = result.candidates[0];
+
+        if (candidate.content && candidate.content.parts) {
+          for (const part of candidate.content.parts) {
+            if (part.inlineData && part.inlineData.data) {
+              const generatedBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+              let resultImageData = await base64ToImageData(generatedBase64);
+
+              // Resize if needed
+              if (resultImageData.width !== sourceImage.width || resultImageData.height !== sourceImage.height) {
+                const resizedCanvas = document.createElement('canvas');
+                resizedCanvas.width = sourceImage.width;
+                resizedCanvas.height = sourceImage.height;
+                const resizedCtx = resizedCanvas.getContext('2d')!;
+
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = resultImageData.width;
+                tempCanvas.height = resultImageData.height;
+                const tempCtx = tempCanvas.getContext('2d')!;
+                tempCtx.putImageData(resultImageData, 0, 0);
+
+                resizedCtx.drawImage(tempCanvas, 0, 0, sourceImage.width, sourceImage.height);
+                resultImageData = resizedCtx.getImageData(0, 0, sourceImage.width, sourceImage.height);
+              }
+
+              return resultImageData;
+            }
+          }
+        }
+      }
+
+      throw new Error('No image data returned from Gemini');
+    } catch (error) {
+      console.error('Gemini text-only error:', error);
+      throw new Error(`Gemini text-only editing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Perform text-only editing with Imagen (no mask)
+   */
+  async textOnlyWithImagen(
+    sourceImage: ImageData,
+    prompt: string
+  ): Promise<ImageData> {
+    if (!this.googleCloudProjectId) {
+      throw new Error('Google Cloud Project ID is required for Imagen');
+    }
+
+    // Convert ImageData to base64
+    const sourceBase64 = imageDataToBase64(sourceImage);
+
+    console.log('🔍 DEBUG: Imagen text-only - Source image size:', sourceImage.width, 'x', sourceImage.height);
+    console.log('🔍 DEBUG: Imagen text-only - Prompt:', prompt);
+
+    try {
+      // Use Vertex AI REST API for Imagen with text-only editing
+      const location = 'us-central1';
+      const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${this.googleCloudProjectId}/locations/${location}/publishers/google/models/imagen-3.0-capability-001:predict`;
+
+      const requestBody = {
+        instances: [{
+          prompt: prompt,
+          referenceImages: [
+            {
+              referenceType: 'REFERENCE_TYPE_RAW',
+              referenceId: 1,
+              referenceImage: {
+                bytesBase64Encoded: sourceBase64.split(',')[1]
+              }
+            }
+          ]
+        }],
+        parameters: {
+          sampleCount: 1,
+          editMode: 'EDIT_MODE_PRODUCT_IMAGE',
+          editConfig: {
+            baseSteps: 35
+          }
+        }
+      };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Imagen API request failed: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      // Extract the generated image from the response
+      if (result.predictions && result.predictions.length > 0) {
+        const prediction = result.predictions[0];
+        if (prediction.bytesBase64Encoded) {
+          const generatedBase64 = `data:image/png;base64,${prediction.bytesBase64Encoded}`;
+          let resultImageData = await base64ToImageData(generatedBase64);
+
+          // Resize if needed
+          if (resultImageData.width !== sourceImage.width || resultImageData.height !== sourceImage.height) {
+            const resizedCanvas = document.createElement('canvas');
+            resizedCanvas.width = sourceImage.width;
+            resizedCanvas.height = sourceImage.height;
+            const resizedCtx = resizedCanvas.getContext('2d')!;
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = resultImageData.width;
+            tempCanvas.height = resultImageData.height;
+            const tempCtx = tempCanvas.getContext('2d')!;
+            tempCtx.putImageData(resultImageData, 0, 0);
+
+            resizedCtx.drawImage(tempCanvas, 0, 0, sourceImage.width, sourceImage.height);
+            resultImageData = resizedCtx.getImageData(0, 0, sourceImage.width, sourceImage.height);
+          }
+
+          console.log('🔍 DEBUG: Imagen text-only response size:', resultImageData.width, 'x', resultImageData.height);
+          (window as any).debugImagenTextOutput = generatedBase64;
+          console.log('🔍 DEBUG: Access Imagen text-only output via window.debugImagenTextOutput');
+
+          return resultImageData;
+        }
+      }
+
+      throw new Error('No image data returned from Imagen');
+    } catch (error) {
+      console.error('Imagen text-only error:', error);
+      throw new Error(`Imagen text-only editing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   /**
@@ -56,6 +254,33 @@ export class GenerativeInpaintService {
     // Convert ImageData to base64
     const sourceBase64 = imageDataToBase64(sourceImage);
     const maskBase64 = imageDataToBase64(maskImage);
+
+    // DEBUG: Log what we're sending to Gemini
+    console.log('🔍 DEBUG: Source image size:', sourceImage.width, 'x', sourceImage.height);
+    console.log('🔍 DEBUG: Mask image size:', maskImage.width, 'x', maskImage.height);
+    console.log('🔍 DEBUG: Prompt:', prompt);
+
+    // Create data URLs for debugging
+    const sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = sourceImage.width;
+    sourceCanvas.height = sourceImage.height;
+    const sourceCtx = sourceCanvas.getContext('2d')!;
+    sourceCtx.putImageData(sourceImage, 0, 0);
+    const sourceDebugUrl = sourceCanvas.toDataURL('image/png');
+    console.log('🔍 DEBUG: Source image data URL (right-click to save):', sourceDebugUrl.substring(0, 100) + '...');
+
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = maskImage.width;
+    maskCanvas.height = maskImage.height;
+    const maskCtx = maskCanvas.getContext('2d')!;
+    maskCtx.putImageData(maskImage, 0, 0);
+    const maskDebugUrl = maskCanvas.toDataURL('image/png');
+    console.log('🔍 DEBUG: Mask image data URL (right-click to save):', maskDebugUrl.substring(0, 100) + '...');
+
+    // Store in window for easy access from console
+    (window as any).debugSourceImage = sourceDebugUrl;
+    (window as any).debugMaskImage = maskDebugUrl;
+    console.log('🔍 DEBUG: Access images via window.debugSourceImage and window.debugMaskImage');
 
     // Build the edit instruction prompt for inpainting
     const editPrompt = `${prompt}
@@ -106,6 +331,18 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
               // Convert base64 to ImageData
               const generatedBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
               let resultImageData = await base64ToImageData(generatedBase64);
+
+              // DEBUG: Log what Gemini returned
+              console.log('🔍 DEBUG: Raw Gemini response size:', resultImageData.width, 'x', resultImageData.height);
+              const debugCanvas = document.createElement('canvas');
+              debugCanvas.width = resultImageData.width;
+              debugCanvas.height = resultImageData.height;
+              const debugCtx = debugCanvas.getContext('2d')!;
+              debugCtx.putImageData(resultImageData, 0, 0);
+              const geminiDebugUrl = debugCanvas.toDataURL('image/png');
+              console.log('🔍 DEBUG: Gemini raw output data URL (right-click to save):', geminiDebugUrl.substring(0, 100) + '...');
+              (window as any).debugGeminiOutput = geminiDebugUrl;
+              console.log('🔍 DEBUG: Access Gemini output via window.debugGeminiOutput');
 
               // Gemini may return a slightly different size - resize to match source
               if (resultImageData.width !== sourceImage.width || resultImageData.height !== sourceImage.height) {
@@ -164,6 +401,132 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
   }
 
   /**
+   * Perform inpainting using Imagen 3.0 on Vertex AI
+   */
+  async inpaintWithImagen(
+    sourceImage: ImageData,
+    maskImage: ImageData,
+    prompt: string
+  ): Promise<ImageData> {
+    if (!this.googleCloudProjectId) {
+      throw new Error('Google Cloud Project ID is required for Imagen');
+    }
+
+    // Convert ImageData to base64
+    const sourceBase64 = imageDataToBase64(sourceImage);
+    const maskBase64 = imageDataToBase64(maskImage);
+
+    // DEBUG: Log what we're sending to Imagen
+    console.log('🔍 DEBUG: Imagen - Source image size:', sourceImage.width, 'x', sourceImage.height);
+    console.log('🔍 DEBUG: Imagen - Mask image size:', maskImage.width, 'x', maskImage.height);
+    console.log('🔍 DEBUG: Imagen - Prompt:', prompt);
+
+    try {
+      // Use Vertex AI REST API for Imagen
+      const location = 'us-central1'; // Imagen is available in us-central1
+      const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${this.googleCloudProjectId}/locations/${location}/publishers/google/models/imagen-3.0-capability-001:predict`;
+
+      const requestBody = {
+        instances: [{
+          prompt: prompt,
+          referenceImages: [
+            {
+              referenceType: 'REFERENCE_TYPE_RAW',
+              referenceId: 1,
+              referenceImage: {
+                bytesBase64Encoded: sourceBase64.split(',')[1]
+              }
+            },
+            {
+              referenceType: 'REFERENCE_TYPE_MASK',
+              referenceId: 2,
+              referenceImage: {
+                bytesBase64Encoded: maskBase64.split(',')[1]
+              },
+              maskImageConfig: {
+                maskMode: 'MASK_MODE_USER_PROVIDED',
+                dilation: 0.01
+              }
+            }
+          ]
+        }],
+        parameters: {
+          sampleCount: 1,
+          editMode: 'EDIT_MODE_INPAINT_INSERTION',
+          editConfig: {
+            baseSteps: 35
+          }
+        }
+      };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Imagen API request failed: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      // Extract the generated image from the response
+      if (result.predictions && result.predictions.length > 0) {
+        const prediction = result.predictions[0];
+        if (prediction.bytesBase64Encoded) {
+          const generatedBase64 = `data:image/png;base64,${prediction.bytesBase64Encoded}`;
+          const resultImageData = await base64ToImageData(generatedBase64);
+
+          // DEBUG: Log what Imagen returned
+          console.log('🔍 DEBUG: Imagen response size:', resultImageData.width, 'x', resultImageData.height);
+          (window as any).debugImagenOutput = generatedBase64;
+          console.log('🔍 DEBUG: Access Imagen output via window.debugImagenOutput');
+
+          return resultImageData;
+        }
+      }
+
+      throw new Error('No image data returned from Imagen');
+    } catch (error) {
+      console.error('Imagen inpainting error:', error);
+      throw new Error(`Imagen inpainting failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Perform image editing with automatic mode detection
+   * If maskImage is provided, uses inpainting mode. Otherwise, uses text-only mode.
+   */
+  async edit(
+    sourceImage: ImageData,
+    prompt: string,
+    maskImage?: ImageData
+  ): Promise<ImageData> {
+    if (maskImage) {
+      // Inpainting mode - use mask with inpainting model preference
+      const modelToUse = this.inpaintingModel || this.model;
+      if (modelToUse === 'imagen') {
+        return this.inpaintWithImagen(sourceImage, maskImage, prompt);
+      } else {
+        return this.inpaintWithGemini(sourceImage, maskImage, prompt);
+      }
+    } else {
+      // Text-only mode - no mask with text-only model preference
+      const modelToUse = this.textOnlyModel || this.model;
+      if (modelToUse === 'imagen') {
+        return this.textOnlyWithImagen(sourceImage, prompt);
+      } else {
+        return this.textOnlyWithGemini(sourceImage, prompt);
+      }
+    }
+  }
+
+  /**
    * Perform inpainting on the source image using the mask and prompt
    */
   async inpaint(
@@ -171,8 +534,10 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
     maskImage: ImageData,
     prompt: string
   ): Promise<ImageData> {
-    // Use Gemini if API key is set
-    if (this.apiKey) {
+    // Use the selected model
+    if (this.model === 'imagen') {
+      return this.inpaintWithImagen(sourceImage, maskImage, prompt);
+    } else if (this.apiKey) {
       return this.inpaintWithGemini(sourceImage, maskImage, prompt);
     }
 
@@ -259,11 +624,21 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
 /**
  * Create a service instance from environment variables or user settings
  * @param apiKey - Optional API key to use (e.g., from SettingsManager)
+ * @param model - AI model to use ('gemini' or 'imagen') - legacy parameter
+ * @param googleCloudProjectId - Google Cloud project ID (for Imagen)
+ * @param inpaintingModel - AI model to use for inpainting (mask-based)
+ * @param textOnlyModel - AI model to use for text-only (conversational)
  */
-export function createGenerativeService(apiKey?: string): GenerativeInpaintService {
+export function createGenerativeService(
+  apiKey?: string,
+  model: AIModel = 'gemini',
+  googleCloudProjectId?: string,
+  inpaintingModel?: AIModel,
+  textOnlyModel?: AIModel
+): GenerativeInpaintService {
   // Priority: provided key > environment variables
   const key = apiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
   const apiEndpoint = import.meta.env.VITE_GENERATIVE_API_ENDPOINT || '';
 
-  return new GenerativeInpaintService(key, apiEndpoint);
+  return new GenerativeInpaintService(key, apiEndpoint, model, googleCloudProjectId, inpaintingModel, textOnlyModel);
 }

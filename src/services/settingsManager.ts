@@ -340,6 +340,62 @@ export class SettingsManager {
   async setGeminiApiKey(key: string): Promise<void> {
     return this.setSetting('gemini_api_key', key);
   }
+
+  /**
+   * Get the AI model preference for inpainting (mask-based)
+   */
+  async getInpaintingModel(): Promise<string | null> {
+    return this.getSetting('inpainting_model');
+  }
+
+  /**
+   * Set the AI model preference for inpainting (mask-based)
+   */
+  async setInpaintingModel(model: string): Promise<void> {
+    return this.setSetting('inpainting_model', model);
+  }
+
+  /**
+   * Get the AI model preference for text-only (conversational)
+   */
+  async getTextOnlyModel(): Promise<string | null> {
+    return this.getSetting('text_only_model');
+  }
+
+  /**
+   * Set the AI model preference for text-only (conversational)
+   */
+  async setTextOnlyModel(model: string): Promise<void> {
+    return this.setSetting('text_only_model', model);
+  }
+
+  /**
+   * Get the AI model preference (legacy - for backward compatibility)
+   */
+  async getAiModel(): Promise<string | null> {
+    return this.getSetting('ai_model');
+  }
+
+  /**
+   * Set the AI model preference (legacy - for backward compatibility)
+   */
+  async setAiModel(model: string): Promise<void> {
+    return this.setSetting('ai_model', model);
+  }
+
+  /**
+   * Get the Google Cloud project ID (for Imagen/Vertex AI)
+   */
+  async getGoogleCloudProjectId(): Promise<string | null> {
+    return this.getSetting('google_cloud_project_id');
+  }
+
+  /**
+   * Set the Google Cloud project ID
+   */
+  async setGoogleCloudProjectId(projectId: string): Promise<void> {
+    return this.setSetting('google_cloud_project_id', projectId);
+  }
 }
 
 // Singleton instance

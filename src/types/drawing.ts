@@ -238,6 +238,7 @@ export interface DrawingState {
   // Generative Fill state
   generativeFillMode: {
     isActive: boolean;
+    mode: 'inpainting' | 'text-only';  // Inpainting requires mask, text-only goes direct to dialog
     selectionTool: GenerativeFillSelectionTool | null;
     selectionPoints: Point[];  // For brush and lasso
     selectionRectangle: Rectangle | null;  // For rectangle

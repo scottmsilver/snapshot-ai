@@ -572,6 +572,11 @@ function App(): React.ReactElement {
     dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
   }, [dispatch]);
 
+  const handleSkipToConversational = useCallback(() => {
+    // Switch to text-only mode and open dialog immediately
+    dispatch({ type: DrawingActionType.START_GENERATIVE_FILL, mode: 'text-only' });
+  }, [dispatch]);
+
   const handleGenerativeFillPromptSubmit = useCallback(
     async (prompt: string) => {
       if (!stageRef.current || !drawingState.generativeFillMode) return;
@@ -586,46 +591,90 @@ function App(): React.ReactElement {
         const ctx = canvas.getContext('2d')!;
         const sourceImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-        // Generate mask based on selection tool
-        const { selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
+        const { mode, selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
+
+        // Generate mask only if in inpainting mode
         let maskExport;
-
-        if (selectionTool === GenerativeFillSelectionTool.BRUSH) {
-          maskExport = generateBrushMask(canvas, selectionPoints, brushWidth);
-        } else if (selectionTool === GenerativeFillSelectionTool.RECTANGLE && selectionRectangle) {
-          maskExport = generateRectangleMask(canvas, selectionRectangle);
-        } else if (selectionTool === GenerativeFillSelectionTool.LASSO) {
-          maskExport = generateLassoMask(canvas, selectionPoints);
-        } else {
-          throw new Error('Invalid selection tool or missing selection data');
-        }
-
-        // Get API key from settings
-        let apiKey: string | null = null;
-        if (authContext?.isAuthenticated && authContext?.getAccessToken) {
-          try {
-            const accessToken = authContext.getAccessToken();
-            if (accessToken) {
-              await settingsManager.initialize(accessToken);
-              apiKey = await settingsManager.getGeminiApiKey();
-            }
-          } catch (error) {
-            console.error('Failed to get API key from settings:', error);
+        if (mode === 'inpainting') {
+          if (selectionTool === GenerativeFillSelectionTool.BRUSH) {
+            maskExport = generateBrushMask(canvas, selectionPoints, brushWidth);
+          } else if (selectionTool === GenerativeFillSelectionTool.RECTANGLE && selectionRectangle) {
+            maskExport = generateRectangleMask(canvas, selectionRectangle);
+          } else if (selectionTool === GenerativeFillSelectionTool.LASSO) {
+            maskExport = generateLassoMask(canvas, selectionPoints);
+          } else {
+            throw new Error('Invalid selection tool or missing selection data');
           }
         }
 
-        // Check if we have an API key
-        if (!apiKey && !import.meta.env.VITE_GEMINI_API_KEY && !import.meta.env.VITE_GENERATIVE_API_KEY) {
-          // No API key available - prompt user to add one
-          dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-          alert('Please add your Gemini API key in Settings to use Generative Fill.');
-          setSettingsDialogOpen(true);
-          return;
+        // Get settings
+        let geminiApiKey: string | null = null;
+        let inpaintingModel: string | null = null;
+        let textOnlyModel: string | null = null;
+        let googleCloudProjectId: string | null = null;
+        let oauthAccessToken: string | null = null;
+
+        if (authContext?.isAuthenticated && authContext?.getAccessToken) {
+          try {
+            const accessToken = authContext.getAccessToken();
+            oauthAccessToken = accessToken;
+            if (accessToken) {
+              await settingsManager.initialize(accessToken);
+              geminiApiKey = await settingsManager.getGeminiApiKey();
+              inpaintingModel = await settingsManager.getInpaintingModel();
+              textOnlyModel = await settingsManager.getTextOnlyModel();
+              googleCloudProjectId = await settingsManager.getGoogleCloudProjectId();
+            }
+          } catch (error) {
+            console.error('Failed to get settings:', error);
+          }
         }
 
-        // Call API service
-        const service = createGenerativeService(apiKey || undefined);
-        const resultImageData = await service.inpaint(sourceImageData, maskExport.maskImageData, prompt);
+        // Default to imagen for inpainting, gemini for text-only
+        const selectedInpaintingModel = (inpaintingModel || 'imagen') as 'gemini' | 'imagen';
+        const selectedTextOnlyModel = (textOnlyModel || 'gemini') as 'gemini' | 'imagen';
+
+        // Determine which model to validate based on mode
+        const modelToValidate = mode === 'inpainting' ? selectedInpaintingModel : selectedTextOnlyModel;
+
+        // Check authentication and API key based on model
+        if (modelToValidate === 'gemini') {
+          if (!geminiApiKey && !import.meta.env.VITE_GEMINI_API_KEY && !import.meta.env.VITE_GENERATIVE_API_KEY) {
+            dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+            alert('Please add your Gemini API key in Settings to use Generative Fill.');
+            setSettingsDialogOpen(true);
+            return;
+          }
+        } else if (modelToValidate === 'imagen') {
+          if (!oauthAccessToken) {
+            dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+            alert('Please sign in with Google to use Imagen.');
+            return;
+          }
+          if (!googleCloudProjectId) {
+            dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+            alert('Please add your Google Cloud Project ID in Settings to use Imagen.');
+            setSettingsDialogOpen(true);
+            return;
+          }
+        }
+
+        // Use appropriate API key/token based on model
+        const apiKeyOrToken = modelToValidate === 'imagen' ? oauthAccessToken : geminiApiKey;
+
+        // Call API service with both model preferences
+        const service = createGenerativeService(
+          apiKeyOrToken || undefined,
+          selectedInpaintingModel, // Legacy parameter
+          googleCloudProjectId || undefined,
+          selectedInpaintingModel,
+          selectedTextOnlyModel
+        );
+
+        // Call edit() method which handles both inpainting and text-only modes
+        const resultImageData = mode === 'inpainting' && maskExport
+          ? await service.edit(sourceImageData, prompt, maskExport.maskImageData)
+          : await service.edit(sourceImageData, prompt);
 
         // Convert result to base64
         const resultCanvas = document.createElement('canvas');
@@ -762,7 +811,8 @@ function App(): React.ReactElement {
   // Activate generative fill mode when tool is selected
   useEffect(() => {
     if (activeTool === DrawingTool.GENERATIVE_FILL && !drawingState.generativeFillMode) {
-      dispatch({ type: DrawingActionType.START_GENERATIVE_FILL });
+      // Default to inpainting mode - user can switch to text-only from toolbar
+      dispatch({ type: DrawingActionType.START_GENERATIVE_FILL, mode: 'inpainting' });
     }
   }, [activeTool, drawingState.generativeFillMode, dispatch]);
 
@@ -861,8 +911,9 @@ function App(): React.ReactElement {
           onClose={() => setSettingsDialogOpen(false)}
         />
 
-        {/* Generative Fill Toolbar - only show if not showing dialog or generating */}
+        {/* Generative Fill Toolbar - only show in inpainting mode when not showing dialog or generating */}
         {drawingState.generativeFillMode?.isActive &&
+         drawingState.generativeFillMode.mode === 'inpainting' &&
          !drawingState.generativeFillMode.showPromptDialog &&
          !drawingState.generativeFillMode.isGenerating && (
           <GenerativeFillToolbar
@@ -876,6 +927,7 @@ function App(): React.ReactElement {
             onBrushWidthChange={handleGenerativeFillBrushWidthChange}
             onComplete={handleGenerativeFillComplete}
             onCancel={handleGenerativeFillCancel}
+            onSkipToConversational={handleSkipToConversational}
           />
         )}
 
@@ -884,6 +936,7 @@ function App(): React.ReactElement {
           <GenerativeFillDialog
             isOpen={drawingState.generativeFillMode.showPromptDialog}
             isGenerating={drawingState.generativeFillMode.isGenerating}
+            mode={drawingState.generativeFillMode.mode}
             onSubmit={handleGenerativeFillPromptSubmit}
             onCancel={handleGenerativeFillDialogCancel}
             sourceImagePreview={drawingState.generativeFillMode.previewImages?.sourceImage}

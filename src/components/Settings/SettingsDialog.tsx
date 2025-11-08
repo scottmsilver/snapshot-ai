@@ -12,12 +12,16 @@ interface SettingsDialogProps {
 export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.ReactElement {
   const { getAccessToken } = useAuth();
   const [apiKey, setApiKey] = useState('');
+  const [inpaintingModel, setInpaintingModel] = useState('imagen');
+  const [textOnlyModel, setTextOnlyModel] = useState('gemini');
+  const [googleCloudProjectId, setGoogleCloudProjectId] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const projectIdRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -67,7 +71,13 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
 
       await settingsManager.initialize(accessToken);
       const key = await settingsManager.getGeminiApiKey();
+      const inpainting = await settingsManager.getInpaintingModel();
+      const textOnly = await settingsManager.getTextOnlyModel();
+      const projectId = await settingsManager.getGoogleCloudProjectId();
       setApiKey(key || '');
+      setInpaintingModel(inpainting || 'imagen');
+      setTextOnlyModel(textOnly || 'gemini');
+      setGoogleCloudProjectId(projectId || '');
     } catch (err) {
       console.error('Failed to load settings:', err);
       setError('Failed to load settings. Please try again.');
@@ -87,12 +97,18 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
         throw new Error('Not authenticated');
       }
 
-      // Get the current value from the input ref
+      // Get the current values from the input refs
       const currentKey = inputRef.current?.value || apiKey;
+      const currentProjectId = projectIdRef.current?.value || googleCloudProjectId;
 
       await settingsManager.initialize(accessToken);
       await settingsManager.setGeminiApiKey(currentKey);
+      await settingsManager.setInpaintingModel(inpaintingModel);
+      await settingsManager.setTextOnlyModel(textOnlyModel);
+      await settingsManager.setGoogleCloudProjectId(currentProjectId);
+
       setApiKey(currentKey); // Update state to match
+      setGoogleCloudProjectId(currentProjectId);
       setSuccessMessage('Settings saved successfully!');
 
       setTimeout(() => {
@@ -235,6 +251,116 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  {/* AI Model Selection */}
+                  <div>
+                    <h3
+                      style={{
+                        margin: '0 0 16px 0',
+                        fontSize: '16px',
+                        fontWeight: '600',
+                        color: '#1a1a1a',
+                      }}
+                    >
+                      Generative Fill Models
+                    </h3>
+
+                    <div style={{ marginBottom: '16px' }}>
+                      <label
+                        style={{
+                          display: 'block',
+                          marginBottom: '8px',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          color: '#333',
+                        }}
+                      >
+                        Inpainting Model (for mask-based edits)
+                      </label>
+                      <select
+                        value={inpaintingModel}
+                        onChange={(e) => setInpaintingModel(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          fontSize: '14px',
+                          border: '1px solid #ddd',
+                          borderRadius: '6px',
+                          outline: 'none',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          boxSizing: 'border-box',
+                        }}
+                        onFocus={(e) => {
+                          e.currentTarget.style.borderColor = '#4a90e2';
+                        }}
+                        onBlur={(e) => {
+                          e.currentTarget.style.borderColor = '#ddd';
+                        }}
+                      >
+                        <option value="imagen">Imagen 3.0 (Google Cloud Vertex AI) - Default</option>
+                        <option value="gemini">Gemini 2.5 Flash (Google AI Studio)</option>
+                      </select>
+                      <p
+                        style={{
+                          margin: '8px 0 0 0',
+                          fontSize: '13px',
+                          color: '#666',
+                          lineHeight: '1.5',
+                        }}
+                      >
+                        Used when you select an area with a mask. Imagen is recommended for precise mask-based inpainting.
+                      </p>
+                    </div>
+
+                    <div style={{ marginBottom: '16px' }}>
+                      <label
+                        style={{
+                          display: 'block',
+                          marginBottom: '8px',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          color: '#333',
+                        }}
+                      >
+                        Text-Only Model (for conversational edits)
+                      </label>
+                      <select
+                        value={textOnlyModel}
+                        onChange={(e) => setTextOnlyModel(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          fontSize: '14px',
+                          border: '1px solid #ddd',
+                          borderRadius: '6px',
+                          outline: 'none',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          boxSizing: 'border-box',
+                        }}
+                        onFocus={(e) => {
+                          e.currentTarget.style.borderColor = '#4a90e2';
+                        }}
+                        onBlur={(e) => {
+                          e.currentTarget.style.borderColor = '#ddd';
+                        }}
+                      >
+                        <option value="gemini">Gemini 2.5 Flash (Google AI Studio) - Default</option>
+                        <option value="imagen">Imagen 3.0 (Google Cloud Vertex AI)</option>
+                      </select>
+                      <p
+                        style={{
+                          margin: '8px 0 0 0',
+                          fontSize: '13px',
+                          color: '#666',
+                          lineHeight: '1.5',
+                        }}
+                      >
+                        Used for text-only prompts without a mask selection. Gemini is fast and conversational.
+                      </p>
+                    </div>
+                  </div>
+
                   {/* API Keys Section */}
                   <div>
                     <h3
@@ -326,6 +452,64 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
                         </button>
                       </div>
                     </div>
+
+                    {/* Google Cloud Project ID (for Imagen) */}
+                    {(inpaintingModel === 'imagen' || textOnlyModel === 'imagen') && (
+                      <div style={{ marginBottom: '16px' }}>
+                        <label
+                          style={{
+                            display: 'block',
+                            marginBottom: '8px',
+                            fontSize: '14px',
+                            fontWeight: '500',
+                            color: '#333',
+                          }}
+                        >
+                          Google Cloud Project ID
+                        </label>
+                        <p
+                          style={{
+                            margin: '0 0 12px 0',
+                            fontSize: '13px',
+                            color: '#666',
+                            lineHeight: '1.5',
+                          }}
+                        >
+                          Your Google Cloud project ID for Vertex AI. Make sure Vertex AI API is enabled.{' '}
+                          <a
+                            href="https://console.cloud.google.com/vertex-ai"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: '#4a90e2', textDecoration: 'none' }}
+                          >
+                            Google Cloud Console
+                          </a>
+                        </p>
+                        <input
+                          ref={projectIdRef}
+                          type="text"
+                          defaultValue={googleCloudProjectId}
+                          placeholder="your-project-id"
+                          autoComplete="off"
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            fontSize: '14px',
+                            border: '1px solid #ddd',
+                            borderRadius: '6px',
+                            outline: 'none',
+                            fontFamily: 'monospace',
+                            boxSizing: 'border-box',
+                          }}
+                          onFocus={(e) => {
+                            e.currentTarget.style.borderColor = '#4a90e2';
+                          }}
+                          onBlur={(e) => {
+                            e.currentTarget.style.borderColor = '#ddd';
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* Status Messages */}
