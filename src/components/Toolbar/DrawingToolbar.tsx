@@ -13,7 +13,8 @@ import {
   StarIcon,
   MeasureIcon,
   ScreenshotIcon,
-  ImageIcon
+  ImageIcon,
+  GenerativeFillIcon
 } from '@/components/Icons/ToolIcons';
 import { ColorPicker } from '@/components/ColorPicker';
 import { ChevronDown } from 'lucide-react';
@@ -30,7 +31,8 @@ const tools = [
   { tool: DrawingTool.STAR, icon: StarIcon, label: 'Star', shortcut: 'S' },
   { tool: DrawingTool.IMAGE, icon: ImageIcon, label: 'Image/PDF', shortcut: 'I' },
   { tool: DrawingTool.SCREENSHOT, icon: ScreenshotIcon, label: 'Screenshot', shortcut: 'X' },
-  { tool: DrawingTool.MEASURE, icon: MeasureIcon, label: 'Measure', shortcut: 'M' }
+  { tool: DrawingTool.MEASURE, icon: MeasureIcon, label: 'Measure', shortcut: 'M' },
+  { tool: DrawingTool.GENERATIVE_FILL, icon: GenerativeFillIcon, label: 'AI Fill', shortcut: 'G' }
 ];
 
 interface DrawingToolbarProps {
@@ -45,7 +47,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
   const isCalibrated = drawingState.measurementCalibration.pixelsPerUnit !== null;
   const [showMeasureDropdown, setShowMeasureDropdown] = useState(false);
   const measureDropdownRef = useRef<HTMLDivElement>(null);
-  
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
@@ -59,24 +61,24 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showMeasureDropdown]);
-  
+
   // Determine if we're showing properties for selected shapes or for the active tool
   const hasSelection = selectedShapes.length > 0;
   const singleSelection = selectedShapes.length === 1;
   const selectedShape = singleSelection ? selectedShapes[0] : null;
-  
+
   // Get display values - either from selected shape or current style
   const displayStroke = selectedShape ? selectedShape.style.stroke : currentStyle.stroke;
   const displayStrokeWidth = selectedShape ? selectedShape.style.strokeWidth : currentStyle.strokeWidth;
   const displayOpacity = selectedShape ? selectedShape.style.opacity : currentStyle.opacity;
   const displayFill = selectedShape ? selectedShape.style.fill : currentStyle.fill;
-  
+
   // Text-specific display values
   const selectedTextShape = selectedShape && selectedShape.type === DrawingTool.TEXT ? selectedShape as TextShape : null;
   const selectedCalloutShape = selectedShape && selectedShape.type === DrawingTool.CALLOUT ? selectedShape as CalloutShape : null;
   const displayFontSize = selectedTextShape ? selectedTextShape.fontSize : selectedCalloutShape ? selectedCalloutShape.fontSize : currentStyle.strokeWidth * 8;
   const displayFontFamily = selectedTextShape ? selectedTextShape.fontFamily : selectedCalloutShape ? selectedCalloutShape.fontFamily : currentStyle.fontFamily || 'Arial';
-  
+
   // Determine which properties to show
   const toolOrShapeType = selectedShape ? selectedShape.type : activeTool;
   const showFillOption = toolOrShapeType === DrawingTool.RECTANGLE || toolOrShapeType === DrawingTool.CIRCLE || toolOrShapeType === DrawingTool.STAR;
@@ -88,7 +90,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
     // Update selected shapes
     if (hasSelection) {
       selectedShapes.forEach(shape => {
-        updateShape(shape.id, { 
+        updateShape(shape.id, {
           style: { ...shape.style, ...updates },
           updatedAt: Date.now()
         });
@@ -108,17 +110,17 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
             ...updates,
             updatedAt: Date.now()
           };
-          
+
           // If text content or font properties change, reset width to allow reflow
           if (updates.text !== undefined || updates.fontSize || updates.fontFamily) {
             shapeUpdates.width = undefined;
           }
-          
+
           // Also reset width if alignment changes to ensure proper reflow
           if (updates.align !== undefined) {
             shapeUpdates.width = undefined;
           }
-          
+
           updateShape(shape.id, shapeUpdates);
         } else if (shape.type === DrawingTool.CALLOUT) {
           const { text, fontSize, fontFamily } = updates;
@@ -165,17 +167,17 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
       }}>
         {tools.map(({ tool, icon: Icon, label, shortcut }) => {
           const tooltipText = tool === DrawingTool.MEASURE && !isCalibrated
-            ? 'Click to set scale for measurements' 
+            ? 'Click to set scale for measurements'
             : `${label} (${shortcut})`;
-          
+
           // Handle Measure tool specially - show with dropdown if calibrated
           if (tool === DrawingTool.MEASURE) {
             return (
-              <div 
-                key={tool} 
-                ref={measureDropdownRef} 
-                style={{ 
-                  position: 'relative', 
+              <div
+                key={tool}
+                ref={measureDropdownRef}
+                style={{
+                  position: 'relative',
                   display: 'flex',
                   backgroundColor: (activeTool === tool || showMeasureDropdown) ? '#e3f2fd' : 'transparent',
                   border: (activeTool === tool || showMeasureDropdown) ? '1px solid #2196f3' : '1px solid transparent',
@@ -305,7 +307,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
               </div>
             );
           }
-          
+
           // Regular tool buttons
           return (
             <button
@@ -352,8 +354,8 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
 
       {/* Style Controls Section */}
       <div>
-        <h3 style={{ 
-          fontSize: '0.875rem', 
+        <h3 style={{
+          fontSize: '0.875rem',
           fontWeight: '600',
           color: '#333',
           marginBottom: '0.75rem',
@@ -361,11 +363,11 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
           letterSpacing: '0.05em'
         }}>
           {hasSelection ? (singleSelection ? 'Shape Properties' : `${selectedShapes.length} Shapes Selected`) :
-           activeTool === DrawingTool.SELECT ? 'Selection' : 
-           activeTool === DrawingTool.TEXT ? 'Text Properties' : 
+           activeTool === DrawingTool.SELECT ? 'Selection' :
+           activeTool === DrawingTool.TEXT ? 'Text Properties' :
            activeTool === DrawingTool.CALLOUT ? 'Callout Properties' : 'Drawing Properties'}
         </h3>
-        
+
         {/* Selection tool message - only show if nothing selected */}
         {activeTool === DrawingTool.SELECT && !hasSelection && (
           <div style={{
@@ -380,7 +382,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
             Click on shapes to select them or drag to select multiple
           </div>
         )}
-        
+
         {/* Color Picker - Show for selected shapes or when drawing */}
         {(hasSelection || activeTool !== DrawingTool.SELECT) && (
           <div style={{ marginBottom: '1rem' }}>
@@ -397,15 +399,15 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
         {/* Stroke Width - Hide for text tool */}
         {showStrokeWidth && (
           <div style={{ marginBottom: '1rem' }}>
-            <label style={{ 
+            <label style={{
               display: 'flex',
               justifyContent: 'space-between',
-              fontSize: '0.75rem', 
+              fontSize: '0.75rem',
               color: '#666',
               marginBottom: '0.5rem'
             }}>
               <span>Stroke Width</span>
-              <span style={{ 
+              <span style={{
                 fontWeight: '600',
                 color: '#333'
               }}>{displayStrokeWidth}px</span>
@@ -448,15 +450,15 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
 
         {/* Opacity */}
         <div style={{ marginBottom: '1rem' }}>
-          <label style={{ 
+          <label style={{
             display: 'flex',
             justifyContent: 'space-between',
-            fontSize: '0.75rem', 
+            fontSize: '0.75rem',
             color: '#666',
             marginBottom: '0.5rem'
           }}>
             <span>Opacity</span>
-            <span style={{ 
+            <span style={{
               fontWeight: '600',
               color: '#333'
             }}>{Math.round(displayOpacity * 100)}%</span>
@@ -479,8 +481,8 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
         {/* Text Controls - Show when using text tool or when text shape is selected */}
         {showTextOptions && (
           <div style={{ marginBottom: '1rem' }}>
-            <h3 style={{ 
-              fontSize: '0.875rem', 
+            <h3 style={{
+              fontSize: '0.875rem',
               fontWeight: '600',
               color: '#333',
               marginBottom: '0.75rem',
@@ -490,13 +492,13 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
             }}>
               {selectedTextShape ? 'Text Properties' : selectedCalloutShape ? 'Callout Properties' : 'Text Settings'}
             </h3>
-            
+
             {/* Text Content Editor for selected text or callout */}
             {(selectedTextShape || selectedCalloutShape) && (
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ 
-                  display: 'block', 
-                  fontSize: '0.75rem', 
+                <label style={{
+                  display: 'block',
+                  fontSize: '0.75rem',
                   color: '#666',
                   marginBottom: '0.25rem'
                 }}>
@@ -528,12 +530,12 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
                 </div>
               </div>
             )}
-            
+
             {/* Font Size */}
             <div style={{ marginBottom: '1rem' }}>
-              <label style={{ 
-                display: 'block', 
-                fontSize: '0.75rem', 
+              <label style={{
+                display: 'block',
+                fontSize: '0.75rem',
                 color: '#666',
                 marginBottom: '0.25rem'
               }}>
@@ -555,9 +557,9 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
 
             {/* Font Family */}
             <div style={{ marginBottom: '1rem' }}>
-              <label style={{ 
-                display: 'block', 
-                fontSize: '0.75rem', 
+              <label style={{
+                display: 'block',
+                fontSize: '0.75rem',
                 color: '#666',
                 marginBottom: '0.25rem'
               }}>
@@ -591,9 +593,9 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
             {/* Text Alignment - only for selected text (not callouts) */}
             {selectedTextShape && !selectedCalloutShape && (
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ 
-                  display: 'block', 
-                  fontSize: '0.75rem', 
+                <label style={{
+                  display: 'block',
+                  fontSize: '0.75rem',
                   color: '#666',
                   marginBottom: '0.25rem'
                 }}>

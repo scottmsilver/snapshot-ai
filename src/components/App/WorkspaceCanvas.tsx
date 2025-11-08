@@ -5,6 +5,7 @@ import { DrawingLayer } from '@/components/Canvas/DrawingLayer';
 import { ImageUploader } from '@/components/ImageUploader';
 import { PDFViewer } from '@/components/PDFViewer/PDFViewer';
 import { DrawingTool, type Point } from '@/types/drawing';
+import { useDrawingContext } from '@/contexts/DrawingContext';
 
 interface CanvasSize {
   width: number;
@@ -52,6 +53,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
   onTextShapeEdit,
   onImageToolComplete,
 }) => {
+  const { state: drawingState } = useDrawingContext();
   if (isLoadingSharedFile) {
     return (
       <section
@@ -252,7 +254,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
             style={{
               border: '1px solid #ddd',
               backgroundColor: '#fafafa',
-              cursor: activeTool === DrawingTool.SELECT ? 'default' : 'crosshair',
+              cursor: drawingState.generativeFillMode?.isActive ? 'crosshair' : (activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'),
             }}
           >
             <Layer scaleX={zoomLevel} scaleY={zoomLevel}>

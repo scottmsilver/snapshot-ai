@@ -1,5 +1,5 @@
 import React from 'react';
-import { Palette, Copy } from 'lucide-react';
+import { Palette, Copy, Settings } from 'lucide-react';
 import { SaveIndicator } from '@/components/SaveIndicator';
 import { FileMenu } from '@/components/FileMenu/FileMenu';
 import { EditMenu } from '@/components/EditMenu';
@@ -20,6 +20,7 @@ interface WorkspaceHeaderProps {
   saveStatus: SaveStatus;
   isCanvasInitialized: boolean;
   onCopyCanvas: () => void;
+  onOpenSettings: () => void;
   fileMenuProps: FileMenuProps;
   editMenuProps?: EditMenuProps;
 }
@@ -35,6 +36,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   saveStatus,
   isCanvasInitialized,
   onCopyCanvas,
+  onOpenSettings,
   fileMenuProps,
   editMenuProps,
 }) => {
@@ -159,6 +161,32 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             <Copy size={18} style={{ pointerEvents: 'none' }} />
           </div>
         )}
+        <div
+          onClick={onOpenSettings}
+          style={{
+            padding: '0.375rem',
+            backgroundColor: 'transparent',
+            border: '1px solid #ddd',
+            cursor: 'pointer',
+            color: '#5f6368',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+            zIndex: 10,
+          }}
+          onMouseEnter={event => {
+            event.currentTarget.style.backgroundColor = '#f1f3f4';
+          }}
+          onMouseLeave={event => {
+            event.currentTarget.style.backgroundColor = 'transparent';
+          }}
+          role="button"
+          title="Settings"
+        >
+          <Settings size={18} style={{ pointerEvents: 'none' }} />
+        </div>
         <UserMenu />
       </div>
     </div>

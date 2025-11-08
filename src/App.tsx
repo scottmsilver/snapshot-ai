@@ -1,10 +1,10 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { motion } from 'framer-motion';
 import Konva from 'konva';
 import { useOptionalAuth } from '@/contexts/AuthContext';
 import { useDrawing } from '@/hooks/useDrawing';
-import { useDrawingContext } from '@/contexts/DrawingContext';
+import { useDrawingContext, DrawingActionType } from '@/contexts/DrawingContext';
 import { useHistory } from '@/hooks/useHistory';
 import { useMeasurement } from '@/hooks/useMeasurement';
 import { useSharedProjectLoader } from '@/hooks/useSharedProjectLoader';
@@ -17,6 +17,8 @@ import { useFileImports } from '@/hooks/useFileImports';
 import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils';
 import {
   DrawingTool,
+  GenerativeFillSelectionTool,
+  getNextZIndex,
   type Point,
   type TextShape,
   type CalloutShape,
@@ -30,6 +32,13 @@ import { WorkspaceHeader } from '@/components/App/WorkspaceHeader';
 import { WorkspaceToolbar } from '@/components/App/WorkspaceToolbar';
 import { WorkspaceCanvas } from '@/components/App/WorkspaceCanvas';
 import { WorkspaceDialogs } from '@/components/App/WorkspaceDialogs';
+import { GenerativeFillToolbar } from '@/components/GenerativeFill/GenerativeFillToolbar';
+import { GenerativeFillDialog } from '@/components/GenerativeFill/GenerativeFillDialog';
+import { GenerativeFillResultToolbar } from '@/components/GenerativeFill/GenerativeFillResultToolbar';
+import { SettingsDialog } from '@/components/Settings';
+import { createGenerativeService } from '@/services/generativeApi';
+import { settingsManager } from '@/services/settingsManager';
+import { generateBrushMask, generateRectangleMask, generateLassoMask } from '@/utils/maskRendering';
 
 const CANVAS_PADDING = 100;
 
@@ -55,6 +64,7 @@ function App(): JSX.Element {
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [calibrationDialogOpen, setCalibrationDialogOpen] = useState(false);
   const [pendingCalibrationLine, setPendingCalibrationLine] = useState<MeasurementLineShape | null>(null);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
   const authContext = useOptionalAuth();
   const {
@@ -73,7 +83,7 @@ function App(): JSX.Element {
     deleteSelected,
     updateStyle,
   } = useDrawing();
-  const { state: drawingState, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes } = useDrawingContext();
+  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes } = useDrawingContext();
   const { canUndo, canRedo, pushState, undo, redo, getCurrentState, currentIndex } = useHistory();
 
   const selectedShapes = useMemo(
@@ -488,6 +498,273 @@ function App(): JSX.Element {
     [calibrationDialogOpen, pendingCalibrationLine, handleCalibrationConfirm, handleCalibrationCancel],
   );
 
+  // Generative Fill handlers
+  const handleGenerativeFillSelectTool = useCallback(
+    (selectionTool: GenerativeFillSelectionTool) => {
+      dispatch({
+        type: DrawingActionType.SET_GENERATIVE_FILL_SELECTION_TOOL,
+        selectionTool,
+      });
+    },
+    [dispatch]
+  );
+
+  const handleGenerativeFillBrushWidthChange = useCallback(
+    (brushWidth: number) => {
+      dispatch({
+        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
+        brushWidth,
+      });
+    },
+    [dispatch]
+  );
+
+  const handleGenerativeFillComplete = useCallback(() => {
+    // Selection complete - generate preview images and show dialog
+    if (!stageRef.current || !drawingState.generativeFillMode) return;
+
+    try {
+      // Get canvas as ImageData
+      const stage = stageRef.current;
+      const canvas = stage.toCanvas();
+
+      // Generate mask based on selection tool
+      const { selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
+      let maskExport;
+
+      if (selectionTool === GenerativeFillSelectionTool.BRUSH) {
+        maskExport = generateBrushMask(canvas, selectionPoints, brushWidth);
+      } else if (selectionTool === GenerativeFillSelectionTool.RECTANGLE && selectionRectangle) {
+        maskExport = generateRectangleMask(canvas, selectionRectangle);
+      } else if (selectionTool === GenerativeFillSelectionTool.LASSO) {
+        maskExport = generateLassoMask(canvas, selectionPoints);
+      } else {
+        console.error('Invalid selection tool or missing selection data');
+        return;
+      }
+
+      // Convert to base64 for preview
+      const sourceCanvas = document.createElement('canvas');
+      sourceCanvas.width = maskExport.sourceImageData.width;
+      sourceCanvas.height = maskExport.sourceImageData.height;
+      const sourceCtx = sourceCanvas.getContext('2d')!;
+      sourceCtx.putImageData(maskExport.sourceImageData, 0, 0);
+      const sourceBase64 = sourceCanvas.toDataURL('image/png');
+
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = maskExport.maskImageData.width;
+      maskCanvas.height = maskExport.maskImageData.height;
+      const maskCtx = maskCanvas.getContext('2d')!;
+      maskCtx.putImageData(maskExport.maskImageData, 0, 0);
+      const maskBase64 = maskCanvas.toDataURL('image/png');
+
+      dispatch({
+        type: DrawingActionType.COMPLETE_GENERATIVE_FILL_SELECTION,
+        sourceImage: sourceBase64,
+        maskImage: maskBase64,
+      });
+    } catch (error) {
+      console.error('Failed to generate preview images:', error);
+    }
+  }, [dispatch, drawingState.generativeFillMode]);
+
+  const handleGenerativeFillCancel = useCallback(() => {
+    dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+  }, [dispatch]);
+
+  const handleGenerativeFillPromptSubmit = useCallback(
+    async (prompt: string) => {
+      if (!stageRef.current || !drawingState.generativeFillMode) return;
+
+      dispatch({ type: DrawingActionType.SET_GENERATIVE_FILL_PROMPT, prompt });
+      dispatch({ type: DrawingActionType.START_GENERATIVE_FILL_GENERATION });
+
+      try {
+        // Get canvas as ImageData
+        const stage = stageRef.current;
+        const canvas = stage.toCanvas();
+        const ctx = canvas.getContext('2d')!;
+        const sourceImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        // Generate mask based on selection tool
+        const { selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
+        let maskExport;
+
+        if (selectionTool === GenerativeFillSelectionTool.BRUSH) {
+          maskExport = generateBrushMask(canvas, selectionPoints, brushWidth);
+        } else if (selectionTool === GenerativeFillSelectionTool.RECTANGLE && selectionRectangle) {
+          maskExport = generateRectangleMask(canvas, selectionRectangle);
+        } else if (selectionTool === GenerativeFillSelectionTool.LASSO) {
+          maskExport = generateLassoMask(canvas, selectionPoints);
+        } else {
+          throw new Error('Invalid selection tool or missing selection data');
+        }
+
+        // Get API key from settings
+        let apiKey: string | null = null;
+        if (authContext?.isAuthenticated && authContext?.getAccessToken) {
+          try {
+            const accessToken = authContext.getAccessToken();
+            if (accessToken) {
+              await settingsManager.initialize(accessToken);
+              apiKey = await settingsManager.getGeminiApiKey();
+            }
+          } catch (error) {
+            console.error('Failed to get API key from settings:', error);
+          }
+        }
+
+        // Check if we have an API key
+        if (!apiKey && !import.meta.env.VITE_GEMINI_API_KEY && !import.meta.env.VITE_GENERATIVE_API_KEY) {
+          // No API key available - prompt user to add one
+          dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+          alert('Please add your Gemini API key in Settings to use Generative Fill.');
+          setSettingsDialogOpen(true);
+          return;
+        }
+
+        // Call API service
+        const service = createGenerativeService(apiKey || undefined);
+
+        // Use mock only if no API key is configured
+        const useMock = !apiKey && !import.meta.env.VITE_GEMINI_API_KEY && !import.meta.env.VITE_GENERATIVE_API_KEY;
+        const resultImageData = useMock
+          ? await service.mockInpaint(sourceImageData, maskExport.maskImageData, prompt)
+          : await service.inpaint(sourceImageData, maskExport.maskImageData, prompt);
+
+        // Convert result to base64
+        const resultCanvas = document.createElement('canvas');
+        resultCanvas.width = resultImageData.width;
+        resultCanvas.height = resultImageData.height;
+        const resultCtx = resultCanvas.getContext('2d')!;
+        resultCtx.putImageData(resultImageData, 0, 0);
+        const resultBase64 = resultCanvas.toDataURL('image/png');
+
+        // Result is now full-size, so bounds should be full canvas
+        const fullCanvasBounds = {
+          x: 0,
+          y: 0,
+          width: canvas.width,
+          height: canvas.height,
+        };
+
+        // Create the image shape immediately and add it to canvas
+        const imageShape: Shape = {
+          id: `image-${Date.now()}`,
+          type: DrawingTool.IMAGE,
+          x: fullCanvasBounds.x,
+          y: fullCanvasBounds.y,
+          width: fullCanvasBounds.width,
+          height: fullCanvasBounds.height,
+          imageData: resultBase64,
+          style: {
+            stroke: 'transparent',
+            strokeWidth: 0,
+            fill: 'transparent',
+            opacity: 1,
+          },
+          rotation: 0,
+          zIndex: getNextZIndex(shapes),
+          visible: true,
+          locked: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+
+        // Add the shape and select it
+        addShape(imageShape);
+        selectShape(imageShape.id);
+
+        // Exit generative fill mode
+        dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+      } catch (error) {
+        console.error('Generative fill failed:', error);
+        alert(`Generative fill failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Reset to allow retry
+        dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+      }
+    },
+    [dispatch, drawingState.generativeFillMode, stageRef, shapes, addShape, selectShape, authContext]
+  );
+
+  const handleGenerativeFillDialogCancel = useCallback(() => {
+    // Just close the dialog, keep the selection
+    if (!drawingState.generativeFillMode) return;
+    dispatch({
+      type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
+    });
+    // Need to close dialog - we'll dispatch a new action or handle via state
+    dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+  }, [dispatch, drawingState.generativeFillMode]);
+
+  const handleGenerativeFillAccept = useCallback(() => {
+    // Apply the result to the canvas by adding it as an ImageShape
+    if (!drawingState.generativeFillMode?.generatedResult) return;
+
+    const { imageData, bounds } = drawingState.generativeFillMode.generatedResult;
+
+    const imageShape: Shape = {
+      id: `image-${Date.now()}`,
+      type: DrawingTool.IMAGE,
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      imageData: imageData,
+      style: {
+        stroke: 'transparent',
+        strokeWidth: 0,
+        opacity: 1,
+      },
+      visible: true,
+      locked: false,
+      zIndex: drawingState.maxZIndex + 1,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    dispatch({ type: DrawingActionType.ADD_SHAPE, shape: imageShape });
+    dispatch({ type: DrawingActionType.APPLY_GENERATIVE_FILL_RESULT });
+    dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+    setActiveTool(DrawingTool.SELECT);
+  }, [dispatch, setActiveTool, drawingState.generativeFillMode, drawingState.maxZIndex]);
+
+  const handleGenerativeFillReject = useCallback(() => {
+    // Discard the result and go back to selection
+    if (!drawingState.generativeFillMode) return;
+    dispatch({
+      type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
+    });
+    // Clear the result but keep the selection for retry
+    const updatedMode = {
+      ...drawingState.generativeFillMode,
+      generatedResult: null,
+      isGenerating: false,
+      showPromptDialog: true, // Show dialog again to allow retry
+    };
+    // We need a way to update just the generated result - for now cancel and restart
+    dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
+  }, [dispatch, drawingState.generativeFillMode]);
+
+  const handleGenerativeFillRegenerate = useCallback(() => {
+    // Re-open dialog with same prompt to regenerate
+    if (!drawingState.generativeFillMode) return;
+
+    // Clear the result and show dialog again
+    dispatch({
+      type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
+    });
+    // Reset to show dialog - we'll use the existing prompt
+    dispatch({ type: DrawingActionType.COMPLETE_GENERATIVE_FILL_SELECTION });
+  }, [dispatch, drawingState.generativeFillMode]);
+
+  // Activate generative fill mode when tool is selected
+  useEffect(() => {
+    if (activeTool === DrawingTool.GENERATIVE_FILL && !drawingState.generativeFillMode) {
+      dispatch({ type: DrawingActionType.START_GENERATIVE_FILL });
+    }
+  }, [activeTool, drawingState.generativeFillMode, dispatch]);
+
   const handleCanvasTextClick = useCallback(
     (position: Point) => {
       setTextPosition(position);
@@ -522,6 +799,7 @@ function App(): JSX.Element {
           saveStatus={saveStatus}
           isCanvasInitialized={isCanvasInitialized}
           onCopyCanvas={handleCopyToClipboard}
+          onOpenSettings={() => setSettingsDialogOpen(true)}
           fileMenuProps={fileMenuProps}
           editMenuProps={editMenuProps}
         />
@@ -575,6 +853,99 @@ function App(): JSX.Element {
           textDialogProps={textDialogProps}
           calibrationDialogProps={calibrationDialogProps}
         />
+
+        {/* Settings Dialog */}
+        <SettingsDialog
+          isOpen={settingsDialogOpen}
+          onClose={() => setSettingsDialogOpen(false)}
+        />
+
+        {/* Generative Fill Toolbar - only show if not showing dialog or generating */}
+        {drawingState.generativeFillMode?.isActive &&
+         !drawingState.generativeFillMode.showPromptDialog &&
+         !drawingState.generativeFillMode.isGenerating && (
+          <GenerativeFillToolbar
+            selectedTool={drawingState.generativeFillMode.selectionTool || GenerativeFillSelectionTool.BRUSH}
+            brushWidth={drawingState.generativeFillMode.brushWidth}
+            hasSelection={
+              drawingState.generativeFillMode.selectionPoints.length > 0 ||
+              drawingState.generativeFillMode.selectionRectangle !== null
+            }
+            onSelectTool={handleGenerativeFillSelectTool}
+            onBrushWidthChange={handleGenerativeFillBrushWidthChange}
+            onComplete={handleGenerativeFillComplete}
+            onCancel={handleGenerativeFillCancel}
+          />
+        )}
+
+        {/* Generative Fill Dialog */}
+        {drawingState.generativeFillMode && (
+          <GenerativeFillDialog
+            isOpen={drawingState.generativeFillMode.showPromptDialog}
+            isGenerating={drawingState.generativeFillMode.isGenerating}
+            onSubmit={handleGenerativeFillPromptSubmit}
+            onCancel={handleGenerativeFillDialogCancel}
+            sourceImagePreview={drawingState.generativeFillMode.previewImages?.sourceImage}
+            maskImagePreview={drawingState.generativeFillMode.previewImages?.maskImage}
+          />
+        )}
+
+        {/* Loading Overlay - block all interactions while generating */}
+        {drawingState.generativeFillMode?.isGenerating && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 999,
+              pointerEvents: 'all',
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: 'white',
+                padding: '24px 32px',
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '16px',
+              }}
+            >
+              <div
+                style={{
+                  width: '48px',
+                  height: '48px',
+                  border: '4px solid #e5e5e5',
+                  borderTopColor: '#4a90e2',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite',
+                }}
+              />
+              <div style={{ fontSize: '16px', fontWeight: '500', color: '#333' }}>
+                Generating with AI...
+              </div>
+              <div style={{ fontSize: '14px', color: '#666' }}>
+                This may take 10-30 seconds
+              </div>
+            </div>
+            <style>
+              {`
+                @keyframes spin {
+                  to { transform: rotate(360deg); }
+                }
+              `}
+            </style>
+          </div>
+        )}
+
       </motion.div>
     </AuthGate>
   );

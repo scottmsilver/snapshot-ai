@@ -11,7 +11,8 @@ export const DrawingTool = {
   MEASURE: 'measure',
   CALIBRATE: 'calibrate', // Internal tool for setting scale
   SCREENSHOT: 'screenshot', // Tool for capturing canvas area
-  IMAGE: 'image' // Shape type for pasted images
+  IMAGE: 'image', // Shape type for pasted images
+  GENERATIVE_FILL: 'generativeFill' // AI-powered inpainting tool
 } as const;
 
 export type DrawingTool = typeof DrawingTool[keyof typeof DrawingTool];
@@ -36,6 +37,23 @@ export const LayerOperation = {
 } as const;
 
 export type LayerOperation = typeof LayerOperation[keyof typeof LayerOperation];
+
+// Generative Fill selection tools
+export const GenerativeFillSelectionTool = {
+  BRUSH: 'brush',
+  RECTANGLE: 'rectangle',
+  LASSO: 'lasso'
+} as const;
+
+export type GenerativeFillSelectionTool = typeof GenerativeFillSelectionTool[keyof typeof GenerativeFillSelectionTool];
+
+// Rectangle type for selections
+export interface Rectangle {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 // Point type
 export interface Point {
@@ -125,20 +143,20 @@ export interface CalloutShape extends BaseShape {
   textWidth?: number;
   textHeight?: number;
   padding: number;
-  
+
   // Arrow properties
   arrowX: number;  // Arrow tip X
   arrowY: number;  // Arrow tip Y
-  
+
   // Arrow base position on perimeter (0 to 1, where 0 = top-left corner going clockwise)
   perimeterOffset: number;  // 0-0.25 = top edge, 0.25-0.5 = right edge, 0.5-0.75 = bottom edge, 0.75-1 = left edge
-  
+
   // Control points for cubic Bezier curve (user-adjustable)
   curveControl1X?: number;
   curveControl1Y?: number;
   curveControl2X?: number;
   curveControl2Y?: number;
-  
+
   // Styling
   backgroundColor?: string;
   borderRadius?: number;
@@ -185,37 +203,57 @@ export interface DrawingState {
   // Current tool and mode
   activeTool: DrawingTool;
   drawingMode: DrawingMode;
-  
+
   // Style settings
   currentStyle: DrawingStyle;
-  
+
   // Shape being drawn
   activeShape: Shape | null;
   tempPoints: Point[];
-  
+
   // All shapes (sorted by zIndex)
   shapes: Shape[];
-  
+
   // Selection
   selectedShapeIds: string[];
-  
+
   // Canvas state
   isDrawing: boolean;
   startPoint: Point | null;
   lastPoint: Point | null;
-  
+
   // Z-order management
   maxZIndex: number; // Track highest z-index for new shapes
-  
+
   // Measurement state
   measurementCalibration: {
     pixelsPerUnit: number | null;
     unit: string;
     calibrationLineId: string | null;
   };
-  
+
   // Clipboard state
   clipboard: Shape[];
+
+  // Generative Fill state
+  generativeFillMode: {
+    isActive: boolean;
+    selectionTool: GenerativeFillSelectionTool | null;
+    selectionPoints: Point[];  // For brush and lasso
+    selectionRectangle: Rectangle | null;  // For rectangle
+    brushWidth: number;  // For brush tool
+    showPromptDialog: boolean;  // Show dialog after selection complete
+    promptInput: string;
+    isGenerating: boolean;  // API call in progress
+    generatedResult: {
+      imageData: string;  // Base64
+      bounds: Rectangle;
+    } | null;
+    previewImages: {
+      sourceImage: string;  // Base64 PNG preview
+      maskImage: string;    // Base64 PNG preview
+    } | null;
+  } | null;
 }
 
 // Helper functions for z-order management
@@ -235,18 +273,18 @@ export const reorderShapes = (
 ): Shape[] => {
   const shapesCopy = [...shapes];
   const shapeIndex = shapesCopy.findIndex(s => s.id === shapeId);
-  
+
   if (shapeIndex === -1) return shapes;
-  
+
   const shape = shapesCopy[shapeIndex];
   const sortedShapes = sortShapesByZIndex(shapesCopy);
   const sortedIndex = sortedShapes.findIndex(s => s.id === shapeId);
-  
+
   switch (operation) {
     case LayerOperation.BRING_TO_FRONT:
       shape.zIndex = getNextZIndex(shapes);
       break;
-      
+
     case LayerOperation.SEND_TO_BACK:
       // Shift all other shapes up
       shapesCopy.forEach(s => {
@@ -256,7 +294,7 @@ export const reorderShapes = (
       });
       shape.zIndex = 0;
       break;
-      
+
     case LayerOperation.BRING_FORWARD:
       if (sortedIndex < sortedShapes.length - 1) {
         const nextShape = sortedShapes[sortedIndex + 1];
@@ -265,7 +303,7 @@ export const reorderShapes = (
         nextShape.zIndex = tempZ;
       }
       break;
-      
+
     case LayerOperation.SEND_BACKWARD:
       if (sortedIndex > 0) {
         const prevShape = sortedShapes[sortedIndex - 1];
@@ -275,6 +313,6 @@ export const reorderShapes = (
       }
       break;
   }
-  
+
   return shapesCopy;
 };

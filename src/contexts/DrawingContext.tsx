@@ -7,7 +7,9 @@ import {
   type Shape,
   type MeasurementLineShape,
   type Point,
+  type Rectangle,
   LayerOperation,
+  GenerativeFillSelectionTool,
   getNextZIndex,
   reorderShapes
 } from '@/types/drawing';
@@ -60,6 +62,15 @@ export enum DrawingActionType {
   PASTE_SHAPES = 'PASTE_SHAPES',
   DELETE_SHAPES = 'DELETE_SHAPES',
   UPDATE_SHAPES = 'UPDATE_SHAPES',
+  START_GENERATIVE_FILL = 'START_GENERATIVE_FILL',
+  SET_GENERATIVE_FILL_SELECTION_TOOL = 'SET_GENERATIVE_FILL_SELECTION_TOOL',
+  UPDATE_GENERATIVE_FILL_SELECTION = 'UPDATE_GENERATIVE_FILL_SELECTION',
+  COMPLETE_GENERATIVE_FILL_SELECTION = 'COMPLETE_GENERATIVE_FILL_SELECTION',
+  SET_GENERATIVE_FILL_PROMPT = 'SET_GENERATIVE_FILL_PROMPT',
+  START_GENERATIVE_FILL_GENERATION = 'START_GENERATIVE_FILL_GENERATION',
+  COMPLETE_GENERATIVE_FILL_GENERATION = 'COMPLETE_GENERATIVE_FILL_GENERATION',
+  APPLY_GENERATIVE_FILL_RESULT = 'APPLY_GENERATIVE_FILL_RESULT',
+  CANCEL_GENERATIVE_FILL = 'CANCEL_GENERATIVE_FILL',
 }
 
 // Action definitions
@@ -74,16 +85,16 @@ type DrawingAction =
   | { type: DrawingActionType.SELECT_SHAPE; id: string; multi?: boolean }
   | { type: DrawingActionType.SELECT_MULTIPLE; ids: string[] }
   | { type: DrawingActionType.CLEAR_SELECTION }
-  | { 
-      type: DrawingActionType.SET_DRAWING_STATE; 
-      isDrawing: boolean; 
+  | {
+      type: DrawingActionType.SET_DRAWING_STATE;
+      isDrawing: boolean;
       startPoint?: Point | null;
       lastPoint?: Point | null;
     }
   | { type: DrawingActionType.SET_TEMP_POINTS; points: Point[] }
   | { type: DrawingActionType.REORDER_SHAPE; id: string; operation: LayerOperation }
   | { type: DrawingActionType.SET_ACTIVE_SHAPE; shape: Shape | null }
-  | { 
+  | {
       type: DrawingActionType.SET_MEASUREMENT_CALIBRATION;
       calibration: {
         pixelsPerUnit: number | null;
@@ -94,7 +105,16 @@ type DrawingAction =
   | { type: DrawingActionType.COPY_SHAPES; shapes: Shape[] }
   | { type: DrawingActionType.PASTE_SHAPES; offset?: Point }
   | { type: DrawingActionType.DELETE_SHAPES; ids: string[] }
-  | { type: DrawingActionType.UPDATE_SHAPES; updates: Array<{ id: string; updates: Partial<Shape> }> };
+  | { type: DrawingActionType.UPDATE_SHAPES; updates: Array<{ id: string; updates: Partial<Shape> }> }
+  | { type: DrawingActionType.START_GENERATIVE_FILL }
+  | { type: DrawingActionType.SET_GENERATIVE_FILL_SELECTION_TOOL; selectionTool: GenerativeFillSelectionTool }
+  | { type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION; points?: Point[]; rectangle?: Rectangle | null; brushWidth?: number }
+  | { type: DrawingActionType.COMPLETE_GENERATIVE_FILL_SELECTION; sourceImage: string; maskImage: string }
+  | { type: DrawingActionType.SET_GENERATIVE_FILL_PROMPT; prompt: string }
+  | { type: DrawingActionType.START_GENERATIVE_FILL_GENERATION }
+  | { type: DrawingActionType.COMPLETE_GENERATIVE_FILL_GENERATION; imageData: string; bounds: Rectangle }
+  | { type: DrawingActionType.APPLY_GENERATIVE_FILL_RESULT }
+  | { type: DrawingActionType.CANCEL_GENERATIVE_FILL };
 
 // Initial state
 export const initialState: DrawingState = {
@@ -123,6 +143,7 @@ export const initialState: DrawingState = {
     calibrationLineId: null,
   },
   clipboard: [],
+  generativeFillMode: null,
 };
 
 // Reducer
@@ -262,7 +283,7 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
-        
+
         // Offset position based on shape type
         if ('x' in newShape && 'y' in newShape) {
           newShape.x += offset.x;
@@ -276,7 +297,7 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
           }
           newShape.points = offsetPoints;
         }
-        
+
         // Special handling for callout shapes
         if (newShape.type === DrawingTool.CALLOUT && 'textX' in newShape) {
           newShape.textX += offset.x;
@@ -292,10 +313,10 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
             newShape.curveControl2Y += offset.y;
           }
         }
-        
+
         return newShape;
       });
-      
+
       return {
         ...state,
         shapes: [...state.shapes, ...newShapes],
@@ -354,6 +375,112 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
       };
     }
 
+    case DrawingActionType.START_GENERATIVE_FILL:
+      return {
+        ...state,
+        activeTool: DrawingTool.GENERATIVE_FILL,
+        generativeFillMode: {
+          isActive: true,
+          selectionTool: GenerativeFillSelectionTool.BRUSH,
+          selectionPoints: [],
+          selectionRectangle: null,
+          brushWidth: 20,
+          showPromptDialog: false,
+          promptInput: '',
+          isGenerating: false,
+          generatedResult: null,
+          previewImages: null,
+        },
+      };
+
+    case DrawingActionType.SET_GENERATIVE_FILL_SELECTION_TOOL:
+      if (!state.generativeFillMode) return state;
+      return {
+        ...state,
+        generativeFillMode: {
+          ...state.generativeFillMode,
+          selectionTool: action.selectionTool,
+          selectionPoints: [],
+          selectionRectangle: null,
+        },
+      };
+
+    case DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION:
+      if (!state.generativeFillMode) return state;
+      return {
+        ...state,
+        generativeFillMode: {
+          ...state.generativeFillMode,
+          selectionPoints: action.points !== undefined ? action.points : state.generativeFillMode.selectionPoints,
+          selectionRectangle: action.rectangle !== undefined ? action.rectangle : state.generativeFillMode.selectionRectangle,
+          brushWidth: action.brushWidth !== undefined ? action.brushWidth : state.generativeFillMode.brushWidth,
+        },
+      };
+
+    case DrawingActionType.COMPLETE_GENERATIVE_FILL_SELECTION:
+      // Selection complete, ready for prompt
+      if (!state.generativeFillMode) return state;
+      return {
+        ...state,
+        generativeFillMode: {
+          ...state.generativeFillMode,
+          showPromptDialog: true,
+          previewImages: {
+            sourceImage: action.sourceImage,
+            maskImage: action.maskImage,
+          },
+        },
+      };
+
+    case DrawingActionType.SET_GENERATIVE_FILL_PROMPT:
+      if (!state.generativeFillMode) return state;
+      return {
+        ...state,
+        generativeFillMode: {
+          ...state.generativeFillMode,
+          promptInput: action.prompt,
+        },
+      };
+
+    case DrawingActionType.START_GENERATIVE_FILL_GENERATION:
+      if (!state.generativeFillMode) return state;
+      return {
+        ...state,
+        generativeFillMode: {
+          ...state.generativeFillMode,
+          showPromptDialog: false,
+          isGenerating: true,
+        },
+      };
+
+    case DrawingActionType.COMPLETE_GENERATIVE_FILL_GENERATION:
+      if (!state.generativeFillMode) return state;
+      return {
+        ...state,
+        generativeFillMode: {
+          ...state.generativeFillMode,
+          isGenerating: false,
+          generatedResult: {
+            imageData: action.imageData,
+            bounds: action.bounds,
+          },
+        },
+      };
+
+    case DrawingActionType.APPLY_GENERATIVE_FILL_RESULT:
+      // Will be handled by adding result as ImageShape
+      return {
+        ...state,
+        generativeFillMode: null,
+      };
+
+    case DrawingActionType.CANCEL_GENERATIVE_FILL:
+      return {
+        ...state,
+        activeTool: DrawingTool.SELECT,
+        generativeFillMode: null,
+      };
+
     default:
       return state;
   }
@@ -363,13 +490,13 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
 export interface DrawingContextType {
   state: DrawingState;
   dispatch: React.Dispatch<DrawingAction>;
-  
+
   // Tool management
   setActiveTool: (tool: DrawingTool) => void;
-  
+
   // Style management
   updateStyle: (style: Partial<DrawingStyle>) => void;
-  
+
   // Shape management
   setShapes: (shapes: Shape[]) => void;
   addShape: (shape: Omit<Shape, 'zIndex'>) => void;
@@ -378,30 +505,30 @@ export interface DrawingContextType {
   deleteShape: (id: string) => void;
   deleteShapes: (ids: string[]) => void;
   deleteSelected: () => void;
-  
+
   // Selection
   selectShape: (id: string, multi?: boolean) => void;
   selectMultiple: (ids: string[]) => void;
   clearSelection: () => void;
-  
+
   // Drawing state
   setDrawingState: (isDrawing: boolean, startPoint?: Point | null, lastPoint?: Point | null) => void;
   setTempPoints: (points: Point[]) => void;
   setActiveShape: (shape: Shape | null) => void;
-  
+
   // Z-order
   reorderShape: (id: string, operation: LayerOperation) => void;
-  
+
   // Measurement
   setMeasurementCalibration: (calibration: {
     pixelsPerUnit: number | null;
     unit: string;
     calibrationLineId: string | null;
   }) => void;
-  
+
   // Helpers
   getSortedShapes: () => Shape[];
-  
+
   // Clipboard operations
   copySelectedShapes: () => void;
   pasteShapes: (offset?: Point) => void;

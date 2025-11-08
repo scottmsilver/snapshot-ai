@@ -1,16 +1,17 @@
 import React from 'react';
-import { 
-  MousePointer2, 
-  Pen, 
-  Square, 
-  Circle, 
+import {
+  MousePointer2,
+  Pen,
+  Square,
+  Circle,
   ArrowRight,
   Type,
   MessageSquare,
   Star,
   Ruler,
   Crop,
-  Image
+  Image,
+  Sparkles
 } from 'lucide-react';
 
 interface IconProps {
@@ -61,4 +62,8 @@ export const ScreenshotIcon: React.FC<IconProps> = ({ size = 24, color = 'curren
 
 export const ImageIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor' }) => (
   <Image size={size} color={color} />
+);
+
+export const GenerativeFillIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor' }) => (
+  <Sparkles size={size} color={color} />
 );

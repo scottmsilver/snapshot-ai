@@ -2,15 +2,17 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, Star, RegularPolygon, Image } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
-import { useDrawingContext } from '@/contexts/DrawingContext';
+import { useDrawingContext, DrawingActionType } from '@/contexts/DrawingContext';
 import { useSelectionMachine } from '@/hooks/useSelectionMachine';
 import { DrawingTool } from '@/types/drawing';
+import { SelectionOverlay } from '@/components/GenerativeFill/SelectionOverlay';
+import { ResultOverlay } from '@/components/GenerativeFill/ResultOverlay';
 import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, StarShape, MeasurementLineShape, ImageShape, Point } from '@/types/drawing';
-import { 
-  perimeterOffsetToPoint, 
-  getArrowPathString, 
-  calculateArrowHeadRotation, 
-  pointToPerimeterOffset, 
+import {
+  perimeterOffsetToPoint,
+  getArrowPathString,
+  calculateArrowHeadRotation,
+  pointToPerimeterOffset,
   calculateInitialPerimeterOffset,
   isValidControlPoint,
   getOptimalControlPoints
@@ -48,7 +50,7 @@ const ImageShapeComponent: React.FC<{
   onRef: (node: Konva.Node | null) => void;
 }> = ({ shape, commonProps, onRef }) => {
   const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
-  
+
   // Load image from base64 data
   useEffect(() => {
     if (shape.imageData) {
@@ -61,7 +63,7 @@ const ImageShapeComponent: React.FC<{
   }, [shape.imageData]);
 
   if (!loadedImage) return null;
-  
+
   return (
     <Image
       {...commonProps}
@@ -98,9 +100,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     selectShape,
     clearSelection,
   } = useDrawing();
-  
-  const { state: drawingState } = useDrawingContext();
-  
+
+  const { state: drawingState, dispatch } = useDrawingContext();
+
+  // Track if mouse is down for generative fill
+  const [isGenerativeFillDrawing, setIsGenerativeFillDrawing] = useState(false);
+
   const {
     context: selectionContext,
     handleShapeClick,
@@ -125,7 +130,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     endControlPointDrag,
     isDraggingControlPoint,
   } = useSelectionMachine();
-  
+
   const transformerRef = useRef<Konva.Transformer>(null);
   const selectedShapeRefs = useRef<Map<string, Konva.Node>>(new Map());
   const isTransformingRef = useRef(false);
@@ -135,7 +140,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   const [currentlyDraggingShapeId, setCurrentlyDraggingShapeId] = useState<string | null>(null);
   const justFinishedDraggingRef = useRef(false);
   const [isSnapping, setIsSnapping] = useState(false);
-  
+
   // Drag session tracking
   const dragSessionRef = useRef<{ id: string; session: string; oldPoints: number[] } | null>(null);
   const positionSessionRef = useRef<{ id: string; session: string; oldPos: { x: number; y: number } } | null>(null);
@@ -158,19 +163,19 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   } | null>(null);
 
   const pendingNodeResetRef = useRef<{ id: string; node: Konva.Node } | null>(null);
-  
+
   // Track which control point is being dragged (0 = start, 1 = end)
   const setDraggingControlPointIndex = useState<number | null>(null)[1];
-  
+
   // Track callout selection modes (text-only vs whole)
   const [calloutSelectionModes, setCalloutSelectionModes] = useState<Map<string, 'text-only' | 'whole'>>(new Map());
-  
+
   // Track if we're currently dragging a callout
   const [draggingCalloutId, setDraggingCalloutId] = useState<string | null>(null);
-  
+
   // Track callout drag start position for calculating delta
   const calloutDragStart = useRef<Map<string, { x: number; y: number }>>(new Map());
-  
+
   // Snap angles for rotation
   const SNAP_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
 
@@ -243,7 +248,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       return newMap;
     });
   }, [drawingSelectedShapeIds]);
-  
+
   // Reset callout group positions when not dragging
   useEffect(() => {
     if (!draggingCalloutId) {
@@ -261,7 +266,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       });
     }
   }, [draggingCalloutId, shapes]);
-  
+
 
   // Update transformer when selection changes
   useEffect(() => {
@@ -272,7 +277,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (shape?.type === DrawingTool.CALLOUT) {
           // For callouts, check the selection mode
           const mode = calloutSelectionModes.get(id) || 'whole';
-          
+
           if (mode === 'text-only') {
             // Transform only the text box rect
             const rectNode = selectedShapeRefs.current.get(id + '_textbox');
@@ -301,19 +306,19 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       transformerRef.current.getLayer()?.batchDraw();
     }
   }, [drawingSelectedShapeIds, shapes, calloutSelectionModes]);
-  
+
   // Force updates while dragging arrow
   useEffect(() => {
     if (!draggedArrowId) return;
-    
+
     let animationId: number;
     const updateFrame = (): void => {
       forceUpdate({});
       animationId = requestAnimationFrame(updateFrame);
     };
-    
+
     animationId = requestAnimationFrame(updateFrame);
-    
+
     return () => {
       cancelAnimationFrame(animationId);
     };
@@ -327,9 +332,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>): void => {
       // Use Konva's built-in pointer position which handles all transformations
       const pos = stage.getPointerPosition();
-      
+
       if (!pos) return;
-      
+
       // Adjust for layer scale
       const adjustedPos = {
         x: pos.x / zoomLevel,
@@ -337,23 +342,23 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       };
 
       // Check if clicking on empty space (no shape)
-      const clickedOnEmpty = e.target === stage || 
+      const clickedOnEmpty = e.target === stage ||
                            e.target.getLayer() === stage.findOne('Layer') ||
                            e.target.getClassName() === 'Layer' ||
                            e.target.getClassName() === 'Image' ||
                            (!e.target.id() && e.target.getClassName() !== 'Transformer' && e.target.name?.() !== 'measurement-control-point');
-      
+
       // Check if clicking on transformer or its anchors
       const targetName = e.target.name?.() || '';
       const targetClass = e.target.getClassName?.() || '';
-      const isTransformerClick = targetClass === 'Transformer' || 
+      const isTransformerClick = targetClass === 'Transformer' ||
                                 targetName.includes('_anchor') ||
                                 targetName.includes('rotater');
-      
+
       // Check if this is a control point
       const isControlPoint = targetName === 'measurement-control-point' ||
                             (targetClass === 'Circle' && e.target.draggable());
-      
+
       // Handle deselection on empty click for any tool
       if (clickedOnEmpty && !isTransformerClick && !isDraggingControlPoint && !isControlPoint) {
         const shouldMultiSelect = e.evt.shiftKey || e.evt.ctrlKey || e.evt.metaKey;
@@ -381,7 +386,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         }
         return;
       }
-      
+
 
       if (clickedOnEmpty) {
         startDrawing(adjustedPos);
@@ -391,9 +396,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>): void => {
       // Use Konva's built-in pointer position which handles all transformations
       const pos = stage.getPointerPosition();
-      
+
       if (!pos) return;
-      
+
       // Adjust for layer scale
       const adjustedPos = {
         x: pos.x / zoomLevel,
@@ -408,7 +413,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         } else if (!isDraggingControlPoint) {
           handleShapeHover(null);
         }
-        
+
         // Handle drag operations
         if (isDragSelecting && !isDraggingControlPoint) {
           updateDragSelection(adjustedPos, shapes);
@@ -420,25 +425,25 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     };
 
     const handleMouseUp = (e: Konva.KonvaEventObject<MouseEvent>): void => {
-      
+
       // Check if we clicked on transformer anchors or control points
       const target = e.target;
       const targetName = target.name?.() || '';
       const targetClass = target.getClassName?.() || '';
-      const isTransformerClick = targetClass === 'Transformer' || 
+      const isTransformerClick = targetClass === 'Transformer' ||
                                 targetName.includes('_anchor') ||
                                 targetName.includes('rotater');
-      
+
       // Check if this is a control point (they're Circle shapes that are draggable)
-      const isControlPoint = (targetClass === 'Circle' && target.draggable() && 
+      const isControlPoint = (targetClass === 'Circle' && target.draggable() &&
                             target.getAttr('fill') && (target.getAttr('fill') === '#4a90e2' || target.getAttr('fill') === '#e24a4a')) ||
                             targetName === 'measurement-control-point';
-      
+
       if (isTransformerClick || isControlPoint) {
         // Don't process mouseup from transformer handles or control points
         return;
       }
-      
+
       if (activeTool === DrawingTool.SELECT) {
         if (isDragSelecting) {
           endDragSelection();
@@ -459,15 +464,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       } else if (isDrawing) {
         // Use Konva's built-in pointer position which handles all transformations
         const pos = stage.getPointerPosition();
-        
+
         if (!pos) return;
-        
+
         // Adjust for layer scale
         const adjustedPos = {
           x: pos.x / zoomLevel,
           y: pos.y / zoomLevel
         };
-        
+
         // Special handling for IMAGE tool
         if (activeTool === DrawingTool.IMAGE && tempPoints.length >= 2 && onImageToolComplete) {
           const startPoint = tempPoints[0];
@@ -478,17 +483,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             width: Math.abs(endPoint.x - startPoint.x),
             height: Math.abs(endPoint.y - startPoint.y)
           };
-          
+
           // Cancel the drawing operation
           cancelDrawing();
-          
+
           // Notify parent to show file picker
           onImageToolComplete(bounds);
         } else {
           finishDrawing(adjustedPos || undefined, zoomLevel);
         }
       }
-      
+
       // Control point dragging is handled by state machine
     };
 
@@ -496,14 +501,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     stage.on('mousedown touchstart', handleMouseDown);
     stage.on('mousemove touchmove', handleMouseMove);
     stage.on('mouseup touchend', handleMouseUp);
-    
+
     // Keyboard handler for escape and delete
     const handleKeyDown = (e: KeyboardEvent): void => {
       // Don't handle if user is typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
-      
+
       if (e.key === 'Escape') {
         if (isDragSelecting || isDraggingShape) {
           cancelDrag();
@@ -513,7 +518,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         deleteSelected();
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
 
     // Cleanup
@@ -568,7 +573,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   // Render temporary drawing preview
   const renderTempDrawing = (): React.ReactNode => {
     if (!isDrawing || tempPoints.length === 0) return null;
-    
+
     switch (activeTool) {
       case DrawingTool.PEN:
         if (tempPoints.length < 2) return null;
@@ -595,7 +600,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         const rectY = Math.min(rectStart.y, rectEnd.y);
         const rectWidth = Math.abs(rectEnd.x - rectStart.x);
         const rectHeight = Math.abs(rectEnd.y - rectStart.y);
-        
+
         return (
           <Rect
             x={rectX}
@@ -622,7 +627,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         // Center based on the start point and the direction of drag
         const centerX = circleStart.x + (dx > 0 ? radius : -radius);
         const centerY = circleStart.y + (dy > 0 ? radius : -radius);
-        
+
         return (
           <Circle
             x={centerX}
@@ -640,7 +645,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (tempPoints.length < 2) return null;
         const arrowStart = tempPoints[0];
         const arrowEnd = tempPoints[1];
-        
+
         return (
           <Arrow
             points={[arrowStart.x, arrowStart.y, arrowEnd.x, arrowEnd.y]}
@@ -657,22 +662,22 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (tempPoints.length < 2) return null;
         const calloutStart = tempPoints[0]; // Arrow tip (what we're pointing at)
         const calloutEnd = tempPoints[1];   // Where text box will be
-        
+
         // Calculate text box dimensions and position - compensate for zoom
         const textPadding = 10 / zoomLevel;
         const textWidth = 120 / zoomLevel;
         const textHeight = 40 / zoomLevel;
         const bgWidth = textWidth;
         const bgHeight = textHeight;
-        
+
         // Calculate text box position based on drag
         const minDistance = 50 / zoomLevel;
         const calloutDx = calloutEnd.x - calloutStart.x;
         const calloutDy = calloutEnd.y - calloutStart.y;
         const distance = Math.sqrt(calloutDx * calloutDx + calloutDy * calloutDy);
-        
+
         let textX: number, textY: number;
-        
+
         if (distance < minDistance) {
           // If drag is too short, position with minimum distance
           const angle = Math.atan2(calloutDy, calloutDx);
@@ -683,7 +688,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           textX = calloutEnd.x - bgWidth / 2;
           textY = calloutEnd.y - bgHeight / 2;
         }
-        
+
         // Calculate perimeter-based arrow for preview
         const previewTextBox = {
           x: textX,
@@ -694,7 +699,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         const previewPerimeterOffset = calculateInitialPerimeterOffset(previewTextBox, calloutStart);
         const previewBasePoint = perimeterOffsetToPoint(previewTextBox, previewPerimeterOffset);
         const previewControlPoints = getOptimalControlPoints(previewBasePoint, calloutStart, previewTextBox);
-        
+
         return (
           <Group>
             {/* Background rectangle */}
@@ -713,7 +718,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               shadowOffset={{ x: 1, y: 1 }}
               listening={false}
             />
-            
+
             {/* Curved arrow using Path */}
             <Path
               data={getArrowPathString(
@@ -727,7 +732,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               opacity={currentStyle.opacity}
               listening={false}
             />
-            
+
             {/* Arrow head */}
             <RegularPolygon
               sides={3}
@@ -738,7 +743,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               fill={currentStyle.stroke}
               listening={false}
             />
-            
+
             {/* Text preview */}
             <Text
               x={textX + textPadding}
@@ -761,7 +766,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         const starDx = starEnd.x - starStart.x;
         const starDy = starEnd.y - starStart.y;
         const starRadius = Math.sqrt(starDx * starDx + starDy * starDy);
-        
+
         return (
           <Star
             x={starStart.x}
@@ -782,12 +787,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (tempPoints.length < 2) return null;
         const measureStart = tempPoints[0];
         const measureEnd = tempPoints[tempPoints.length - 1];
-        
+
         const measureDx = measureEnd.x - measureStart.x;
         const measureDy = measureEnd.y - measureStart.y;
         const measureDistance = Math.sqrt(measureDx * measureDx + measureDy * measureDy);
         const measureAngle = Math.atan2(measureDy, measureDx) * (180 / Math.PI);
-        
+
         return (
           <Group listening={false}>
             <Line
@@ -820,7 +825,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                       drawingState.measurementCalibration.unit as MeasurementUnit
                     )
                   : `${Math.round(measureDistance)}px`;
-                
+
                 return (
                   <>
                     {/* Background rectangle */}
@@ -848,9 +853,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                         if (node) {
                           const textWidth = node.width();
                           const boxWidth = textWidth + 8;
-                          
+
                           node.x(-textWidth / 2);
-                          
+
                           const parent = node.getParent();
                           if (parent) {
                             const bgRect = parent.findOne('Rect');
@@ -879,7 +884,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         const calibrateDy = calibrateEnd.y - calibrateStart.y;
         const calibrateDistance = Math.sqrt(calibrateDx * calibrateDx + calibrateDy * calibrateDy);
         const calibrateAngle = Math.atan2(calibrateDy, calibrateDx) * (180 / Math.PI);
-        
+
         return (
           <Group>
             <Line
@@ -924,9 +929,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                         if (node) {
                           const textWidth = node.width();
                           const boxWidth = textWidth + 8;
-                          
+
                           node.x(-textWidth / 2);
-                          
+
                           const parent = node.getParent();
                           if (parent) {
                             const bgRect = parent.findOne('Rect');
@@ -951,7 +956,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (tempPoints.length < 2) return null;
         const screenshotStart = tempPoints[0];
         const screenshotEnd = tempPoints[tempPoints.length - 1];
-        
+
         return (
           <Rect
             x={Math.min(screenshotStart.x, screenshotEnd.x)}
@@ -965,7 +970,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             listening={false}
           />
         );
-        
+
       case DrawingTool.IMAGE:
         if (tempPoints.length < 2) return null;
         const imageStart = tempPoints[0];
@@ -974,7 +979,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         const imageY = Math.min(imageStart.y, imageEnd.y);
         const imageWidth = Math.abs(imageEnd.x - imageStart.x);
         const imageHeight = Math.abs(imageEnd.y - imageStart.y);
-        
+
         return (
           <Group>
             <Rect
@@ -1013,7 +1018,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   const renderShape = (shape: Shape): React.ReactNode => {
     const isSelected = drawingSelectedShapeIds.includes(shape.id);
     const isHovered = hoveredShapeId === shape.id && activeTool === DrawingTool.SELECT;
-    
+
     const computeShapeUpdateFromNode = (
       targetShape: Shape,
       node: Konva.Node,
@@ -1189,7 +1194,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         positionSessionRef.current = null;
       }
     };
-    
+
     const commonProps: ShapeCommonProps = {
       id: shape.id,
       opacity: shape.style.opacity,
@@ -1199,7 +1204,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       onClick: (e: Konva.KonvaEventObject<MouseEvent>) => {
         if (activeTool === DrawingTool.SELECT) {
           const isSelected = drawingSelectedShapeIds.includes(shape.id);
-          
+
           // Don't handle click if we're dragging or if drag distance was significant
           const node = e.target;
           const wasDragged = node.attrs._wasDragged;
@@ -1207,7 +1212,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             node.setAttrs({ _wasDragged: false });
             return;
           }
-          
+
           if (!isSelected || e.evt.ctrlKey || e.evt.metaKey) {
             // Use DrawingContext's selection
             if (e.evt.ctrlKey || e.evt.metaKey || e.evt.shiftKey) {
@@ -1235,7 +1240,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       },
       onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => {
         const isSelected = drawingSelectedShapeIds.includes(shape.id);
-        
+
         // Set currently dragging shape
         setCurrentlyDraggingShapeId(shape.id);
         pendingNodeResetRef.current = null;
@@ -1250,8 +1255,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           // Create drag session to prevent bounce
           const arrowShape = shape as ArrowShape;
           const sessionId = `drag-${Date.now()}-${Math.random()}`;
-          dragSessionRef.current = { 
-            id: shape.id, 
+          dragSessionRef.current = {
+            id: shape.id,
             session: sessionId,
             oldPoints: [...arrowShape.points]  // Store the original points
           };
@@ -1278,17 +1283,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             postDragPositionRef.current = null;
           }
         }
-        
+
         // If shape is not selected, select it first
         if (!isSelected) {
           selectShape(shape.id);
         }
-        
+
         const pos = e.target.getStage()?.getPointerPosition();
         if (pos && !isDraggingShape) {
           startDragShape(pos, shapes);
         }
-        
+
         // Store initial positions for multi-drag
         if (drawingSelectedShapeIds.length > 1 || (!isSelected && !e.evt.ctrlKey && !e.evt.metaKey)) {
           e.target.setAttrs({ _dragStartX: e.target.x(), _dragStartY: e.target.y() });
@@ -1296,30 +1301,30 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       },
       onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => {
         const node = e.target;
-        
+
         // Real-time update for callout dragging - arrow "stretches" like a rubber band
         if (shape.type === DrawingTool.CALLOUT && drawingSelectedShapeIds.length === 1) {
           // Force a re-render to update the arrow path based on group position
           forceUpdate({});
         }
-        
+
         // Force update for arrow dragging
         if (shape.type === DrawingTool.ARROW) {
           // The animation frame in useEffect will handle updates
         }
-        
+
         // Mark that drag occurred (to prevent click after drag)
-        const dragDistance = Math.abs(node.x() - (node.attrs._dragStartX || node.x())) + 
+        const dragDistance = Math.abs(node.x() - (node.attrs._dragStartX || node.x())) +
                            Math.abs(node.y() - (node.attrs._dragStartY || node.y()));
         if (dragDistance > 2) {
           node.setAttrs({ _wasDragged: true });
         }
-        
+
         // Handle multi-shape dragging
         if (drawingSelectedShapeIds.length > 1) {
           const dx = node.x() - (node.attrs._dragStartX || node.x());
           const dy = node.y() - (node.attrs._dragStartY || node.y());
-          
+
           // Move other selected shapes by the same amount
           drawingSelectedShapeIds.forEach(id => {
             if (id !== shape.id) {
@@ -1340,7 +1345,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
         // Prevent the event from bubbling to stage
         e.cancelBubble = true;
-        
+
         const isMultiDrag = drawingSelectedShapeIds.length > 1;
 
         if (!isMultiDrag) {
@@ -1352,7 +1357,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         setTimeout(() => {
           justFinishedDraggingRef.current = false;
         }, 100);
-        
+
         // Clear dragging states
         setCurrentlyDraggingShapeId(null);
         if (shape.type === DrawingTool.ARROW) {
@@ -1394,12 +1399,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           if (shape.type === DrawingTool.CALLOUT) {
             const calloutShape = shape as CalloutShape;
             const mode = calloutSelectionModes.get(shape.id) || 'whole';
-            
+
             // Get the drag delta directly from the event target
             const node = e.target;
             const dx = node.x() / zoomLevel;
             const dy = node.y() / zoomLevel;
-            
+
             if (mode === 'whole') {
               // Move entire callout including arrow tip
               updateShape(shape.id, {
@@ -1421,7 +1426,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               // Text-only mode: only move the text box - arrow tip stays anchored
               const newTextX = calloutShape.textX + dx;
               const newTextY = calloutShape.textY + dy;
-              
+
               // Recalculate optimal control points for the new text box position
               const newTextBox = {
                 x: newTextX,
@@ -1429,16 +1434,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 width: calloutShape.textWidth || 120,
                 height: calloutShape.textHeight || 40
               };
-              
+
               const arrowTip = { x: calloutShape.arrowX, y: calloutShape.arrowY };
-              
+
               // Recalculate the optimal perimeter offset for the new text box position
               const newPerimeterOffset = calculateInitialPerimeterOffset(newTextBox, arrowTip);
               const newBasePoint = perimeterOffsetToPoint(newTextBox, newPerimeterOffset);
-              
+
               // Always recalculate control points based on new positions
               const newControlPoints = getOptimalControlPoints(newBasePoint, arrowTip, newTextBox);
-              
+
               updateShape(shape.id, {
                 textX: newTextX,
                 textY: newTextY,
@@ -1450,10 +1455,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 curveControl2Y: newControlPoints.control2.y
               });
             }
-            
+
             // Reset node position to origin
             node.position({ x: 0, y: 0 });
-            
+
             // Clear dragging state
             setDraggingCalloutId(null);
             calloutDragStart.current.delete(shape.id);
@@ -1463,7 +1468,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (isDraggingShape) {
           endDragShape();
         }
-        
+
         // Clean up drag attributes
         e.target.setAttrs({ _dragStartX: undefined, _dragStartY: undefined });
       },
@@ -1507,21 +1512,21 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                   if (!points || points.length < 2) {
                     return { x: 0, y: 0, width: 0, height: 0 };
                   }
-                  
+
                   let minX = Infinity, minY = Infinity;
                   let maxX = -Infinity, maxY = -Infinity;
-                  
+
                   for (let i = 0; i < points.length; i += 2) {
                     minX = Math.min(minX, points[i]);
                     maxX = Math.max(maxX, points[i]);
                     minY = Math.min(minY, points[i + 1]);
                     maxY = Math.max(maxY, points[i + 1]);
                   }
-                  
+
                   // Add padding based on stroke width
                   const strokeWidth = this.strokeWidth() || 1;
                   const padding = strokeWidth * 2;
-                  
+
                   return {
                     x: minX - padding,
                     y: minY - padding,
@@ -1529,7 +1534,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                     height: maxY - minY + padding * 2
                   };
                 };
-                
+
                 selectedShapeRefs.current.set(shape.id, node);
               } else {
                 selectedShapeRefs.current.delete(shape.id);
@@ -1741,14 +1746,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         const textPadding = calloutShape.padding;
         const bgWidth = calloutShape.textWidth || 120;
         const bgHeight = calloutShape.textHeight || 40;
-        
+
         // Get the current group position (for drag preview)
         const groupNode = selectedShapeRefs.current.get(shape.id);
         // Only use group position while actively dragging to prevent glitches
         const isDraggingThis = draggingCalloutId === shape.id;
         const rawGroupPos = groupNode ? groupNode.position() : { x: 0, y: 0 };
         const groupPos = isDraggingThis ? rawGroupPos : { x: 0, y: 0 };
-        
+
         // Calculate arrow base point from perimeter offset
         // Account for group position during drag
         const textBox = {
@@ -1757,19 +1762,19 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           width: bgWidth,
           height: bgHeight
         };
-        
+
         // Recalculate perimeter offset for current position
         const arrowTip = {
           x: calloutShape.arrowX,
           y: calloutShape.arrowY
         };
-        
+
         // Use stored perimeter offset if available, otherwise calculate it
-        const currentPerimeterOffset = calloutShape.perimeterOffset !== undefined 
-          ? calloutShape.perimeterOffset 
+        const currentPerimeterOffset = calloutShape.perimeterOffset !== undefined
+          ? calloutShape.perimeterOffset
           : calculateInitialPerimeterOffset(textBox, arrowTip);
         const basePoint = perimeterOffsetToPoint(textBox, currentPerimeterOffset);
-        
+
         // Use stored control points if available, otherwise calculate optimal ones
         let control1: Point, control2: Point;
         if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined &&
@@ -1781,14 +1786,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           control1 = optimalPoints.control1;
           control2 = optimalPoints.control2;
         }
-        
+
         // Modify commonProps based on selection mode
         const calloutGroupProps = {
           ...commonProps,
           // Group is draggable in both modes (just handles the drag differently)
           draggable: activeTool === DrawingTool.SELECT && !isDraggingControlPoint,
         };
-        
+
         return (
           <Group
             key={shape.id}
@@ -1849,7 +1854,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 }
               }}
             />
-            
+
             {/* Curved arrow using Path with cubic Bezier */}
             {/* Subtract group position to keep arrow tip anchored */}
             <Path
@@ -1877,7 +1882,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 }
               }}
             />
-            
+
             {/* Arrow head - also subtract group position */}
             <RegularPolygon
               sides={3}
@@ -1900,7 +1905,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 }
               }}
             />
-            
+
             {/* Text */}
             <Text
               x={calloutShape.textX + textPadding}
@@ -1952,24 +1957,24 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       case DrawingTool.MEASURE:
         const measureShape = shape as MeasurementLineShape;
         const [x1, y1, x2, y2] = measureShape.points;
-        
+
         // Calculate midpoint for label
         const midX = (x1 + x2) / 2;
         const midY = (y1 + y2) / 2;
-        
+
         // Calculate angle for text rotation
         const dx = x2 - x1;
         const dy = y2 - y1;
         const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-        
+
         // Flip text if it would be upside down
         const textAngle = (angle > 90 || angle < -90) ? angle + 180 : angle;
-        
+
         // Get measurement label
-        const measurementLabel = measureShape.measurement 
+        const measurementLabel = measureShape.measurement
           ? formatMeasurement(measureShape.measurement.value, measureShape.measurement.unit as MeasurementUnit)
           : `${Math.round(Math.sqrt(dx * dx + dy * dy))}px`;
-        
+
         return (
           <Group
             key={shape.id}
@@ -1992,7 +1997,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               dash={measureShape.isCalibration ? [5, 5] : undefined}
               hitStrokeWidth={20} // Make it easier to select the line
             />
-            
+
             {/* End caps */}
             <Line
               points={[x1 - 5 * Math.sin(angle * Math.PI / 180), y1 + 5 * Math.cos(angle * Math.PI / 180),
@@ -2008,7 +2013,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               strokeWidth={measureShape.style.strokeWidth}
               opacity={measureShape.style.opacity}
             />
-            
+
             {/* Measurement label with background */}
             <Group
               x={midX}
@@ -2041,10 +2046,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                   if (node) {
                     const textWidth = node.width();
                     const boxWidth = textWidth + 8;
-                    
+
                     // Center the text horizontally
                     node.x(-textWidth / 2);
-                    
+
                     // Update background rectangle
                     const parent = node.getParent();
                     if (parent) {
@@ -2060,7 +2065,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 }}
               />
             </Group>
-            
+
             {/* Calibration icon */}
             {measureShape.isCalibration && (
               <Text
@@ -2073,7 +2078,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             )}
           </Group>
         );
-        
+
       case DrawingTool.IMAGE:
         const imageShape = shape as ImageShape;
         const monitoredImagePos = monitorPostDragPosition(shape.id, { x: imageShape.x, y: imageShape.y });
@@ -2095,7 +2100,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             }}
           />
         );
-        
+
       default:
         return null;
     }
@@ -2111,20 +2116,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     if (!selectedShape || selectedShape.type !== DrawingTool.MEASURE) {
       return null;
     }
-    
+
     // Don't show control points if we're transforming
     if (isTransforming) {
       return null;
     }
-    
+
     const measureShape = selectedShape as MeasurementLineShape;
     const measureNode = selectedShapeRefs.current.get(measureShape.id);
     if (!measureNode) return null;
-    
+
     // Get the measurement line's current position (changes during drag)
     const nodePos = measureNode.position();
     const [x1, y1, x2, y2] = measureShape.points;
-    
+
     // Add the node's current position to get actual control point positions
     const actualX1 = x1 + nodePos.x;
     const actualY1 = y1 + nodePos.y;
@@ -2134,11 +2139,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
       const pos = e.target.position();
       const newPoints: [number, number, number, number] = [...measureShape.points];
-      
+
       // Subtract the measurement node's position to get relative coordinates
       const relativeX = pos.x - nodePos.x;
       const relativeY = pos.y - nodePos.y;
-      
+
       if (index === 0) {
         // Update start point
         newPoints[0] = relativeX;
@@ -2148,11 +2153,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         newPoints[2] = relativeX;
         newPoints[3] = relativeY;
       }
-      
+
       // If calibrated, update the measurement value
       if (drawingState.measurementCalibration.pixelsPerUnit) {
         const pixelDistance = Math.sqrt(
-          Math.pow(newPoints[2] - newPoints[0], 2) + 
+          Math.pow(newPoints[2] - newPoints[0], 2) +
           Math.pow(newPoints[3] - newPoints[1], 2)
         );
         const value = pixelsToMeasurement(
@@ -2160,7 +2165,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           drawingState.measurementCalibration.pixelsPerUnit,
           drawingState.measurementCalibration.unit as MeasurementUnit
         );
-        
+
         updateShape(measureShape.id, {
           points: newPoints,
           measurement: {
@@ -2174,7 +2179,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         updateShape(measureShape.id, { points: newPoints });
       }
     };
-    
+
     const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
       e.cancelBubble = true;
       setTimeout(() => {
@@ -2194,7 +2199,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           opacity={0.5}
           listening={false}
         />
-        
+
         {/* Start point control (blue) */}
         <Circle
           name="measurement-control-point"
@@ -2232,7 +2237,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             }
           }}
         />
-        
+
         {/* End point control (red) */}
         <Circle
           name="measurement-control-point"
@@ -2276,7 +2281,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
   // Render arrow control points
   const renderArrowControlPoints = (): React.ReactNode => {
-    
+
     if (activeTool !== DrawingTool.SELECT || drawingSelectedShapeIds.length !== 1) {
       return null;
     }
@@ -2285,12 +2290,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     if (!selectedShape || selectedShape.type !== DrawingTool.ARROW) {
       return null;
     }
-    
+
     // Don't show control points if we're transforming
     if (isTransforming) {
       return null;
     }
-    
+
     const arrowShape = selectedShape as ArrowShape;
     let arrowPoints = arrowShape.points;
 
@@ -2316,8 +2321,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     // Get the arrow's current position (changes during drag)
     const nodePos = arrowNode.position();
     const [x1, y1, x2, y2] = arrowPoints;
-    
-    
+
+
     // Add the node's current position to get actual control point positions
     const actualX1 = x1 + nodePos.x;
     const actualY1 = y1 + nodePos.y;
@@ -2327,11 +2332,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
       const pos = e.target.position();
       const newPoints: [number, number, number, number] = [...arrowShape.points];
-      
+
       // Subtract the arrow node's position to get relative coordinates
       const relativeX = pos.x - nodePos.x;
       const relativeY = pos.y - nodePos.y;
-      
+
       if (index === 0) {
         // Update start point
         newPoints[0] = relativeX;
@@ -2341,11 +2346,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         newPoints[2] = relativeX;
         newPoints[3] = relativeY;
       }
-      
+
       // Update the arrow shape immediately for real-time feedback
       updateShape(arrowShape.id, { points: newPoints });
     };
-    
+
     const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
       e.cancelBubble = true;
       setTimeout(() => {
@@ -2365,7 +2370,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           opacity={0.5}
           listening={false}
         />
-        
+
         {/* Tail control point (blue - arrow start) */}
         <Circle
           x={actualX1}
@@ -2406,7 +2411,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             }
           }}
         />
-        
+
         {/* Head control point (red - arrow head where pointer is) */}
         {(() => {
           // Offset from arrow head
@@ -2416,7 +2421,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           const length = Math.sqrt(dx * dx + dy * dy);
           const offsetX = length > 0 ? (dx / length) * offsetDistance : offsetDistance;
           const offsetY = length > 0 ? (dy / length) * offsetDistance : 0;
-          
+
           return (
             <Circle
               x={actualX2 + offsetX}
@@ -2473,14 +2478,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     if (!selectedShape || selectedShape.type !== DrawingTool.CALLOUT) {
       return null;
     }
-    
+
     const calloutShape = selectedShape as CalloutShape;
     const calloutNode = selectedShapeRefs.current.get(calloutShape.id);
     if (!calloutNode) return null;
-    
+
     // Get current position
     const nodePos = calloutNode.position();
-    
+
     // Calculate actual positions
     const textBox = {
       x: calloutShape.textX + nodePos.x,
@@ -2488,18 +2493,18 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       width: calloutShape.textWidth || 120,
       height: calloutShape.textHeight || 40
     };
-    
+
     const arrowTip = {
       x: calloutShape.arrowX,
       y: calloutShape.arrowY
     };
-    
+
     // Get base point from perimeter offset - always use stored value if available
     const basePoint = perimeterOffsetToPoint(textBox, calloutShape.perimeterOffset);
-    
+
     // Get control points - always use stored values if available
     let control1: Point, control2: Point;
-    
+
     if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined &&
         calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
       // Use stored control points
@@ -2518,19 +2523,19 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         {(() => {
           // Calculate offset position to be tangent to arrow tip
           const offsetDistance = 15; // Distance from arrow tip
-          
+
           // Direction from control point to arrow tip (for offset)
           const dx = arrowTip.x - control2.x;
           const dy = arrowTip.y - control2.y;
           const length = Math.sqrt(dx * dx + dy * dy);
-          
+
           // Normalize and offset in the direction of the arrow
           const offsetX = length > 0 ? (dx / length) * offsetDistance : offsetDistance;
           const offsetY = length > 0 ? (dy / length) * offsetDistance : 0;
-          
+
           const handleX = arrowTip.x + offsetX;
           const handleY = arrowTip.y + offsetY;
-          
+
           return (
             <>
               {/* Small line connecting handle to arrow tip */}
@@ -2541,7 +2546,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 opacity={0.3}
                 listening={false}
               />
-              
+
               {/* Control handle */}
               <Circle
                 x={handleX}
@@ -2567,10 +2572,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                   // Calculate offset back to arrow tip
                   const dx = pos.x - handleX;
                   const dy = pos.y - handleY;
-                  
+
                   // Update arrow tip position
                   const newArrowTip = { x: arrowTip.x + dx, y: arrowTip.y + dy };
-                  
+
                   // Only update the arrow position, keep existing control points
                   updateShape(calloutShape.id, {
                     arrowX: newArrowTip.x,
@@ -2599,7 +2604,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             </>
           );
         })()}
-        
+
         {/* Arrow base control point (green) - moves along perimeter */}
         <Circle
           x={basePoint.x}
@@ -2624,15 +2629,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             const pos = e.target.position();
             // Convert position to perimeter offset
             const newOffset = pointToPerimeterOffset(textBox, pos);
-            
+
             // Get new base point position
             const newBasePoint = perimeterOffsetToPoint(textBox, newOffset);
-            
+
             // Only update the perimeter offset
             updateShape(calloutShape.id, {
               perimeterOffset: newOffset
             });
-            
+
             // Snap the control point to the perimeter
             e.target.position(newBasePoint);
           }}
@@ -2655,7 +2660,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             }
           }}
         />
-        
+
         {/* Curve control point 1 (blue - closer to base) */}
         <Circle
           x={control1.x}
@@ -2709,7 +2714,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             }
           }}
         />
-        
+
         {/* Curve control point 2 (purple - closer to tip) */}
         <Circle
           x={control2.x}
@@ -2757,12 +2762,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             }
           }}
         />
-        
+
         {/* Visual guides */}
         {(() => {
           const isValid = isValidControlPoint(basePoint, control1, control2, arrowTip, textBox);
           const guideColor = isValid ? "#3498db" : "#e74c3c";
-          
+
           return (
             <>
               <Line
@@ -2796,16 +2801,110 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     );
   };
 
+  // Generative fill mouse event handlers
+  const handleGenerativeFillMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (!drawingState.generativeFillMode?.isActive) return;
+
+    setIsGenerativeFillDrawing(true);
+
+    const pos = e.target.getStage()?.getPointerPosition();
+    if (!pos) return;
+
+    const { selectionTool } = drawingState.generativeFillMode;
+
+    if (selectionTool === 'brush' || selectionTool === 'lasso') {
+      // Start collecting points
+      dispatch({
+        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
+        points: [{ x: pos.x / zoomLevel, y: pos.y / zoomLevel }],
+      });
+    } else if (selectionTool === 'rectangle') {
+      // Start rectangle
+      dispatch({
+        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
+        rectangle: { x: pos.x / zoomLevel, y: pos.y / zoomLevel, width: 0, height: 0 },
+      });
+    }
+  };
+
+  const handleGenerativeFillMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (!drawingState.generativeFillMode?.isActive || !isGenerativeFillDrawing) return;
+    if (!e.target.getStage()) return;
+
+    const pos = e.target.getStage()!.getPointerPosition();
+    if (!pos) return;
+
+    const { selectionTool, selectionPoints, selectionRectangle } = drawingState.generativeFillMode;
+
+    if ((selectionTool === 'brush' || selectionTool === 'lasso') && selectionPoints.length > 0) {
+      // Add point to path
+      dispatch({
+        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
+        points: [...selectionPoints, { x: pos.x / zoomLevel, y: pos.y / zoomLevel }],
+      });
+    } else if (selectionTool === 'rectangle' && selectionRectangle) {
+      // Update rectangle size
+      dispatch({
+        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
+        rectangle: {
+          ...selectionRectangle,
+          width: (pos.x / zoomLevel) - selectionRectangle.x,
+          height: (pos.y / zoomLevel) - selectionRectangle.y,
+        },
+      });
+    }
+  };
+
+  const handleGenerativeFillMouseUp = () => {
+    setIsGenerativeFillDrawing(false);
+  };
+
   return (
-    <Layer scaleX={zoomLevel} scaleY={zoomLevel}>
+    <Layer
+      scaleX={zoomLevel}
+      scaleY={zoomLevel}
+    >
+      {/* Invisible rect to capture mouse events for generative fill */}
+      {drawingState.generativeFillMode?.isActive && stageRef.current && (
+        <Rect
+          x={0}
+          y={0}
+          width={stageRef.current.width() / zoomLevel}
+          height={stageRef.current.height() / zoomLevel}
+          fill="transparent"
+          listening={true}
+          onMouseDown={handleGenerativeFillMouseDown}
+          onMouseMove={handleGenerativeFillMouseMove}
+          onMouseUp={handleGenerativeFillMouseUp}
+        />
+      )}
+
       {/* Render all shapes in z-order */}
       {getSortedShapes().map(renderShape)}
-      
+
       {/* Render temporary drawing preview - with high z-index */}
       <Group listening={false} zIndex={999999}>
         {renderTempDrawing()}
       </Group>
-      
+
+      {/* Render generative fill selection overlay */}
+      {drawingState.generativeFillMode?.isActive && (
+        <SelectionOverlay
+          selectionTool={drawingState.generativeFillMode.selectionTool}
+          selectionPoints={drawingState.generativeFillMode.selectionPoints}
+          selectionRectangle={drawingState.generativeFillMode.selectionRectangle}
+          brushWidth={drawingState.generativeFillMode.brushWidth}
+        />
+      )}
+
+      {/* Render generative fill result preview */}
+      {drawingState.generativeFillMode?.generatedResult && (
+        <ResultOverlay
+          imageData={drawingState.generativeFillMode.generatedResult.imageData}
+          bounds={drawingState.generativeFillMode.generatedResult.bounds}
+        />
+      )}
+
       {/* Render selection rectangle */}
       {isDragSelecting && selectionBox.visible && (
         <Rect
@@ -2820,7 +2919,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           listening={false}
         />
       )}
-      
+
       {/* Render transformer for selected shapes */}
       {activeTool === DrawingTool.SELECT && drawingSelectedShapeIds.length > 0 && (
         <Transformer
@@ -2858,7 +2957,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               const shape = shapes.find(s => s.id === id);
               return shape?.type === DrawingTool.MEASURE;
             });
-            
+
             // If it's a measurement line, prevent resize (only allow rotation/move)
             if (hasMeasurementLine) {
               return {
@@ -2867,7 +2966,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 height: oldBox.height
               };
             }
-            
+
             // For other shapes, allow resize but enforce minimum size
             return {
               ...newBox,
@@ -2878,7 +2977,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           onTransformStart={(e) => {
             isTransformingRef.current = true;
             startTransform();
-            
+
             // Disable dragging on nodes during transform
             const nodes = transformerRef.current?.nodes();
             if (nodes) {
@@ -2886,7 +2985,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 node.draggable(false);
               });
             }
-            
+
             // Check if shift is pressed and update snaps
             const shiftPressed = (e.evt as KeyboardEvent).shiftKey;
             if (transformerRef.current) {
@@ -2903,7 +3002,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               transformerRef.current.keepRatio(shiftPressed);
             }
             setIsSnapping(shiftPressed);
-            
+
             // Live update during transform
             const nodes = transformerRef.current?.nodes();
             if (nodes) {
@@ -2915,23 +3014,23 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           onTransformEnd={() => {
             // Reset snapping state
             setIsSnapping(false);
-            
+
             // End transform state
             setTimeout(() => {
               isTransformingRef.current = false;
               endTransform();
             }, 50); // Small delay to ensure mouseup is processed first
-            
+
             // Get transformed nodes from the transformer
             const nodes = transformerRef.current?.nodes();
             if (!nodes || nodes.length === 0) return;
-            
+
             // Re-enable dragging on nodes after transform
             nodes.forEach(node => {
               node.draggable(true);
             });
-            
-            
+
+
             const batchUpdates: Array<{ id: string; updates: Partial<Shape> }> = [];
 
             nodes.forEach(node => {
@@ -3091,20 +3190,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 console.error('Error updating shapes:', error);
               }
             }
-            
-            
+
+
             // Force a redraw to ensure the updated dimensions are reflected
             transformerRef.current?.getLayer()?.batchDraw();
           }}
           />
         )}
-        
+
       {/* Render arrow control points */}
       {renderArrowControlPoints()}
-      
+
       {/* Render measurement control points */}
       {renderMeasurementControlPoints()}
-      
+
       {/* Render callout control points */}
       {renderCalloutControlPoints()}
     </Layer>
