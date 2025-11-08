@@ -90,7 +90,7 @@ class GoogleDriveService {
 
   async initialize(accessToken: string): Promise<void> {
     if (this.isInitialized) return;
-    
+
     if (this.initPromise) {
       return this.initPromise;
     }
@@ -104,11 +104,11 @@ class GoogleDriveService {
               apiKey: import.meta.env.VITE_GOOGLE_API_KEY,
               discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
             });
-            
+
             gapi.auth.setToken({
               access_token: accessToken,
             });
-            
+
             this.isInitialized = true;
             resolve();
           } catch (error) {
@@ -117,7 +117,7 @@ class GoogleDriveService {
         });
         return;
       }
-      
+
       const script = document.createElement('script');
       script.src = 'https://apis.google.com/js/api.js';
       script.onload = () => {
@@ -127,11 +127,11 @@ class GoogleDriveService {
               apiKey: import.meta.env.VITE_GOOGLE_API_KEY,
               discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
             });
-            
+
             gapi.auth.setToken({
               access_token: accessToken,
             });
-            
+
             this.isInitialized = true;
             resolve();
           } catch (error) {
@@ -150,7 +150,7 @@ class GoogleDriveService {
     try {
       const fileContent = JSON.stringify(data, null, 2);
       const file = new Blob([fileContent], { type: 'application/json' });
-      
+
       const metadata = {
         name: fileName ? `Markup - ${fileName}` : `Markup - ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
         mimeType: 'application/json'
@@ -208,21 +208,21 @@ class GoogleDriveService {
         fileId: fileId,
         fields: 'name',
       });
-      
+
       // Then get the file content
       const response = await gapi.client.drive.files.get({
         fileId: fileId,
         alt: 'media',
       });
-      
+
       // The response.result might be a string that needs to be parsed
-      const data = typeof response.result === 'string' 
-        ? JSON.parse(response.result) 
+      const data = typeof response.result === 'string'
+        ? JSON.parse(response.result)
         : response.result;
-      
+
       return {
         projectData: data as ProjectData,
-        fileName: metadataResponse.result.name
+        fileName: (metadataResponse.result as { name: string }).name
       };
     } catch (error) {
       console.error('Error loading project:', error);
@@ -263,8 +263,8 @@ class GoogleDriveService {
     });
 
     return {
-      shareLink: fileResponse.result.webViewLink,
-      permissionId: response.result.id,
+      shareLink: (fileResponse.result as { webViewLink: string }).webViewLink,
+      permissionId: (response.result as { id: string }).id,
     };
   }
 
@@ -286,7 +286,7 @@ class GoogleDriveService {
       fields: 'webViewLink',
     });
 
-    return response.result.webViewLink;
+    return (response.result as { webViewLink: string }).webViewLink;
   }
 }
 

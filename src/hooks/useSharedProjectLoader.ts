@@ -80,10 +80,11 @@ export function useSharedProjectLoader({
 
           projectData.shapes.forEach(shape => {
             if ('x' in shape && 'y' in shape && 'width' in shape && 'height' in shape) {
-              minX = Math.min(minX, shape.x);
-              minY = Math.min(minY, shape.y);
-              maxX = Math.max(maxX, shape.x + shape.width);
-              maxY = Math.max(maxY, shape.y + shape.height);
+              const shapeWithDims = shape as { x: number; y: number; width: number; height: number };
+              minX = Math.min(minX, shapeWithDims.x);
+              minY = Math.min(minY, shapeWithDims.y);
+              maxX = Math.max(maxX, shapeWithDims.x + shapeWithDims.width);
+              maxY = Math.max(maxY, shapeWithDims.y + shapeWithDims.height);
             }
           });
 

@@ -16,7 +16,7 @@ interface WorkspaceHeaderProps {
   onDocumentNameChange: (value: string) => void;
   onDocumentNameBlur: () => void;
   onDocumentNameKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
-  nameInputRef: React.RefObject<HTMLInputElement>;
+  nameInputRef: React.RefObject<HTMLInputElement | null>;
   saveStatus: SaveStatus;
   isCanvasInitialized: boolean;
   onCopyCanvas: () => void;

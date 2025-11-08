@@ -13,22 +13,22 @@ export interface InpaintResponse {
 }
 
 // Helper to convert ImageData to a format Google GenAI expects
-function imageDataToBlob(imageData: ImageData): Blob {
+function imageDataToBlob(imageData: ImageData): Promise<Blob> {
   const canvas = document.createElement('canvas');
   canvas.width = imageData.width;
   canvas.height = imageData.height;
   const ctx = canvas.getContext('2d')!;
   ctx.putImageData(imageData, 0, 0);
 
-  return new Promise<Blob>((resolve) => {
+  return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) {
         resolve(blob);
       } else {
-        throw new Error('Failed to convert canvas to blob');
+        reject(new Error('Failed to convert canvas to blob'));
       }
     }, 'image/png');
-  }) as Promise<Blob>;
+  });
 }
 
 /**
@@ -93,8 +93,8 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
         ],
         generationConfig: {
           responseModalities: ['image'],
-        },
-      });
+        } as Record<string, unknown>,
+      } as Parameters<typeof ai.models.generateContent>[0]);
 
       // Extract image from response
       if (result.candidates && result.candidates.length > 0) {

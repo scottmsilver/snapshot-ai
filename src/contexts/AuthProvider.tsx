@@ -149,7 +149,7 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
         if (error.type) {
           console.error('Error type:', error.type);
         }
-        if (error.message) {
+        if ('message' in error && typeof error.message === 'string') {
           console.error('Error message:', error.message);
         }
         console.error('Full error object:', JSON.stringify(error, null, 2));

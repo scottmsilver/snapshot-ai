@@ -57,16 +57,22 @@ export const AnimatedButton: React.FC<AnimatedButtonProps> = ({
     ...style,
   };
 
-  const { 
+  const {
     onClick,
     onMouseEnter,
     onMouseLeave,
     className,
     title,
     type,
-    ...otherProps 
+    onAnimationStart,
+    onAnimationEnd,
+    onAnimationIteration,
+    onDrag,
+    onDragEnd,
+    onDragStart,
+    ...otherProps
   } = props;
-  
+
   return (
     <motion.button
       whileHover={disabled ? {} : { scale: 1.02 }}
@@ -79,7 +85,7 @@ export const AnimatedButton: React.FC<AnimatedButtonProps> = ({
       onMouseLeave={onMouseLeave}
       className={className}
       title={title}
-      type={type}
+      type={type as 'button' | 'submit' | 'reset' | undefined}
       {...otherProps}
     >
       {children}

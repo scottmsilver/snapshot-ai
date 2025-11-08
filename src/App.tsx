@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { motion } from 'framer-motion';
 import Konva from 'konva';
@@ -44,7 +44,7 @@ const CANVAS_PADDING = 100;
 
 type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
 
-function App(): JSX.Element {
+function App(): React.ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -754,8 +754,14 @@ function App(): JSX.Element {
     dispatch({
       type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
     });
-    // Reset to show dialog - we'll use the existing prompt
-    dispatch({ type: DrawingActionType.COMPLETE_GENERATIVE_FILL_SELECTION });
+    // Reset to show dialog - we'll use the existing prompt and preview images
+    if (drawingState.generativeFillMode.previewImages) {
+      dispatch({
+        type: DrawingActionType.COMPLETE_GENERATIVE_FILL_SELECTION,
+        sourceImage: drawingState.generativeFillMode.previewImages.sourceImage,
+        maskImage: drawingState.generativeFillMode.previewImages.maskImage,
+      });
+    }
   }, [dispatch, drawingState.generativeFillMode]);
 
   // Activate generative fill mode when tool is selected

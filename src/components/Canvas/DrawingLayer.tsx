@@ -1163,7 +1163,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         }
       } else {
         const updates = result.updates as Record<string, unknown>;
-        if (('x' in updates || 'y' in updates) && shape.type !== DrawingTool.CALLOUT) {
+        if ('x' in updates || 'y' in updates) {
           const node = e.target;
           pendingNodeResetRef.current = { id: shape.id, node };
         }
@@ -1269,7 +1269,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           calloutDragStart.current.set(shape.id, { x: 0, y: 0 });
         }
 
-        if ('x' in shape && 'y' in shape && shape.type !== DrawingTool.CALLOUT) {
+        if ('x' in shape && 'y' in shape) {
           const sessionId = `pos-${Date.now()}-${Math.random()}`;
           const startX = (shape as { x?: number }).x ?? 0;
           const startY = (shape as { y?: number }).y ?? 0;
@@ -1413,11 +1413,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
                 arrowX: calloutShape.arrowX + dx,
                 arrowY: calloutShape.arrowY + dy,
                 // Update control points if they exist
-                ...(calloutShape.curveControl1X !== undefined && {
+                ...(calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined && {
                   curveControl1X: calloutShape.curveControl1X + dx,
                   curveControl1Y: calloutShape.curveControl1Y + dy,
                 }),
-                ...(calloutShape.curveControl2X !== undefined && {
+                ...(calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined && {
                   curveControl2X: calloutShape.curveControl2X + dx,
                   curveControl2Y: calloutShape.curveControl2Y + dy,
                 })
@@ -1628,7 +1628,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             }
             activeSession.seenNewPoints = true;
           } else if (activeSession.seenNewPoints && pointsMatchOld) {
-            currentPoints = activeSession.newPoints;
+            currentPoints = activeSession.newPoints as [number, number, number, number];
 
             if (!activeSession.reapplied) {
               activeSession.reapplied = true;
@@ -2306,7 +2306,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       postDragSession.seenNewPoints &&
       pointsEqual(arrowShape.points, postDragSession.oldPoints)
     ) {
-      arrowPoints = postDragSession.newPoints;
+      arrowPoints = postDragSession.newPoints as [number, number, number, number];
     }
 
     // Don't show control points if the arrow itself is being dragged
@@ -3102,9 +3102,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               node.scaleX(1);
               node.scaleY(1);
 
-              const updates: Partial<Shape> = {};
+              const updates: Partial<Record<string, unknown>> = {};
 
-              if (Math.abs(rotation - (shape.rotation || 0)) > 0.01) {
+              if (Math.abs(rotation - (('rotation' in shape ? shape.rotation : 0) || 0)) > 0.01) {
                 updates.rotation = rotation;
               }
 

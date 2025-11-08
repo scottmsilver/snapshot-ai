@@ -20,6 +20,6 @@ npm run build
 
 # Deploy to Vercel
 echo "🌐 Deploying to Vercel..."
-vercel --prod
+vercel --prod --yes
 
 echo "✅ Deployment complete!"
