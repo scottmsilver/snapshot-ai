@@ -50,3 +50,6 @@ build
 .vitest
 *.test.js
 *.spec.js
+
+# Heavy artifacts
+evaluation-results
