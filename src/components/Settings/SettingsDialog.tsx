@@ -298,7 +298,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
                         }}
                       >
                         <option value="imagen">Imagen 3.0 (Google Cloud Vertex AI) - Default</option>
-                        <option value="gemini">Gemini 2.5 Flash (Google AI Studio)</option>
+                        <option value="gemini">Gemini 3 Pro (Google AI Studio)</option>
                       </select>
                       <p
                         style={{
@@ -345,7 +345,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
                           e.currentTarget.style.borderColor = '#ddd';
                         }}
                       >
-                        <option value="gemini">Gemini 2.5 Flash (Google AI Studio) - Default</option>
+                        <option value="gemini">Gemini 3 Pro (Google AI Studio) - Default</option>
                         <option value="imagen">Imagen 3.0 (Google Cloud Vertex AI)</option>
                       </select>
                       <p
