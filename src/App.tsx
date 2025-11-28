@@ -39,12 +39,19 @@ import { SettingsDialog } from '@/components/Settings';
 import { createGenerativeService } from '@/services/generativeApi';
 import { settingsManager } from '@/services/settingsManager';
 import { generateBrushMask, generateRectangleMask, generateLassoMask } from '@/utils/maskRendering';
+import { InlineTextPlayground } from '@/components/Test/InlineTextPlayground';
 
 const CANVAS_PADDING = 100;
 
 type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
 
 function App(): React.ReactElement {
+  // Test Playground Route
+  const isTestMode = new URLSearchParams(window.location.search).has('test');
+  if (isTestMode) {
+    return <InlineTextPlayground />;
+  }
+
   const stageRef = useRef<Konva.Stage | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -524,12 +531,51 @@ function App(): React.ReactElement {
     if (!stageRef.current || !drawingState.generativeFillMode) return;
 
     try {
-      // Get canvas as ImageData
       const stage = stageRef.current;
+      const { selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
+
+      // Find the DrawingLayer which contains both shapes AND SelectionOverlay
+            // Find the DrawingLayer which contains both shapes AND SelectionOverlay
+      const drawingLayer = stage.findOne('.drawingLayer') as Konva.Layer;
+      if (!drawingLayer) {
+        console.error('Could not find drawing layer');
+        return;
+      }
+
+      // Find all Shape nodes (Line, Rect) that have blue selection fill
+      // Temporarily hide them by setting visible=false
+      const overlayNodes = drawingLayer.find((node: any) => {
+        // Find nodes with the blue selection color (rgba(74, 144, 226, ...))
+        const fill = node.fill?.();
+        const stroke = node.stroke?.();
+        return (
+          (typeof fill === 'string' && fill.includes('74, 144, 226')) ||
+          (typeof stroke === 'string' && stroke.includes('74, 144, 226'))
+        );
+      });
+
+      // Hide overlay nodes temporarily
+      const previousVisibility = overlayNodes.map((node: any) => node.visible());
+      overlayNodes.forEach((node: any) => node.visible(false));
+
+      // Get clean canvas WITHOUT the selection overlay
       const canvas = stage.toCanvas();
+      
+      console.log('🔍 DEBUG: Captured canvas size:', canvas.width, 'x', canvas.height);
+      
+      // Verify canvas has content (simple check of center pixel)
+      const checkCtx = canvas.getContext('2d');
+      if (checkCtx) {
+          const pixel = checkCtx.getImageData(canvas.width / 2, canvas.height / 2, 1, 1).data;
+          console.log(`🔍 DEBUG: Center pixel color: rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3]})`);
+      } else {
+          console.error('❌ ERROR: Failed to get context from captured canvas');
+      }
+
+      // Restore overlay visibility immediately
+      overlayNodes.forEach((node: any, index: number) => node.visible(previousVisibility[index]));
 
       // Generate mask based on selection tool
-      const { selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
       let maskExport;
 
       if (selectionTool === GenerativeFillSelectionTool.BRUSH) {
@@ -585,13 +631,40 @@ function App(): React.ReactElement {
       dispatch({ type: DrawingActionType.START_GENERATIVE_FILL_GENERATION });
 
       try {
-        // Get canvas as ImageData
         const stage = stageRef.current;
+        const { mode, selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
+
+        // Find the DrawingLayer and temporarily hide selection overlay nodes
+              // Find the DrawingLayer which contains both shapes AND SelectionOverlay
+      const drawingLayer = stage.findOne('.drawingLayer') as Konva.Layer;
+        let overlayNodes: any[] = [];
+        let previousVisibility: boolean[] = [];
+
+        if (drawingLayer) {
+          // Find all Shape nodes (Line, Rect) that have blue selection fill
+          overlayNodes = drawingLayer.find((node: any) => {
+            const fill = node.fill?.();
+            const stroke = node.stroke?.();
+            return (
+              (typeof fill === 'string' && fill.includes('74, 144, 226')) ||
+              (typeof stroke === 'string' && stroke.includes('74, 144, 226'))
+            );
+          });
+
+          // Hide overlay nodes temporarily
+          previousVisibility = overlayNodes.map((node: any) => node.visible());
+          overlayNodes.forEach((node: any) => node.visible(false));
+        }
+
+        // Get clean canvas WITHOUT the selection overlay
         const canvas = stage.toCanvas();
         const ctx = canvas.getContext('2d')!;
         const sourceImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-        const { mode, selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
+        // Restore overlay visibility immediately
+        if (overlayNodes.length > 0) {
+          overlayNodes.forEach((node: any, index: number) => node.visible(previousVisibility[index]));
+        }
 
         // Generate mask only if in inpainting mode
         let maskExport;
@@ -630,8 +703,8 @@ function App(): React.ReactElement {
           }
         }
 
-        // Default to imagen for inpainting, gemini for text-only
-        const selectedInpaintingModel = (inpaintingModel || 'imagen') as 'gemini' | 'imagen';
+        // Default to gemini for inpainting, gemini for text-only
+        const selectedInpaintingModel = (inpaintingModel || 'gemini') as 'gemini' | 'imagen';
         const selectedTextOnlyModel = (textOnlyModel || 'gemini') as 'gemini' | 'imagen';
 
         // Determine which model to validate based on mode
@@ -913,23 +986,23 @@ function App(): React.ReactElement {
 
         {/* Generative Fill Toolbar - only show in inpainting mode when not showing dialog or generating */}
         {drawingState.generativeFillMode?.isActive &&
-         drawingState.generativeFillMode.mode === 'inpainting' &&
-         !drawingState.generativeFillMode.showPromptDialog &&
-         !drawingState.generativeFillMode.isGenerating && (
-          <GenerativeFillToolbar
-            selectedTool={drawingState.generativeFillMode.selectionTool || GenerativeFillSelectionTool.BRUSH}
-            brushWidth={drawingState.generativeFillMode.brushWidth}
-            hasSelection={
-              drawingState.generativeFillMode.selectionPoints.length > 0 ||
-              drawingState.generativeFillMode.selectionRectangle !== null
-            }
-            onSelectTool={handleGenerativeFillSelectTool}
-            onBrushWidthChange={handleGenerativeFillBrushWidthChange}
-            onComplete={handleGenerativeFillComplete}
-            onCancel={handleGenerativeFillCancel}
-            onSkipToConversational={handleSkipToConversational}
-          />
-        )}
+          drawingState.generativeFillMode.mode === 'inpainting' &&
+          !drawingState.generativeFillMode.showPromptDialog &&
+          !drawingState.generativeFillMode.isGenerating && (
+            <GenerativeFillToolbar
+              selectedTool={drawingState.generativeFillMode.selectionTool || GenerativeFillSelectionTool.BRUSH}
+              brushWidth={drawingState.generativeFillMode.brushWidth}
+              hasSelection={
+                drawingState.generativeFillMode.selectionPoints.length > 0 ||
+                drawingState.generativeFillMode.selectionRectangle !== null
+              }
+              onSelectTool={handleGenerativeFillSelectTool}
+              onBrushWidthChange={handleGenerativeFillBrushWidthChange}
+              onComplete={handleGenerativeFillComplete}
+              onCancel={handleGenerativeFillCancel}
+              onSkipToConversational={handleSkipToConversational}
+            />
+          )}
 
         {/* Generative Fill Dialog */}
         {drawingState.generativeFillMode && (

@@ -81,7 +81,7 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
 
     try {
       const result = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3-pro-image-preview',
         contents: [
           {
             role: 'user',
@@ -242,7 +242,208 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
   }
 
   /**
-   * Perform inpainting using Gemini 2.5 Flash image editing
+   * Show debug dialog with Gemini interaction details
+   */
+  private showDebugDialog(): void {
+    const debug = (window as any).geminiDebug;
+    if (!debug) return;
+
+    // Create dialog
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      max-width: 90vw;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 10000;
+    `;
+
+    dialog.innerHTML = `
+      <h2 style="margin-top: 0;">Gemini Debug Info</h2>
+
+      <h3>Step 1: Describe Selected Area</h3>
+      <div style="margin-bottom: 20px;">
+        <p><strong>Image sent:</strong></p>
+        <img src="${debug.step1MarkedImage}" style="max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px;" />
+        <p><strong>Prompt:</strong></p>
+        <pre style="background: #f5f5f5; padding: 10px; border-radius: 4px; white-space: pre-wrap;">${debug.step1Prompt}</pre>
+        <p><strong>Gemini's Response:</strong></p>
+        <pre style="background: #e8f4ff; padding: 10px; border-radius: 4px; white-space: pre-wrap;">${debug.step1Response}</pre>
+      </div>
+
+      <h3>Step 2: Edit Image</h3>
+      <div style="margin-bottom: 20px;">
+        <p><strong>Image sent:</strong></p>
+        <img src="${debug.step2MarkedImage}" style="max-width: 100%; border: 1px solid #ddd; margin-bottom: 10px;" />
+        <p><strong>Prompt:</strong></p>
+        <pre style="background: #f5f5f5; padding: 10px; border-radius: 4px; white-space: pre-wrap;">${debug.step2Prompt}</pre>
+        <p><strong>Gemini's Raw Output:</strong></p>
+        <img src="${debug.step2RawResponse}" style="max-width: 100%; border: 1px solid #ddd;" />
+      </div>
+
+      <button id="closeDebugDialog" style="
+        padding: 10px 20px;
+        background: #4a90e2;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+      ">Close</button>
+    `;
+
+    // Add backdrop
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 9999;
+    `;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(dialog);
+
+    // Close handler
+    const closeBtn = dialog.querySelector('#closeDebugDialog');
+    const close = () => {
+      document.body.removeChild(dialog);
+      document.body.removeChild(backdrop);
+    };
+    closeBtn?.addEventListener('click', close);
+    backdrop.addEventListener('click', close);
+  }
+
+  /**
+   * Create a marked version of the source image with a red outline around the masked area
+   */
+  private createMarkedImage(sourceImage: ImageData, maskImage: ImageData): string {
+    // Create canvas with source image
+    const canvas = document.createElement('canvas');
+    canvas.width = sourceImage.width;
+    canvas.height = sourceImage.height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.putImageData(sourceImage, 0, 0);
+
+    // Draw red outline where mask is white
+    const maskData = maskImage.data;
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 3;
+
+    // Find contours of the mask and draw outline
+    // Simple approach: draw red pixels around white mask pixels
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = maskImage.width;
+    tempCanvas.height = maskImage.height;
+    const tempCtx = tempCanvas.getContext('2d')!;
+    tempCtx.putImageData(maskImage, 0, 0);
+
+    // Use the mask to create an outline
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Draw thick red border around white areas
+    for (let y = 0; y < maskImage.height; y++) {
+      for (let x = 0; x < maskImage.width; x++) {
+        const idx = (y * maskImage.width + x) * 4;
+        if (maskData[idx] > 128) { // White pixel in mask
+          // Check if it's an edge pixel
+          const isEdge =
+            x === 0 || x === maskImage.width - 1 ||
+            y === 0 || y === maskImage.height - 1 ||
+            (maskData[idx - 4] <= 128) || // left
+            (maskData[idx + 4] <= 128) || // right
+            (maskData[idx - maskImage.width * 4] <= 128) || // top
+            (maskData[idx + maskImage.width * 4] <= 128); // bottom
+
+          if (isEdge) {
+            ctx.fillStyle = 'red';
+            ctx.fillRect(x - 1, y - 1, 3, 3);
+          }
+        }
+      }
+    }
+    ctx.restore();
+
+    const dataUrl = canvas.toDataURL('image/png');
+    if (!dataUrl || dataUrl.length < 100) {
+        console.error('❌ ERROR: createMarkedImage produced invalid data URL');
+    }
+    return dataUrl;
+  }
+
+  /**
+   * Use Gemini to describe the selected area identified by the red marker
+   * This helps Gemini understand which specific object/area to edit
+   */
+  private async describeSelectedArea(
+    sourceImage: ImageData,
+    maskImage: ImageData
+  ): Promise<string> {
+    const ai = new GoogleGenAI({ apiKey: this.apiKey });
+
+    // Create marked image with red outline
+    const markedImageBase64 = this.createMarkedImage(sourceImage, maskImage);
+    const markedBase64Data = markedImageBase64.split(',')[1];
+
+    if (!markedBase64Data) {
+        console.error('❌ ERROR: Failed to extract base64 from marked image');
+        return 'the selected area';
+    }
+
+    console.log('🔍 DEBUG: Describing selected area with marker...');
+
+    try {
+      const result = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: 'IMAGE WITH RED MARKER:' },
+              {
+                inlineData: {
+                  mimeType: 'image/png',
+                  data: markedBase64Data,
+                },
+              },
+              { text: 'This image contains a red outline marking a specific area.\n\nYour task: Identify and describe what is inside the red outline in great detail, relative to everything else in the image.\n\nIMPORTANT: In your description, DO NOT mention the red outline itself. Describe ONLY the actual content (objects, areas) that are marked, as if the red outline doesn\'t exist. The red outline is just a tool to help you identify what to describe.\n\nInclude:\n- What specific object or area is marked\n- Its precise location relative to other elements in the image (e.g., "the third window from the left", "the door in the bottom right corner", "the central building among five buildings")\n- Distinctive visual features that differentiate it from similar objects nearby\n- Spatial relationships to surrounding elements\n\nBe extremely specific and detailed so this object can be unambiguously identified in the original image WITHOUT needing to see the red outline.' },
+            ],
+          },
+        ],
+      } as Parameters<typeof ai.models.generateContent>[0]);
+
+      const description = result.text || '';
+      console.log('🔍 DEBUG: Area description:', description);
+
+      // Store for debug dialog
+      (window as any).geminiDebug = (window as any).geminiDebug || {};
+      (window as any).geminiDebug.step1MarkedImage = markedImageBase64;
+      (window as any).geminiDebug.step1Prompt = 'This image contains a red outline marking a specific area.\n\nYour task: Identify and describe what is inside the red outline in great detail, relative to everything else in the image.\n\nIMPORTANT: In your description, DO NOT mention the red outline itself. Describe ONLY the actual content (objects, areas) that are marked, as if the red outline doesn\'t exist. The red outline is just a tool to help you identify what to describe.\n\nInclude:\n- What specific object or area is marked\n- Its precise location relative to other elements in the image\n- Distinctive visual features that differentiate it from similar objects nearby\n- Spatial relationships to surrounding elements\n\nBe extremely specific and detailed so this object can be unambiguously identified in the original image WITHOUT needing to see the red outline.';
+      (window as any).geminiDebug.step1Response = description;
+
+      return description;
+    } catch (error) {
+      console.error('Failed to describe selected area:', error);
+      // Fall back to generic description
+      return 'the selected area';
+    }
+  }
+
+  /**
+   * Perform inpainting using Gemini 2.5 Flash image editing with two-step approach:
+   * 1. First describe the selected area using the mask
+   * 2. Then apply the user's edit instruction to that specific area
    */
   async inpaintWithGemini(
     sourceImage: ImageData,
@@ -253,12 +454,29 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
 
     // Convert ImageData to base64
     const sourceBase64 = imageDataToBase64(sourceImage);
+    
+    console.log('🔍 DEBUG: sourceBase64 length:', sourceBase64.length);
+    console.log('🔍 DEBUG: sourceBase64 prefix:', sourceBase64.substring(0, 50));
+    
+    const base64Data = sourceBase64.split(',')[1];
+    if (!base64Data) {
+        console.error('❌ ERROR: Failed to extract base64 data from source image data URL');
+        throw new Error('Failed to process image data');
+    }
+    console.log('🔍 DEBUG: Extracted base64 data length:', base64Data.length);
+
     const maskBase64 = imageDataToBase64(maskImage);
 
     // DEBUG: Log what we're sending to Gemini
     console.log('🔍 DEBUG: Source image size:', sourceImage.width, 'x', sourceImage.height);
     console.log('🔍 DEBUG: Mask image size:', maskImage.width, 'x', maskImage.height);
-    console.log('🔍 DEBUG: Prompt:', prompt);
+    console.log('🔍 DEBUG: User prompt:', prompt);
+
+    // Step 1: Describe the selected area
+    const areaDescription = await this.describeSelectedArea(sourceImage, maskImage);
+
+    // Create marked image for step 2
+    const markedImageBase64 = this.createMarkedImage(sourceImage, maskImage);
 
     // Create data URLs for debugging
     const sourceCanvas = document.createElement('canvas');
@@ -282,34 +500,40 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
     (window as any).debugMaskImage = maskDebugUrl;
     console.log('🔍 DEBUG: Access images via window.debugSourceImage and window.debugMaskImage');
 
-    // Build the edit instruction prompt for inpainting
-    const editPrompt = `${prompt}
+    // Step 2: Build the edit instruction using the area description
+    // This matches the successful 2step-clean-describe strategy from evaluation
+    const editPrompt = `In this image, there is: ${areaDescription}
 
-Make SIGNIFICANT, VISIBLE changes to create the requested modification. The result should look clearly different from the original in the edited area.`;
+Apply this change to ONLY that specific area described above: ${prompt}
 
+CRITICAL RULES:
+1. Make the requested change very visible and significant to the area I described
+2. DO NOT change, modify, or alter any other parts of the image
+3. ONLY modify other elements if they would naturally interact with or be affected by the requested change
+4. Preserve all unrelated elements exactly as they appear in the original image
+
+Return the edited image.`;
+
+    console.log('🔍 DEBUG: Step 2 - Edit prompt being sent to Gemini:');
+    console.log('═══════════════════════════════════════════════════');
+    console.log(editPrompt);
+    console.log('═══════════════════════════════════════════════════');
 
     try {
 
       // Use Gemini 2.5 Flash with image editing
-      // Send source image first, then mask, then repeat the instruction
+      // Step 2: Send clean original image (not marked) with description-based instruction
       const result = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3-pro-image-preview',
         contents: [
           {
             role: 'user',
             parts: [
-              { text: 'SOURCE IMAGE:' },
+              { text: 'ORIGINAL IMAGE:' },
               {
                 inlineData: {
                   mimeType: 'image/png',
-                  data: sourceBase64.split(',')[1], // Remove data URL prefix
-                },
-              },
-              { text: 'BINARY MASK (WHITE=edit, BLACK=keep):' },
-              {
-                inlineData: {
-                  mimeType: 'image/png',
-                  data: maskBase64.split(',')[1], // Remove data URL prefix
+                  data: sourceBase64.split(',')[1], // Send clean original image
                 },
               },
               { text: editPrompt },
@@ -343,6 +567,14 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
               console.log('🔍 DEBUG: Gemini raw output data URL (right-click to save):', geminiDebugUrl.substring(0, 100) + '...');
               (window as any).debugGeminiOutput = geminiDebugUrl;
               console.log('🔍 DEBUG: Access Gemini output via window.debugGeminiOutput');
+
+              // Store for debug dialog
+              (window as any).geminiDebug.step2MarkedImage = sourceDebugUrl; // Now using clean original image
+              (window as any).geminiDebug.step2Prompt = editPrompt;
+              (window as any).geminiDebug.step2RawResponse = geminiDebugUrl;
+
+              // Show debug dialog
+              this.showDebugDialog();
 
               // Gemini may return a slightly different size - resize to match source
               if (resultImageData.width !== sourceImage.width || resultImageData.height !== sourceImage.height) {

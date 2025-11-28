@@ -2861,6 +2861,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
   return (
     <Layer
+      name="drawingLayer"
       scaleX={zoomLevel}
       scaleY={zoomLevel}
     >
