@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Upload } from 'lucide-react';
 import type { FileType, UploadError } from '@/types/canvas';
+import { isHeicFile, convertHeicToJpeg } from '@/utils/heicConverter';
 
 interface ImageUploaderProps {
   onImageUpload: (file: File) => void;
@@ -9,7 +10,7 @@ interface ImageUploaderProps {
   maxSizeMB?: number;
 }
 
-const ACCEPTED_IMAGE_TYPES: FileType[] = ['image/jpeg', 'image/png', 'image/jpg'];
+const ACCEPTED_IMAGE_TYPES: FileType[] = ['image/jpeg', 'image/png', 'image/jpg', 'image/heic', 'image/heif'];
 const ACCEPTED_PDF_TYPES = ['application/pdf'];
 const ACCEPTED_TYPES = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_PDF_TYPES];
 
@@ -21,15 +22,18 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<UploadError | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
 
   const validateFile = useCallback((file: File): UploadError | null => {
     // Check file type
     const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type as FileType);
     const isPDF = ACCEPTED_PDF_TYPES.includes(file.type);
+    // HEIC files from iPhone often have empty/incorrect MIME type, so check by extension too
+    const isHeic = isHeicFile(file);
     
-    if (!isImage && !isPDF) {
+    if (!isImage && !isPDF && !isHeic) {
       return { 
-        message: 'Please upload only JPG, PNG images or PDF files', 
+        message: 'Please upload only JPG, PNG, HEIC images or PDF files', 
         type: 'type' 
       };
     }
@@ -46,7 +50,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     return null;
   }, [maxSizeMB]);
 
-  const handleFile = useCallback((file: File): void => {
+  const handleFile = useCallback(async (file: File): Promise<void> => {
     const error = validateFile(file);
     if (error) {
       setError(error);
@@ -63,6 +67,23 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         setError({ 
           message: 'PDF support is not enabled', 
           type: 'type' 
+        });
+      }
+      return;
+    }
+    
+    // Check if it's a HEIC file and convert to JPEG
+    if (isHeicFile(file)) {
+      try {
+        setIsConverting(true);
+        const convertedFile = await convertHeicToJpeg(file);
+        setIsConverting(false);
+        onImageUpload(convertedFile);
+      } catch (err) {
+        setIsConverting(false);
+        setError({
+          message: err instanceof Error ? err.message : 'Failed to convert HEIC image',
+          type: 'type'
         });
       }
     } else {
@@ -290,7 +311,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
           color: '#999',
           fontSize: '0.875rem'
         }}>
-          JPG, PNG or PDF • Max {maxSizeMB}MB
+          JPG, PNG, HEIC or PDF • Max {maxSizeMB}MB
         </p>
 
         <p style={{
@@ -316,10 +337,35 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         </div>
       )}
 
+      {isConverting && (
+        <div style={{
+          marginTop: '1rem',
+          padding: '0.75rem 1rem',
+          backgroundColor: '#e3f2fd',
+          border: '1px solid #90caf9',
+          borderRadius: '4px',
+          color: '#1976d2',
+          fontSize: '0.875rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <div style={{
+            width: '16px',
+            height: '16px',
+            border: '2px solid #1976d2',
+            borderTopColor: 'transparent',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }} />
+          Converting HEIC image...
+        </div>
+      )}
+
       <input
         ref={fileInputRef}
         type="file"
-        accept={ACCEPTED_TYPES.join(',')}
+        accept={`${ACCEPTED_TYPES.join(',')},.heic,.heif`}
         onChange={handleFileChange}
         style={{ display: 'none' }}
       />

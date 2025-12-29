@@ -11,7 +11,7 @@ export interface CanvasSize {
   height: number;
 }
 
-export type FileType = 'image/jpeg' | 'image/png' | 'image/jpg';
+export type FileType = 'image/jpeg' | 'image/png' | 'image/jpg' | 'image/heic' | 'image/heif';
 
 export interface UploadError {
   message: string;
