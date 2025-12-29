@@ -14,6 +14,7 @@ import { useHistorySync } from '@/hooks/useHistorySync';
 import { useClipboardPaste } from '@/hooks/useClipboardPaste';
 import { useMeasurementEffects } from '@/hooks/useMeasurementEffects';
 import { useFileImports } from '@/hooks/useFileImports';
+import { useAIProgress } from '@/contexts/AIProgressContext';
 import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils';
 import {
   DrawingTool,
@@ -35,8 +36,10 @@ import { WorkspaceDialogs } from '@/components/App/WorkspaceDialogs';
 import { GenerativeFillToolbar } from '@/components/GenerativeFill/GenerativeFillToolbar';
 import { GenerativeFillDialog } from '@/components/GenerativeFill/GenerativeFillDialog';
 import { GenerativeFillResultToolbar } from '@/components/GenerativeFill/GenerativeFillResultToolbar';
+import { AIProgressPanel } from '@/components/GenerativeFill/AIProgressPanel';
 import { SettingsDialog } from '@/components/Settings';
 import { createGenerativeService } from '@/services/generativeApi';
+import { AgenticPainterService } from '@/services/agenticService';
 import { settingsManager } from '@/services/settingsManager';
 import { generateBrushMask, generateRectangleMask, generateLassoMask } from '@/utils/maskRendering';
 import { InlineTextPlayground } from '@/components/Test/InlineTextPlayground';
@@ -74,6 +77,7 @@ function App(): React.ReactElement {
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
   const authContext = useOptionalAuth();
+  const { updateProgress } = useAIProgress();
   const {
     shapes,
     activeTool,
@@ -535,7 +539,7 @@ function App(): React.ReactElement {
       const { selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
 
       // Find the DrawingLayer which contains both shapes AND SelectionOverlay
-            // Find the DrawingLayer which contains both shapes AND SelectionOverlay
+      // Find the DrawingLayer which contains both shapes AND SelectionOverlay
       const drawingLayer = stage.findOne('.drawingLayer') as Konva.Layer;
       if (!drawingLayer) {
         console.error('Could not find drawing layer');
@@ -560,16 +564,16 @@ function App(): React.ReactElement {
 
       // Get clean canvas WITHOUT the selection overlay
       const canvas = stage.toCanvas();
-      
+
       console.log('🔍 DEBUG: Captured canvas size:', canvas.width, 'x', canvas.height);
-      
+
       // Verify canvas has content (simple check of center pixel)
       const checkCtx = canvas.getContext('2d');
       if (checkCtx) {
-          const pixel = checkCtx.getImageData(canvas.width / 2, canvas.height / 2, 1, 1).data;
-          console.log(`🔍 DEBUG: Center pixel color: rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3]})`);
+        const pixel = checkCtx.getImageData(canvas.width / 2, canvas.height / 2, 1, 1).data;
+        console.log(`🔍 DEBUG: Center pixel color: rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3]})`);
       } else {
-          console.error('❌ ERROR: Failed to get context from captured canvas');
+        console.error('❌ ERROR: Failed to get context from captured canvas');
       }
 
       // Restore overlay visibility immediately
@@ -635,8 +639,8 @@ function App(): React.ReactElement {
         const { mode, selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
 
         // Find the DrawingLayer and temporarily hide selection overlay nodes
-              // Find the DrawingLayer which contains both shapes AND SelectionOverlay
-      const drawingLayer = stage.findOne('.drawingLayer') as Konva.Layer;
+        // Find the DrawingLayer which contains both shapes AND SelectionOverlay
+        const drawingLayer = stage.findOne('.drawingLayer') as Konva.Layer;
         let overlayNodes: any[] = [];
         let previousVisibility: boolean[] = [];
 
@@ -736,18 +740,25 @@ function App(): React.ReactElement {
         const apiKeyOrToken = modelToValidate === 'imagen' ? oauthAccessToken : geminiApiKey;
 
         // Call API service with both model preferences
-        const service = createGenerativeService(
-          apiKeyOrToken || undefined,
-          selectedInpaintingModel, // Legacy parameter
-          googleCloudProjectId || undefined,
-          selectedInpaintingModel,
-          selectedTextOnlyModel
+        // Resolve Gemini API Key for the Agent (and Nano Banana tool)
+        const effectiveGeminiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
+
+        // Create specific service for the Nano Banana tool (always Gemini)
+        const nanoBananaService = createGenerativeService(
+          effectiveGeminiKey,
+          'gemini',
+          undefined,
+          'gemini',
+          'gemini'
         );
+
+        // Use Agentic Service for the interaction
+        const agenticService = new AgenticPainterService(effectiveGeminiKey, nanoBananaService);
 
         // Call edit() method which handles both inpainting and text-only modes
         const resultImageData = mode === 'inpainting' && maskExport
-          ? await service.edit(sourceImageData, prompt, maskExport.maskImageData)
-          : await service.edit(sourceImageData, prompt);
+          ? await agenticService.edit(sourceImageData, prompt, maskExport.maskImageData, updateProgress)
+          : await agenticService.edit(sourceImageData, prompt, undefined, updateProgress);
 
         // Convert result to base64
         const resultCanvas = document.createElement('canvas');
@@ -801,7 +812,7 @@ function App(): React.ReactElement {
         dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
       }
     },
-    [dispatch, drawingState.generativeFillMode, stageRef, shapes, addShape, selectShape, authContext]
+    [dispatch, drawingState.generativeFillMode, stageRef, shapes, addShape, selectShape, authContext, updateProgress]
   );
 
   const handleGenerativeFillDialogCancel = useCallback(() => {
@@ -1072,6 +1083,9 @@ function App(): React.ReactElement {
             </style>
           </div>
         )}
+
+        {/* AI Console - persistent log of AI operations */}
+        <AIProgressPanel />
 
       </motion.div>
     </AuthGate>
