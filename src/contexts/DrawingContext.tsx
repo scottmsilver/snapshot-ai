@@ -8,6 +8,8 @@ import {
   type MeasurementLineShape,
   type Point,
   type Rectangle,
+  type ReferencePoint,
+  type AiMoveState,
   LayerOperation,
   GenerativeFillSelectionTool,
   getNextZIndex,
@@ -71,6 +73,12 @@ export enum DrawingActionType {
   COMPLETE_GENERATIVE_FILL_GENERATION = 'COMPLETE_GENERATIVE_FILL_GENERATION',
   APPLY_GENERATIVE_FILL_RESULT = 'APPLY_GENERATIVE_FILL_RESULT',
   CANCEL_GENERATIVE_FILL = 'CANCEL_GENERATIVE_FILL',
+  SET_AI_REFERENCE_MODE = 'SET_AI_REFERENCE_MODE',
+  ADD_REFERENCE_POINT = 'ADD_REFERENCE_POINT',
+  CLEAR_REFERENCE_POINTS = 'CLEAR_REFERENCE_POINTS',
+  REMOVE_REFERENCE_POINT = 'REMOVE_REFERENCE_POINT',
+  SET_AI_MOVE_STATE = 'SET_AI_MOVE_STATE',
+  CLEAR_AI_MOVE_STATE = 'CLEAR_AI_MOVE_STATE',
 }
 
 // Action definitions
@@ -114,7 +122,13 @@ type DrawingAction =
   | { type: DrawingActionType.START_GENERATIVE_FILL_GENERATION }
   | { type: DrawingActionType.COMPLETE_GENERATIVE_FILL_GENERATION; imageData: string; bounds: Rectangle }
   | { type: DrawingActionType.APPLY_GENERATIVE_FILL_RESULT }
-  | { type: DrawingActionType.CANCEL_GENERATIVE_FILL };
+  | { type: DrawingActionType.CANCEL_GENERATIVE_FILL }
+  | { type: DrawingActionType.SET_AI_REFERENCE_MODE; enabled: boolean }
+  | { type: DrawingActionType.ADD_REFERENCE_POINT; point: { x: number; y: number } }
+  | { type: DrawingActionType.CLEAR_REFERENCE_POINTS }
+  | { type: DrawingActionType.REMOVE_REFERENCE_POINT; id: string }
+  | { type: DrawingActionType.SET_AI_MOVE_STATE; state: Partial<AiMoveState> }
+  | { type: DrawingActionType.CLEAR_AI_MOVE_STATE };
 
 // Initial state
 export const initialState: DrawingState = {
@@ -144,6 +158,10 @@ export const initialState: DrawingState = {
   },
   clipboard: [],
   generativeFillMode: null,
+  aiReferenceMode: false,
+  referencePoints: [],
+  nextReferenceLabel: 'A',
+  aiMoveState: null,
 };
 
 // Reducer
@@ -484,6 +502,86 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
         generativeFillMode: null,
       };
 
+    case DrawingActionType.SET_AI_REFERENCE_MODE:
+      return {
+        ...state,
+        aiReferenceMode: action.enabled,
+        // Clear reference points when turning off the mode
+        referencePoints: action.enabled ? state.referencePoints : [],
+        nextReferenceLabel: action.enabled ? state.nextReferenceLabel : 'A',
+      };
+
+    case DrawingActionType.ADD_REFERENCE_POINT: {
+      const newPoint: ReferencePoint = {
+        id: `ref_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        label: state.nextReferenceLabel,
+        x: action.point.x,
+        y: action.point.y,
+      };
+
+      // Calculate next label (A -> B -> C ... -> Z -> AA -> AB ...)
+      const getNextLabel = (current: string): string => {
+        const chars = current.split('');
+        let carry = true;
+
+        for (let i = chars.length - 1; i >= 0 && carry; i--) {
+          if (chars[i] === 'Z') {
+            chars[i] = 'A';
+          } else {
+            chars[i] = String.fromCharCode(chars[i].charCodeAt(0) + 1);
+            carry = false;
+          }
+        }
+
+        if (carry) {
+          chars.unshift('A');
+        }
+
+        return chars.join('');
+      };
+
+      return {
+        ...state,
+        referencePoints: [...state.referencePoints, newPoint],
+        nextReferenceLabel: getNextLabel(state.nextReferenceLabel),
+      };
+    }
+
+    case DrawingActionType.CLEAR_REFERENCE_POINTS:
+      return {
+        ...state,
+        referencePoints: [],
+        nextReferenceLabel: 'A',
+      };
+
+    case DrawingActionType.REMOVE_REFERENCE_POINT:
+      return {
+        ...state,
+        referencePoints: state.referencePoints.filter(p => p.id !== action.id),
+      };
+
+    case DrawingActionType.SET_AI_MOVE_STATE:
+      return {
+        ...state,
+        aiMoveState: state.aiMoveState
+          ? { ...state.aiMoveState, ...action.state }
+          : {
+              phase: 'idle',
+              segmentedMask: null,
+              segmentedBounds: null,
+              originalClickPoint: null,
+              currentDragPoint: null,
+              segmentedImageData: null,
+              ...action.state,
+            },
+      };
+
+    case DrawingActionType.CLEAR_AI_MOVE_STATE:
+      return {
+        ...state,
+        aiMoveState: null,
+      };
+
     default:
       return state;
   }
@@ -535,6 +633,16 @@ export interface DrawingContextType {
   // Clipboard operations
   copySelectedShapes: () => void;
   pasteShapes: (offset?: Point) => void;
+
+  // AI Reference Mode
+  setAiReferenceMode: (enabled: boolean) => void;
+  addReferencePoint: (point: { x: number; y: number }) => void;
+  clearReferencePoints: () => void;
+  removeReferencePoint: (id: string) => void;
+
+  // AI Move
+  setAiMoveState: (state: Partial<AiMoveState>) => void;
+  clearAiMoveState: () => void;
 }
 
 // Create context

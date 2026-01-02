@@ -131,6 +131,30 @@ export const DrawingProvider: React.FC<DrawingProviderProps> = ({ children }) =>
     }
   }, [state.clipboard]);
 
+  const setAiReferenceMode = useCallback((enabled: boolean) => {
+    dispatch({ type: DrawingActionType.SET_AI_REFERENCE_MODE, enabled });
+  }, []);
+
+  const addReferencePoint = useCallback((point: { x: number; y: number }) => {
+    dispatch({ type: DrawingActionType.ADD_REFERENCE_POINT, point });
+  }, []);
+
+  const clearReferencePoints = useCallback(() => {
+    dispatch({ type: DrawingActionType.CLEAR_REFERENCE_POINTS });
+  }, []);
+
+  const removeReferencePoint = useCallback((id: string) => {
+    dispatch({ type: DrawingActionType.REMOVE_REFERENCE_POINT, id });
+  }, []);
+
+  const setAiMoveState = useCallback((state: Partial<import('@/types/drawing').AiMoveState>) => {
+    dispatch({ type: DrawingActionType.SET_AI_MOVE_STATE, state });
+  }, []);
+
+  const clearAiMoveState = useCallback(() => {
+    dispatch({ type: DrawingActionType.CLEAR_AI_MOVE_STATE });
+  }, []);
+
   const value: DrawingContextType = {
     state,
     dispatch,
@@ -154,6 +178,12 @@ export const DrawingProvider: React.FC<DrawingProviderProps> = ({ children }) =>
     getSortedShapes,
     copySelectedShapes,
     pasteShapes,
+    setAiReferenceMode,
+    addReferencePoint,
+    clearReferencePoints,
+    removeReferencePoint,
+    setAiMoveState,
+    clearAiMoveState,
   };
 
   return <DrawingContext.Provider value={value}>{children}</DrawingContext.Provider>;

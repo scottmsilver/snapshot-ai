@@ -1,0 +1,20 @@
+/* Reference Label Marker */
+.reference-label-marker {
+  /* Styles are inline for now to match the pattern used in other components */
+  /* This file is a placeholder for any future styling needs */
+}
+
+/* Reference Toolbar */
+.reference-toolbar {
+  /* Styles are inline for now to match the pattern used in other components */
+  /* This file is a placeholder for any future styling needs */
+}
+
+.reference-toolbar-button:focus {
+  outline: 2px solid #2196f3;
+  outline-offset: 2px;
+}
+
+.reference-toolbar-button:active {
+  transform: scale(0.98);
+}

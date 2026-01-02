@@ -39,10 +39,13 @@ import { GenerativeFillResultToolbar } from '@/components/GenerativeFill/Generat
 import { AIProgressPanel } from '@/components/GenerativeFill/AIProgressPanel';
 import { SettingsDialog } from '@/components/Settings';
 import { createGenerativeService } from '@/services/generativeApi';
-import { AgenticPainterService } from '@/services/agenticService';
+import { AgenticPainterService, type MovePlan } from '@/services/agenticService';
 import { settingsManager } from '@/services/settingsManager';
+// SAM service removed - AI Move not yet implemented
 import { generateBrushMask, generateRectangleMask, generateLassoMask } from '@/utils/maskRendering';
+import { annotateImage } from '@/utils/imageAnnotation';
 import { InlineTextPlayground } from '@/components/Test/InlineTextPlayground';
+import { ManipulationDialog, MoveConfirmationDialog } from '@/components/AIReference';
 
 const CANVAS_PADDING = 100;
 
@@ -75,6 +78,11 @@ function App(): React.ReactElement {
   const [calibrationDialogOpen, setCalibrationDialogOpen] = useState(false);
   const [pendingCalibrationLine, setPendingCalibrationLine] = useState<MeasurementLineShape | null>(null);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [manipulationDialogOpen, setManipulationDialogOpen] = useState(false);
+  const [manipulationPreviewImage, setManipulationPreviewImage] = useState<string | null>(null);
+  const [moveConfirmationOpen, setMoveConfirmationOpen] = useState(false);
+  const [movePlan, setMovePlan] = useState<MovePlan | null>(null);
+  const [isPlanningMove, setIsPlanningMove] = useState(false);
 
   const authContext = useOptionalAuth();
   const { updateProgress } = useAIProgress();
@@ -94,7 +102,7 @@ function App(): React.ReactElement {
     deleteSelected,
     updateStyle,
   } = useDrawing();
-  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes } = useDrawingContext();
+  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes, clearReferencePoints, setAiReferenceMode, setAiMoveState, clearAiMoveState } = useDrawingContext();
   const { canUndo, canRedo, pushState, undo, redo, getCurrentState, currentIndex } = useHistory();
 
   const selectedShapes = useMemo(
@@ -278,6 +286,172 @@ function App(): React.ReactElement {
     setCalibrationDialogOpen(false);
     setPendingCalibrationLine(null);
   }, [deleteShapes, pendingCalibrationLine]);
+
+  const handleAiMoveClick = useCallback(async (_x: number, _y: number) => {
+    // AI Move requires SAM (Segment Anything Model) which is not yet implemented
+    console.log('AI Move: Not yet implemented - SAM service needs to be integrated');
+    clearAiMoveState();
+  }, [clearAiMoveState]);
+
+  // Effect to execute AI move when phase transitions to 'executing'
+  useEffect(() => {
+    const aiMoveState = drawingState.aiMoveState;
+    if (!aiMoveState || aiMoveState.phase !== 'executing') {
+      return;
+    }
+
+    // Capture required data before async operation
+    const { segmentedBounds, originalClickPoint, currentDragPoint } = aiMoveState;
+    if (!segmentedBounds || !originalClickPoint || !currentDragPoint) {
+      console.error('AI Move: Missing required data for execution');
+      clearAiMoveState();
+      return;
+    }
+
+    // Calculate movement offset
+    const offsetX = currentDragPoint.x - originalClickPoint.x;
+    const offsetY = currentDragPoint.y - originalClickPoint.y;
+
+    // Skip if no movement
+    if (Math.abs(offsetX) < 5 && Math.abs(offsetY) < 5) {
+      console.log('AI Move: Movement too small, cancelling');
+      clearAiMoveState();
+      return;
+    }
+
+    const executeMove = async () => {
+      try {
+        const stage = stageRef.current;
+        if (!stage) {
+          clearAiMoveState();
+          return;
+        }
+
+        updateProgress({
+          step: 'planning',
+          message: 'Preparing AI move operation...',
+          thinkingText: `## AI Move Operation\n\nMoving object from (${Math.round(originalClickPoint.x)}, ${Math.round(originalClickPoint.y)}) to (${Math.round(currentDragPoint.x)}, ${Math.round(currentDragPoint.y)})\n\n**Offset:** ${Math.round(offsetX)}px horizontal, ${Math.round(offsetY)}px vertical`,
+          iteration: { current: 0, max: 3 }
+        });
+
+        // Get settings for API key
+        let geminiApiKey: string | null = null;
+        if (authContext?.isAuthenticated && authContext?.getAccessToken) {
+          try {
+            const accessToken = authContext.getAccessToken();
+            if (accessToken) {
+              await settingsManager.initialize(accessToken);
+              geminiApiKey = await settingsManager.getGeminiApiKey();
+            }
+          } catch (error) {
+            console.error('Failed to get settings:', error);
+          }
+        }
+
+        const apiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY;
+        if (!apiKey) {
+          updateProgress({
+            step: 'error',
+            message: 'No API key configured',
+            error: { message: 'Please add your Gemini API key in Settings' }
+          });
+          clearAiMoveState();
+          return;
+        }
+
+        // Capture clean canvas
+        const canvas = stage.toCanvas();
+        const ctx = canvas.getContext('2d')!;
+        const sourceImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        // Build the move prompt describing what to do
+        const moveDirection = [];
+        if (offsetX > 0) moveDirection.push(`${Math.round(offsetX)} pixels to the right`);
+        if (offsetX < 0) moveDirection.push(`${Math.round(Math.abs(offsetX))} pixels to the left`);
+        if (offsetY > 0) moveDirection.push(`${Math.round(offsetY)} pixels down`);
+        if (offsetY < 0) moveDirection.push(`${Math.round(Math.abs(offsetY))} pixels up`);
+
+        const movePrompt = `Move the object that was at position (${Math.round(originalClickPoint.x)}, ${Math.round(originalClickPoint.y)}) to position (${Math.round(currentDragPoint.x)}, ${Math.round(currentDragPoint.y)}). That's ${moveDirection.join(' and ')}. Fill in the original location naturally to match the surrounding background. Keep the moved object exactly the same but in the new position.`;
+
+        updateProgress({
+          step: 'calling_api',
+          message: 'Executing AI move...',
+          thinkingText: `## AI Move Prompt\n\n${movePrompt}`,
+          iteration: { current: 1, max: 3 }
+        });
+
+        // Create services and execute edit
+        const generativeService = createGenerativeService(apiKey);
+        const agenticService = new AgenticPainterService(apiKey, generativeService);
+
+        const result = await agenticService.edit(
+          sourceImageData,
+          movePrompt,
+          undefined, // no mask - let AI figure out what to move based on coordinates
+          updateProgress
+        );
+
+        // Convert result to image and add to canvas
+        const resultCanvas = document.createElement('canvas');
+        resultCanvas.width = result.width;
+        resultCanvas.height = result.height;
+        const resultCtx = resultCanvas.getContext('2d')!;
+        resultCtx.putImageData(result, 0, 0);
+        const resultDataUrl = resultCanvas.toDataURL('image/png');
+
+        // Create image element
+        const img = new Image();
+        img.src = resultDataUrl;
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+        });
+
+        // Add as new image shape
+        const newShape = {
+          id: `ai_move_${Date.now()}`,
+          type: DrawingTool.IMAGE as typeof DrawingTool.IMAGE,
+          x: 0,
+          y: 0,
+          width: result.width,
+          height: result.height,
+          src: resultDataUrl,
+          image: img,
+          style: {
+            stroke: '#000000',
+            strokeWidth: 0,
+            opacity: 1,
+          },
+          visible: true,
+          locked: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+
+        addShape(newShape);
+        setActiveTool(DrawingTool.SELECT);
+        selectShape(newShape.id);
+
+        updateProgress({
+          step: 'complete',
+          message: 'AI move completed!',
+          thinkingText: '## Complete\n\nThe object has been moved successfully.',
+        });
+
+        clearAiMoveState();
+      } catch (error) {
+        console.error('AI Move execution failed:', error);
+        updateProgress({
+          step: 'error',
+          message: 'AI move failed',
+          error: { message: error instanceof Error ? error.message : 'Unknown error' }
+        });
+        clearAiMoveState();
+      }
+    };
+
+    executeMove();
+  }, [drawingState.aiMoveState, clearAiMoveState, updateProgress, authContext, addShape, setActiveTool, selectShape]);
 
   const handleDismissSharedFileError = useCallback(() => {
     setSharedFileError(null);
@@ -892,6 +1066,266 @@ function App(): React.ReactElement {
     }
   }, [dispatch, drawingState.generativeFillMode]);
 
+  // Store reference points and canvas data for the confirmation flow
+  const pendingManipulationRef = useRef<{
+    referencePoints: Array<{label: string, x: number, y: number}>;
+    imageDataUrl: string;
+    canvasWidth: number;
+    canvasHeight: number;
+    geminiApiKey: string;
+  } | null>(null);
+
+  // AI Reference Mode - Manipulation Handler (now with confirmation)
+  const handleManipulationSubmit = useCallback(async (command: string) => {
+    // Capture reference points BEFORE closing dialog
+    const referencePointsCopy = [...drawingState.referencePoints];
+
+    // Close the command dialog but keep reference mode active
+    setManipulationDialogOpen(false);
+
+    try {
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      const canvas = stage.toCanvas();
+      const imageDataUrl = canvas.toDataURL('image/png');
+
+      // Get API key
+      let geminiApiKey: string | null = null;
+      if (authContext?.isAuthenticated && authContext?.getAccessToken) {
+        try {
+          const accessToken = authContext.getAccessToken();
+          if (accessToken) {
+            await settingsManager.initialize(accessToken);
+            geminiApiKey = await settingsManager.getGeminiApiKey();
+          }
+        } catch (error) {
+          console.error('Failed to get settings:', error);
+        }
+      }
+
+      const effectiveGeminiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
+
+      if (!effectiveGeminiKey) {
+        console.error('No API key');
+        alert('Please add your Gemini API key in Settings to use AI Reference Mode.');
+        setSettingsDialogOpen(true);
+        return;
+      }
+
+      // Store data for confirmation flow
+      pendingManipulationRef.current = {
+        referencePoints: referencePointsCopy,
+        imageDataUrl,
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        geminiApiKey: effectiveGeminiKey,
+      };
+
+      // Open confirmation dialog and start planning
+      setMoveConfirmationOpen(true);
+      setIsPlanningMove(true);
+
+      // Create service and get plan
+      const nanoBananaService = createGenerativeService(
+        effectiveGeminiKey,
+        'gemini',
+        undefined,
+        'gemini',
+        'gemini'
+      );
+      const agenticService = new AgenticPainterService(effectiveGeminiKey, nanoBananaService);
+
+      // Get the plan with annotations and descriptions
+      const plan = await agenticService.planMoveOperation(
+        imageDataUrl,
+        referencePointsCopy,
+        command,
+        canvas.width,
+        canvas.height
+      );
+
+      setMovePlan(plan);
+      setIsPlanningMove(false);
+
+    } catch (error) {
+      console.error('Planning failed:', error);
+      setMoveConfirmationOpen(false);
+      setIsPlanningMove(false);
+      setMovePlan(null);
+      alert('Failed to plan operation: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  }, [drawingState.referencePoints, authContext]);
+
+  // Handler for confirming the move operation
+  const handleMoveConfirm = useCallback(async () => {
+    if (!movePlan || !pendingManipulationRef.current) return;
+
+    const { imageDataUrl, canvasWidth, canvasHeight, geminiApiKey } = pendingManipulationRef.current;
+
+    // Close confirmation and clear reference mode
+    setMoveConfirmationOpen(false);
+    clearReferencePoints();
+    setAiReferenceMode(false);
+
+    try {
+      // Create service
+      const nanoBananaService = createGenerativeService(
+        geminiApiKey,
+        'gemini',
+        undefined,
+        'gemini',
+        'gemini'
+      );
+      const agenticService = new AgenticPainterService(geminiApiKey, nanoBananaService);
+
+      // Convert to ImageData
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = imageDataUrl;
+      });
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = canvasWidth;
+      tempCanvas.height = canvasHeight;
+      const tempCtx = tempCanvas.getContext('2d')!;
+      tempCtx.drawImage(img, 0, 0);
+      const sourceImageData = tempCtx.getImageData(0, 0, canvasWidth, canvasHeight);
+
+      // Build a rich prompt that includes all the learned context
+      const descriptionsContext = movePlan.descriptions
+        .map(d => `- "${d.description}" located at coordinates (${d.x}, ${d.y})`)
+        .join('\n');
+
+      const enrichedPrompt = `CONTEXT - Elements in this image that are relevant to the edit:
+${descriptionsContext}
+
+TASK:
+${movePlan.suggestedPrompt}
+
+IMPORTANT: Use the exact coordinates provided above to locate elements. The descriptions tell you precisely what each element looks like and where it is.`;
+
+      updateProgress({
+        step: 'processing',
+        message: 'Executing confirmed operation...',
+        thinkingText: `Executing:\n\n${movePlan.interpretation}\n\n**Full prompt with context:**\n${enrichedPrompt}`,
+      });
+
+      // Execute the edit with the enriched prompt (includes all learned context)
+      const resultImageData = await agenticService.edit(
+        sourceImageData,
+        enrichedPrompt,
+        undefined,
+        updateProgress
+      );
+
+      // Convert result to base64
+      const resultCanvas = document.createElement('canvas');
+      resultCanvas.width = resultImageData.width;
+      resultCanvas.height = resultImageData.height;
+      const resultCtx = resultCanvas.getContext('2d')!;
+      resultCtx.putImageData(resultImageData, 0, 0);
+      const resultBase64 = resultCanvas.toDataURL('image/png');
+
+      // Create image shape and add to canvas
+      const imageShape: Shape = {
+        id: `image-${Date.now()}`,
+        type: DrawingTool.IMAGE,
+        x: 0,
+        y: 0,
+        width: canvasWidth,
+        height: canvasHeight,
+        imageData: resultBase64,
+        style: {
+          stroke: 'transparent',
+          strokeWidth: 0,
+          fill: 'transparent',
+          opacity: 1,
+        },
+        rotation: 0,
+        zIndex: getNextZIndex(shapes),
+        visible: true,
+        locked: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      addShape(imageShape);
+      selectShape(imageShape.id);
+
+      updateProgress({
+        step: 'complete',
+        message: 'Image manipulation completed successfully!',
+        thinkingText: 'Your edited image has been added to the canvas.',
+      });
+
+    } catch (error) {
+      console.error('Manipulation failed:', error);
+      updateProgress({
+        step: 'error',
+        message: 'Failed to process manipulation',
+        error: {
+          message: error instanceof Error ? error.message : 'Unknown error',
+          details: error instanceof Error ? error.stack : undefined,
+        },
+      });
+      alert('Failed to process manipulation: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
+      setMovePlan(null);
+      pendingManipulationRef.current = null;
+    }
+  }, [movePlan, clearReferencePoints, setAiReferenceMode, updateProgress, shapes, addShape, selectShape]);
+
+  // Handler for editing the command (go back to manipulation dialog)
+  const handleMoveEditCommand = useCallback(() => {
+    setMoveConfirmationOpen(false);
+    setMovePlan(null);
+    setManipulationDialogOpen(true);
+  }, []);
+
+  // Handler for closing the confirmation dialog
+  const handleMoveConfirmationClose = useCallback(() => {
+    setMoveConfirmationOpen(false);
+    setMovePlan(null);
+    setIsPlanningMove(false);
+    pendingManipulationRef.current = null;
+  }, []);
+
+  // Handler for opening the manipulation dialog with annotated preview
+  const handleOpenManipulationDialog = useCallback(async () => {
+    const stage = stageRef.current;
+    if (!stage) {
+      setManipulationDialogOpen(true);
+      return;
+    }
+
+    try {
+      // Capture the canvas
+      const canvas = stage.toCanvas();
+      const imageDataUrl = canvas.toDataURL('image/png');
+
+      // Create annotated preview with pins
+      const annotationPoints = drawingState.referencePoints.map((p: { label: string; x: number; y: number }) => ({
+        label: p.label,
+        x: p.x * zoomLevel, // Scale to match captured canvas
+        y: p.y * zoomLevel,
+      }));
+
+      const annotatedPreview = await annotateImage(imageDataUrl, {
+        points: annotationPoints,
+      });
+
+      setManipulationPreviewImage(annotatedPreview);
+    } catch (error) {
+      console.error('Failed to capture preview:', error);
+      setManipulationPreviewImage(null);
+    }
+
+    setManipulationDialogOpen(true);
+  }, [drawingState.referencePoints, zoomLevel]);
+
   // Activate generative fill mode when tool is selected
   useEffect(() => {
     if (activeTool === DrawingTool.GENERATIVE_FILL && !drawingState.generativeFillMode) {
@@ -956,8 +1390,8 @@ function App(): React.ReactElement {
           style={{
             flex: 1,
             display: 'flex',
-            gap: '1rem',
-            padding: '1rem',
+            gap: 0,
+            padding: 0,
             overflow: 'hidden',
             minHeight: 0,
           }}
@@ -981,7 +1415,17 @@ function App(): React.ReactElement {
             onTextClick={handleCanvasTextClick}
             onTextShapeEdit={handleTextShapeEdit}
             onImageToolComplete={handleImageToolComplete}
+            onReferenceManipulate={handleOpenManipulationDialog}
+            onReferenceClear={() => {
+              clearReferencePoints();
+              setAiReferenceMode(false);
+            }}
+            onAiMoveClick={handleAiMoveClick}
+            isManipulationDialogOpen={manipulationDialogOpen || moveConfirmationOpen}
           />
+
+          {/* AI Console - side panel for AI operation logs */}
+          <AIProgressPanel />
         </main>
 
         <WorkspaceDialogs
@@ -1084,8 +1528,28 @@ function App(): React.ReactElement {
           </div>
         )}
 
-        {/* AI Console - persistent log of AI operations */}
-        <AIProgressPanel />
+
+        {/* AI Reference Mode - Manipulation Dialog only (overlay is in WorkspaceCanvas) */}
+        <ManipulationDialog
+          open={manipulationDialogOpen}
+          onClose={() => {
+            setManipulationDialogOpen(false);
+            setManipulationPreviewImage(null);
+          }}
+          onSubmit={handleManipulationSubmit}
+          referencePoints={drawingState.referencePoints}
+          previewImage={manipulationPreviewImage || undefined}
+        />
+
+        {/* AI Reference Mode - Move Confirmation Dialog */}
+        <MoveConfirmationDialog
+          open={moveConfirmationOpen}
+          onClose={handleMoveConfirmationClose}
+          onConfirm={handleMoveConfirm}
+          onEditCommand={handleMoveEditCommand}
+          plan={movePlan}
+          isLoading={isPlanningMove}
+        />
 
       </motion.div>
     </AuthGate>

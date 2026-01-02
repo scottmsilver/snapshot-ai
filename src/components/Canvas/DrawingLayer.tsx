@@ -25,6 +25,7 @@ interface DrawingLayerProps {
   onTextClick?: (position: Point) => void;
   onTextShapeEdit?: (shapeId: string) => void;
   onImageToolComplete?: (bounds: { x: number; y: number; width: number; height: number }) => void;
+  onAiMoveClick?: (x: number, y: number) => void;
 }
 
 type ShapeCommonProps = {
@@ -80,7 +81,7 @@ const ImageShapeComponent: React.FC<{
   );
 };
 
-export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel = 1, onTextClick, onTextShapeEdit, onImageToolComplete }) => {
+export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel = 1, onTextClick, onTextShapeEdit, onImageToolComplete, onAiMoveClick }) => {
   const {
     activeTool,
     currentStyle,
@@ -101,7 +102,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     clearSelection,
   } = useDrawing();
 
-  const { state: drawingState, dispatch } = useDrawingContext();
+  const { state: drawingState, dispatch, addReferencePoint } = useDrawingContext();
 
   // Track if mouse is down for generative fill
   const [isGenerativeFillDrawing, setIsGenerativeFillDrawing] = useState(false);
@@ -324,6 +325,31 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     };
   }, [draggedArrowId]);
 
+  // Enforce crosshair cursor when in AI reference mode
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const container = stage.container();
+    if (drawingState.aiReferenceMode) {
+      container.style.cursor = 'crosshair';
+    }
+
+    // Also set up an interval to enforce crosshair (in case other handlers override it)
+    let intervalId: number | undefined;
+    if (drawingState.aiReferenceMode) {
+      intervalId = window.setInterval(() => {
+        container.style.cursor = 'crosshair';
+      }, 100);
+    }
+
+    return () => {
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [drawingState.aiReferenceMode, stageRef]);
+
   // Set up mouse event handlers
   useEffect(() => {
     const stage = stageRef.current;
@@ -340,6 +366,12 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         x: pos.x / zoomLevel,
         y: pos.y / zoomLevel
       };
+
+      // Early check: if AI Reference Mode is active, capture the click as a reference point
+      if (drawingState.aiReferenceMode) {
+        addReferencePoint(adjustedPos);
+        return; // Bypass all normal drawing behavior
+      }
 
       // Check if clicking on empty space (no shape)
       const clickedOnEmpty = e.target === stage ||
@@ -387,6 +419,13 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         return;
       }
 
+      if (activeTool === DrawingTool.AI_MOVE) {
+        // For AI_MOVE tool, call SAM to segment at click point
+        if (clickedOnEmpty && onAiMoveClick) {
+          onAiMoveClick(adjustedPos.x, adjustedPos.y);
+        }
+        return;
+      }
 
       if (clickedOnEmpty) {
         startDrawing(adjustedPos);
@@ -563,6 +602,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     endControlPointDrag,
     onTextClick,
     onImageToolComplete,
+    onAiMoveClick,
     selectShape,
     clearSelection,
     selectedShapeIds,
@@ -1472,16 +1512,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         // Clean up drag attributes
         e.target.setAttrs({ _dragStartX: undefined, _dragStartY: undefined });
       },
-      // Change cursor when hovering over shapes
+      // Change cursor when hovering over shapes (but not in AI reference mode)
       onMouseEnter: (e: Konva.KonvaEventObject<MouseEvent>) => {
         const stage = e.target.getStage();
-        if (stage && activeTool === DrawingTool.SELECT) {
+        if (stage && activeTool === DrawingTool.SELECT && !drawingState.aiReferenceMode) {
           stage.container().style.cursor = isSelected ? 'move' : 'pointer';
         }
       },
       onMouseLeave: (e: Konva.KonvaEventObject<MouseEvent>) => {
         const stage = e.target.getStage();
-        if (stage && activeTool === DrawingTool.SELECT) {
+        if (stage && activeTool === DrawingTool.SELECT && !drawingState.aiReferenceMode) {
           stage.container().style.cursor = 'default';
         }
       },

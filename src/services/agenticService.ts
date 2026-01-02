@@ -1,7 +1,25 @@
 import { GoogleGenAI } from '@google/genai';
 import { GenerativeInpaintService } from './generativeApi';
 import { imageDataToBase64, base64ToImageData } from '@/utils/maskRendering';
+import { annotateImage, parseCommandForArrows } from '@/utils/imageAnnotation';
+import { aiLogService } from './aiLogService';
 import type { AIProgressEvent } from '@/types/aiProgress';
+
+/**
+ * Result of the planning phase for AI Move operations
+ */
+export interface MovePlan {
+  annotatedImage: string;  // Image with circles/arrows drawn for visualization
+  descriptions: Array<{
+    label: string;
+    x: number;
+    y: number;
+    description: string;
+  }>;
+  interpretation: string;  // AI's understanding of what to do
+  suggestedPrompt: string; // The prompt that will be sent to edit()
+  originalCommand: string; // The user's original command
+}
 
 const MAX_ITERATIONS = 3;
 const HIGH_THINKING_BUDGET = 8192;
@@ -133,15 +151,15 @@ You MUST call the gemini_image_painter tool.`;
 
         // Step 1: Agent plans the edit with high thinking budget
         const systemPrompt = this.buildSystemPrompt(prompt, !!maskImage);
-        
+
         // Generate base64 images for preview and API
         const sourceBase64 = imageDataToBase64(sourceImage);
         const maskBase64 = maskImage ? imageDataToBase64(maskImage) : null;
-        
+
         // Calculate image sizes
         const sourceKB = Math.round((sourceBase64.length * 3) / 4 / 1024);
         const maskKB = maskBase64 ? Math.round((maskBase64.length * 3) / 4 / 1024) : 0;
-        
+
         // Show the user what we're sending with image previews
         const planningContext = `## Planning Request
 
@@ -229,7 +247,7 @@ ${systemPrompt}
             let streamedText = '';
             let refinedPrompt = prompt;
             let chunkCount = 0;
-            
+
             // Send immediate update that we're starting to receive
             onProgress?.({
                 step: 'planning',
@@ -237,22 +255,22 @@ ${systemPrompt}
                 thinkingText: `## AI Thinking\n\n*Waiting for thoughts...*`,
                 iteration: { current: 0, max: MAX_ITERATIONS }
             });
-            
+
             for await (const chunk of stream) {
                 chunkCount++;
                 const parts = chunk.candidates?.[0]?.content?.parts || [];
-                
+
                 console.log(`🤖 Stream chunk #${chunkCount}:`, parts.length, 'parts');
-                
+
                 for (const part of parts) {
                     // Log what we're getting
                     console.log(`🤖 Part: thought=${part.thought}, hasText=${!!part.text}, hasFunctionCall=${!!part.functionCall}`);
-                    
+
                     // Check if this is a thought part
                     if (part.thought && part.text) {
                         streamedThinking += part.text;
                         console.log(`🤖 Thought chunk: "${part.text.substring(0, 50)}..."`);
-                        
+
                         // Update UI immediately with each thought chunk
                         onProgress?.({
                             step: 'planning',
@@ -283,11 +301,11 @@ ${systemPrompt}
                     }
                 }
             }
-            
+
             console.log(`🤖 Stream complete: ${chunkCount} chunks, ${streamedThinking.length} thinking chars, ${streamedText.length} text chars`);
-            
+
             const planThinking = streamedThinking || streamedText;
-            
+
             // Send final update with all thinking
             if (planThinking) {
                 onProgress?.({
@@ -415,7 +433,7 @@ Asking AI to evaluate if the result meets the goal...`;
 
                 if (checkResult.satisfied) {
                     console.log(`🤖 Agentic Service: Self-check SATISFIED: ${checkResult.reasoning}`);
-                    
+
                     const satisfiedContext = `## Self-Check: SATISFIED
 
 **Reasoning:** ${checkResult.reasoning}
@@ -431,7 +449,7 @@ The AI is happy with the result. Completing edit.`;
                     break;
                 } else {
                     console.log(`🤖 Agentic Service: Self-check requested REVISION: ${checkResult.reasoning}`);
-                    
+
                     if (checkResult.suggestion) {
                         const revisionContext = `## Self-Check: REVISION NEEDED
 
@@ -453,7 +471,7 @@ Will try again with the revised prompt...`;
                         console.log(`🤖 Agentic Service: Trying revised prompt: "${refinedPrompt.substring(0, 100)}..."`);
                     } else {
                         console.log('🤖 Agentic Service: No suggestion provided, using current result');
-                        
+
                         onProgress?.({
                             step: 'processing',
                             message: 'No revision suggested, using current result',
@@ -648,6 +666,380 @@ Be thoughtful - only request revision if there's a real problem. Consider whethe
             return this.underlyingService.inpaintWithGemini(sourceImage, maskImage, prompt);
         } else {
             return this.underlyingService.textOnlyWithGemini(sourceImage, prompt);
+        }
+    }
+
+    /**
+     * Identify what UI element is at a specific coordinate in an image
+     * @param imageData Base64-encoded image data
+     * @param x X coordinate (0-1 normalized or pixel coordinate)
+     * @param y Y coordinate (0-1 normalized or pixel coordinate)
+     * @param imageWidth Width of the image in pixels
+     * @param imageHeight Height of the image in pixels
+     * @returns Description of the element at that location
+     */
+    async identifyElementAtPoint(
+        imageData: string,
+        x: number,
+        y: number,
+        imageWidth: number,
+        imageHeight: number
+    ): Promise<string> {
+        console.log(`🤖 Agentic Service: Identifying element at (${x}, ${y})`);
+
+        const prompt = `You are analyzing a screenshot to identify what is at a specific coordinate.
+
+Image dimensions: ${imageWidth} x ${imageHeight} pixels
+Target coordinate: (${x}, ${y})
+
+IMPORTANT: You may see blue teardrop-shaped pin markers with letters (A, B, C) overlaid on the image. These are UI markers added by the application - IGNORE THEM COMPLETELY. Describe only the ACTUAL content underneath or near the pin.
+
+Describe what is at this location:
+
+1. **What it is**: The actual element/object (NOT the pin marker)
+2. **Approximate size**: Width and height in pixels
+3. **Visual features**: Color, text, icons, distinctive characteristics
+4. **Context**: What surrounds it
+
+Respond with a single paragraph. Examples:
+- "A blue 'Submit' button (approximately 100x36 pixels) with white text, in the bottom-right of a login form."
+- "A red sports car (approximately 200x80 pixels) facing left, on a gray road."
+- "Empty white background area, near the page header."
+
+Do NOT mention any pin markers, letters A/B/C, or overlay elements in your description.`;
+
+        try {
+            const result = await this.genAI.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: [{
+                    role: 'user',
+                    parts: [
+                        { text: prompt },
+                        { inlineData: { mimeType: 'image/png', data: imageData.split(',')[1] } }
+                    ]
+                }]
+            });
+
+            const parts = result.candidates?.[0]?.content?.parts || [];
+            let description = '';
+
+            for (const part of parts) {
+                if (part.text) {
+                    description += part.text;
+                }
+            }
+
+            const cleanDescription = description.trim();
+            console.log(`🤖 Agentic Service: Element identified: "${cleanDescription}"`);
+            return cleanDescription;
+
+        } catch (error) {
+            console.error('🤖 Agentic Service: Element identification failed:', error);
+            return `Unknown element at (${x}, ${y})`;
+        }
+    }
+
+    /**
+     * Resolve reference points to element descriptions and execute a command
+     * @param imageData Base64-encoded image data
+     * @param referencePoints Array of labeled reference points (e.g., [{label: 'A', x: 100, y: 200}])
+     * @param command User's natural language command (e.g., "Move A to B")
+     * @param imageWidth Width of the image in pixels
+     * @param imageHeight Height of the image in pixels
+     * @returns AI's interpretation and suggested manipulation
+     */
+    async resolveReferencesAndExecute(
+        imageData: string,
+        referencePoints: Array<{label: string, x: number, y: number}>,
+        command: string,
+        imageWidth: number,
+        imageHeight: number
+    ): Promise<string> {
+        console.log('🤖 Agentic Service: Resolving references and executing command');
+        console.log(`🤖 Reference points:`, referencePoints);
+        console.log(`🤖 Command: "${command}"`);
+
+        // Step 1: Identify what's at each reference point
+        const resolvedReferences: Array<{label: string, x: number, y: number, description: string}> = [];
+
+        for (const point of referencePoints) {
+            const description = await this.identifyElementAtPoint(
+                imageData,
+                point.x,
+                point.y,
+                imageWidth,
+                imageHeight
+            );
+
+            resolvedReferences.push({
+                label: point.label,
+                x: point.x,
+                y: point.y,
+                description
+            });
+        }
+
+        // Step 2: Build context string
+        const referenceContext = resolvedReferences
+            .map(ref => `- Point ${ref.label} (at coordinates ${ref.x}, ${ref.y}): ${ref.description}`)
+            .join('\n');
+
+        // Step 3: Create prompt combining context with command
+        // IMPORTANT: We ask the model to produce a CLEAN editing prompt that describes
+        // the elements by what they ARE, not by labels like "A" or "B"
+        const finalPrompt = `You are helping translate a user's reference-based command into a clear image editing instruction.
+
+The user placed reference markers on an image:
+${referenceContext}
+
+The user's command using these references: "${command}"
+
+YOUR TASK: Write a CLEAN image editing prompt that describes what to do WITHOUT using labels like "A", "B", "Point A", etc.
+
+Instead, describe the elements by what they actually are. For example:
+- If the user says "Move A to B" where A is a button and B is a sidebar, write: "Move the blue Submit button to the sidebar area"
+- If the user says "Make A look like B" where A is a heading and B is a styled label, write: "Style the main heading to match the font and color of the styled label below"
+
+Respond with ONLY the clean editing prompt, nothing else. Do not include coordinates, point labels, or explanations.`;
+
+        console.log('🤖 Agentic Service: Sending resolution prompt to Gemini');
+
+        try {
+            // Step 4: Send to Gemini and return response
+            const result = await this.genAI.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: [{
+                    role: 'user',
+                    parts: [
+                        { text: finalPrompt },
+                        { inlineData: { mimeType: 'image/png', data: imageData.split(',')[1] } }
+                    ]
+                }],
+                config: {
+                    thinkingConfig: {
+                        thinkingBudget: CHECK_THINKING_BUDGET,
+                        includeThoughts: true,
+                    },
+                }
+            } as any);
+
+            const parts = result.candidates?.[0]?.content?.parts || [];
+            let response = '';
+
+            for (const part of parts) {
+                if (part.text && !part.thought) {
+                    response += part.text;
+                }
+            }
+
+            const cleanResponse = response.trim();
+            console.log(`🤖 Agentic Service: Resolution response: "${cleanResponse.substring(0, 150)}..."`);
+            return cleanResponse;
+
+        } catch (error) {
+            console.error('🤖 Agentic Service: Reference resolution failed:', error);
+            throw new Error(`Failed to resolve references: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    /**
+     * Plan a move operation with visual annotations and confirmation
+     * This is the enhanced version that provides rich context before execution
+     * @param imageData Base64-encoded image data
+     * @param referencePoints Array of labeled reference points
+     * @param command User's natural language command
+     * @param imageWidth Width of the image in pixels
+     * @param imageHeight Height of the image in pixels
+     * @returns MovePlan with annotated image, descriptions, and suggested prompt
+     */
+    async planMoveOperation(
+        imageData: string,
+        referencePoints: Array<{label: string, x: number, y: number}>,
+        command: string,
+        imageWidth: number,
+        imageHeight: number
+    ): Promise<MovePlan> {
+        console.log('🤖 Agentic Service: Planning move operation');
+        console.log(`🤖 Reference points:`, referencePoints);
+        console.log(`🤖 Command: "${command}"`);
+
+        // Start logging this operation
+        aiLogService.startOperation('planning', `Planning: "${command}"`);
+
+        const pointLabels = referencePoints.map(p => p.label).join(', ');
+        aiLogService.appendThinking(`## Move Operation Planning\n\n**Command:** "${command}"\n\n**Reference points:** ${pointLabels}\n\n---\n`);
+
+        // Step 1: Parse command to detect arrows for visualization
+        const labels = referencePoints.map(p => p.label);
+        const arrows = parseCommandForArrows(command, labels);
+        console.log('🤖 Detected arrows:', arrows);
+
+        // Step 2: Create annotated image with circles at each point (and arrows if detected)
+        const annotationPoints = referencePoints.map(p => ({
+            label: p.label,
+            x: p.x,
+            y: p.y
+        }));
+
+        const annotatedImage = await annotateImage(imageData, {
+            points: annotationPoints,
+            arrows: arrows.length > 0 ? arrows : undefined
+        });
+        console.log('🤖 Created annotated image');
+        aiLogService.appendThinking(`\n**Step 1:** Created annotated image with pins${arrows.length > 0 ? ' and arrows' : ''}\n\n`);
+
+        // Step 3: Get detailed descriptions for each point using the ANNOTATED image
+        // This helps the AI see the labels directly on the image
+        const descriptions: Array<{label: string, x: number, y: number, description: string}> = [];
+
+        aiLogService.updateOperation({ step: 'processing', message: 'Identifying reference points...' });
+        aiLogService.appendThinking(`**Step 2:** Identifying what's at each reference point...\n\n`);
+
+        for (const point of referencePoints) {
+            aiLogService.appendThinking(`- Analyzing point **${point.label}** at (${point.x}, ${point.y})... `);
+
+            const description = await this.identifyElementAtPoint(
+                annotatedImage,
+                point.x,
+                point.y,
+                imageWidth,
+                imageHeight
+            );
+
+            descriptions.push({
+                label: point.label,
+                x: point.x,
+                y: point.y,
+                description
+            });
+
+            aiLogService.appendThinking(`\n  → "${description}"\n\n`);
+        }
+        console.log('🤖 Got descriptions for all points');
+
+        // Step 4: Build rich context for interpretation
+        const referenceContext = descriptions
+            .map(ref => `- **${ref.label}** at coordinates (${ref.x}, ${ref.y}): ${ref.description}`)
+            .join('\n');
+
+        // Step 5: Ask AI to interpret the command and explain what it will do
+        aiLogService.updateOperation({ step: 'calling_api', message: 'Interpreting command...' });
+        aiLogService.appendThinking(`**Step 3:** Sending to AI for interpretation...\n\n`);
+        const interpretationPrompt = `You are translating a user's reference-based command into an image editing instruction.
+
+The user marked points on an image. Here is what exists at each marked location:
+
+${referenceContext}
+
+User's command: "${command}"
+
+CRITICAL RULES:
+- The letters A, B, C are ONLY labels the user used to mark locations
+- Your output must NEVER contain the letters A, B, C, or phrases like "Point A", "marker A", "location A"
+- Replace every reference to a letter with the FULL description of what's actually there
+- The editing AI will NOT see any labels - only the raw image
+
+OUTPUT FORMAT:
+
+INTERPRETATION: [One sentence describing the action using actual element names and coordinates - NO LETTERS]
+
+EDITING_PROMPT: [Complete instruction using only element descriptions, coordinates, colors, and sizes - NO LETTERS ALLOWED]
+
+EXAMPLE:
+User command: "Move A to B"
+Where A = "blue Submit button at (150, 200)" and B = "gray sidebar at (50, 300)"
+
+INTERPRETATION: I will move the blue Submit button from (150, 200) to the gray sidebar area at (50, 300).
+
+EDITING_PROMPT: Move the blue Submit button currently located at coordinates (150, 200) to the gray sidebar area at coordinates (50, 300). Maintain the button's original appearance. Fill the vacated area at (150, 200) with appropriate background.
+
+YOUR RESPONSE:`;
+
+        try {
+            const result = await this.genAI.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: [{
+                    role: 'user',
+                    parts: [
+                        { text: interpretationPrompt },
+                        { inlineData: { mimeType: 'image/png', data: annotatedImage.split(',')[1] } }
+                    ]
+                }],
+                config: {
+                    thinkingConfig: {
+                        thinkingBudget: CHECK_THINKING_BUDGET,
+                        includeThoughts: true,
+                    },
+                }
+            } as any);
+
+            const parts = result.candidates?.[0]?.content?.parts || [];
+            let response = '';
+
+            for (const part of parts) {
+                if (part.text && !part.thought) {
+                    response += part.text;
+                }
+            }
+
+            // Parse the response
+            const interpretationMatch = response.match(/INTERPRETATION:\s*(.+?)(?=EDITING_PROMPT:|$)/s);
+            const editingPromptMatch = response.match(/EDITING_PROMPT:\s*(.+?)$/s);
+
+            // Helper to strip any remaining letter references
+            const stripLetterReferences = (text: string): string => {
+                return text
+                    // Remove standalone letter references like "A", "B", "C" when used as labels
+                    .replace(/\b(point|marker|location|label|reference)\s+[A-C]\b/gi, '')
+                    .replace(/\b[A-C]\s+(point|marker|location|label|reference)\b/gi, '')
+                    // Remove "at A", "to B", "from C" patterns
+                    .replace(/\b(at|to|from|of)\s+[A-C]\b/gi, '')
+                    // Clean up double spaces
+                    .replace(/\s{2,}/g, ' ')
+                    .trim();
+            };
+
+            let interpretation = interpretationMatch
+                ? stripLetterReferences(interpretationMatch[1].trim())
+                : 'Unable to interpret the command. Please try rephrasing.';
+
+            let suggestedPrompt = editingPromptMatch
+                ? stripLetterReferences(editingPromptMatch[1].trim())
+                : await this.resolveReferencesAndExecute(imageData, referencePoints, command, imageWidth, imageHeight);
+
+            console.log('🤖 Interpretation:', interpretation);
+            console.log('🤖 Suggested prompt:', suggestedPrompt.substring(0, 100) + '...');
+
+            aiLogService.appendThinking(`**Interpretation:**\n> ${interpretation}\n\n**Editing prompt:**\n> ${suggestedPrompt}\n`);
+            aiLogService.endOperation('complete', 'Planning complete - ready for confirmation');
+
+            return {
+                annotatedImage,
+                descriptions,
+                interpretation,
+                suggestedPrompt,
+                originalCommand: command
+            };
+
+        } catch (error) {
+            console.error('🤖 Agentic Service: Planning failed:', error);
+
+            aiLogService.appendThinking(`\n**Error:** ${error instanceof Error ? error.message : 'Unknown error'}\n\nUsing fallback interpretation...\n`);
+
+            // Fallback: return basic plan without AI interpretation
+            const fallbackPrompt = await this.resolveReferencesAndExecute(
+                imageData, referencePoints, command, imageWidth, imageHeight
+            );
+
+            aiLogService.endOperation('complete', 'Planning complete (fallback)');
+
+            return {
+                annotatedImage,
+                descriptions,
+                interpretation: `Execute command: "${command}"`,
+                suggestedPrompt: fallbackPrompt,
+                originalCommand: command
+            };
         }
     }
 }

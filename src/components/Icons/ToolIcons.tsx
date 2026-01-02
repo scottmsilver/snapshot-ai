@@ -11,7 +11,9 @@ import {
   Ruler,
   Crop,
   Image,
-  Sparkles
+  Sparkles,
+  Crosshair,
+  Move
 } from 'lucide-react';
 
 interface IconProps {
@@ -66,4 +68,12 @@ export const ImageIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColo
 
 export const GenerativeFillIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor' }) => (
   <Sparkles size={size} color={color} />
+);
+
+export const AIReferenceIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor' }) => (
+  <Crosshair size={size} color={color} />
+);
+
+export const AIMoveIcon: React.FC<IconProps> = ({ size = 24, color = 'currentColor' }) => (
+  <Move size={size} color={color} />
 );

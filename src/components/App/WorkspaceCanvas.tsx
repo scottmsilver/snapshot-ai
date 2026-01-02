@@ -6,6 +6,8 @@ import { ImageUploader } from '@/components/ImageUploader';
 import { PDFViewer } from '@/components/PDFViewer/PDFViewer';
 import { DrawingTool, type Point } from '@/types/drawing';
 import { useDrawingContext } from '@/contexts/DrawingContext';
+import { ReferenceLabelOverlay } from '@/components/AIReference';
+import { DragPreview } from '@/components/AIMove';
 
 interface CanvasSize {
   width: number;
@@ -31,6 +33,10 @@ interface WorkspaceCanvasProps {
   onTextClick: (position: Point) => void;
   onTextShapeEdit: (shapeId: string) => void;
   onImageToolComplete: (bounds: { x: number; y: number; width: number; height: number }) => void;
+  onReferenceManipulate?: () => void;
+  onReferenceClear?: () => void;
+  onAiMoveClick?: (x: number, y: number) => void;
+  isManipulationDialogOpen?: boolean;
 }
 
 export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
@@ -52,16 +58,53 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
   onTextClick,
   onTextShapeEdit,
   onImageToolComplete,
+  onReferenceManipulate,
+  onReferenceClear,
+  onAiMoveClick,
+  isManipulationDialogOpen,
 }) => {
-  const { state: drawingState } = useDrawingContext();
+  const { state: drawingState, setAiMoveState } = useDrawingContext();
+
+  // Handle mouse move during AI Move drag phase
+  const handleMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const aiMoveState = drawingState.aiMoveState;
+    if (!aiMoveState || aiMoveState.phase !== 'dragging') {
+      return;
+    }
+
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const pointerPos = stage.getPointerPosition();
+    if (!pointerPos) return;
+
+    // Update current drag point (in canvas coordinates, not zoomed)
+    setAiMoveState({
+      currentDragPoint: {
+        x: pointerPos.x / zoomLevel,
+        y: pointerPos.y / zoomLevel,
+      },
+    });
+  }, [drawingState.aiMoveState, stageRef, zoomLevel, setAiMoveState]);
+
+  // Handle mouse up to complete drag and transition to executing phase
+  const handleMouseUp = React.useCallback(() => {
+    const aiMoveState = drawingState.aiMoveState;
+    if (!aiMoveState || aiMoveState.phase !== 'dragging') {
+      return;
+    }
+
+    // Transition to executing phase (the actual move will be handled elsewhere)
+    setAiMoveState({
+      phase: 'executing',
+    });
+  }, [drawingState.aiMoveState, setAiMoveState]);
   if (isLoadingSharedFile) {
     return (
       <section
         style={{
           flex: 1,
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          backgroundColor: '#f5f5f5',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -97,9 +140,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
       <section
         style={{
           flex: 1,
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          backgroundColor: '#f5f5f5',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -143,9 +184,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
         <section
           style={{
             flex: 1,
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            backgroundColor: '#f5f5f5',
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'flex-start',
@@ -200,21 +239,20 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
     <section
       style={{
         flex: 1,
-        backgroundColor: 'white',
-        borderRadius: '8px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+        backgroundColor: '#f5f5f5',
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'flex-start',
         position: 'relative',
         overflow: 'auto',
+        cursor: drawingState.aiReferenceMode ? 'crosshair' : undefined,
       }}
     >
       <div
         style={{
           position: 'relative',
           display: 'inline-block',
-          padding: 20,
+          padding: 0,
           width: 'fit-content',
           height: 'fit-content',
         }}
@@ -244,6 +282,8 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
             height: canvasSize.height * zoomLevel,
             overflow: 'visible',
           }}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
         >
           <Stage
             width={canvasSize.width * zoomLevel}
@@ -252,9 +292,12 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
             scaleX={1}
             scaleY={1}
             style={{
-              border: '1px solid #ddd',
               backgroundColor: '#fafafa',
-              cursor: drawingState.generativeFillMode?.isActive ? 'crosshair' : (activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'),
+              cursor: drawingState.aiReferenceMode
+                ? 'crosshair'
+                : drawingState.generativeFillMode?.isActive
+                  ? 'crosshair'
+                  : (activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'),
             }}
           >
             <Layer scaleX={zoomLevel} scaleY={zoomLevel}>
@@ -268,8 +311,19 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
               onTextClick={onTextClick}
               onTextShapeEdit={onTextShapeEdit}
               onImageToolComplete={onImageToolComplete}
+              onAiMoveClick={onAiMoveClick}
             />
           </Stage>
+          {/* AI Reference Mode overlay - positioned relative to canvas, hidden when dialog is open */}
+          {drawingState.aiReferenceMode && !isManipulationDialogOpen && (
+            <ReferenceLabelOverlay
+              onManipulate={onReferenceManipulate}
+              onClear={onReferenceClear}
+              zoomLevel={zoomLevel}
+            />
+          )}
+          {/* AI Move drag preview overlay */}
+          <DragPreview zoomLevel={zoomLevel} />
         </div>
       </div>
 

@@ -14,7 +14,9 @@ import {
   MeasureIcon,
   ScreenshotIcon,
   ImageIcon,
-  GenerativeFillIcon
+  GenerativeFillIcon,
+  AIReferenceIcon,
+  AIMoveIcon
 } from '@/components/Icons/ToolIcons';
 import { ColorPicker } from '@/components/ColorPicker';
 import { ChevronDown } from 'lucide-react';
@@ -32,7 +34,8 @@ const tools = [
   { tool: DrawingTool.IMAGE, icon: ImageIcon, label: 'Image/PDF', shortcut: 'I' },
   { tool: DrawingTool.SCREENSHOT, icon: ScreenshotIcon, label: 'Screenshot', shortcut: 'X' },
   { tool: DrawingTool.MEASURE, icon: MeasureIcon, label: 'Measure', shortcut: 'M' },
-  { tool: DrawingTool.GENERATIVE_FILL, icon: GenerativeFillIcon, label: 'AI Fill', shortcut: 'G' }
+  { tool: DrawingTool.GENERATIVE_FILL, icon: GenerativeFillIcon, label: 'AI Fill', shortcut: 'G' },
+  { tool: DrawingTool.AI_MOVE, icon: AIMoveIcon, label: 'AI Move', shortcut: 'Q' }
 ];
 
 interface DrawingToolbarProps {
@@ -43,10 +46,13 @@ interface DrawingToolbarProps {
 
 export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizontal = false, selectedShapes = [] }) => {
   const { activeTool, setActiveTool, currentStyle, updateStyle, handleKeyPress, updateShape } = useDrawing();
-  const { state: drawingState } = useDrawingContext();
+  const { state: drawingState, dispatch } = useDrawingContext();
   const isCalibrated = drawingState.measurementCalibration.pixelsPerUnit !== null;
   const [showMeasureDropdown, setShowMeasureDropdown] = useState(false);
   const measureDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // AI Reference Mode state (will be added by another worker)
+  const aiReferenceMode = (drawingState as any).aiReferenceMode || false;
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -344,6 +350,48 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
             </button>
           );
         })}
+        
+        {/* AI Reference Mode Toggle */}
+        <div style={{
+          width: '1px',
+          height: '24px',
+          backgroundColor: '#ddd',
+          margin: '0 0.25rem'
+        }} />
+        <button
+          title="AI Reference Mode (R)"
+          onClick={() => {
+            // Dispatch SET_AI_REFERENCE_MODE action
+            dispatch({ type: 'SET_AI_REFERENCE_MODE' as any, enabled: !aiReferenceMode });
+          }}
+          style={{
+            padding: '0.375rem',
+            backgroundColor: aiReferenceMode ? '#e3f2fd' : 'transparent',
+            border: aiReferenceMode ? '1px solid #2196f3' : '1px solid transparent',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '0.875rem',
+            color: aiReferenceMode ? '#1976d2' : '#666',
+            transition: 'all 0.2s',
+            width: '32px',
+            height: '32px',
+          }}
+          onMouseEnter={(e) => {
+            if (!aiReferenceMode) {
+              e.currentTarget.style.backgroundColor = '#f5f5f5';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!aiReferenceMode) {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }
+          }}
+        >
+          <AIReferenceIcon size={18} />
+        </button>
       </div>
     );
   }
