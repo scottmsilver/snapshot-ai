@@ -3,6 +3,7 @@ import {
   type AIProgressState,
   type AIProgressEvent,
   type AILogEntry,
+  type ThinkingStatus,
   initialAIProgressState,
 } from '@/types/aiProgress';
 
@@ -21,6 +22,12 @@ export interface AIProgressContextType {
 
   /** Clear the entire log history */
   clearLog: () => void;
+
+  /** Set the thinking image for overlay display */
+  setThinkingImage: (image: string | null) => void;
+
+  /** Set the thinking status for overlay animation */
+  setThinkingStatus: (status: ThinkingStatus) => void;
 }
 
 /**
@@ -150,6 +157,31 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
       }
       // No else needed - it's normal to have no currentLogId after operation ends
 
+      // Handle thinking image based on step changes
+      let thinkingImage = prev.thinkingImage;
+      let thinkingStatus = prev.thinkingStatus;
+
+      // When iteration image arrives, set it as the thinking image
+      if (event.iterationImage) {
+        thinkingImage = event.iterationImage;
+        thinkingStatus = 'thinking';
+      }
+
+      // When iteration completes successfully (moving to self_checking or complete)
+      if (prev.step === 'processing' && event.step === 'self_checking') {
+        thinkingStatus = 'accepted';
+      }
+
+      // When complete or error, clear thinking state after brief delay handled by component
+      if (event.step === 'complete' || event.step === 'error') {
+        // Component will handle clearing after animation
+      }
+
+      // When iterating (retrying), mark as rejected
+      if (event.step === 'iterating') {
+        thinkingStatus = 'rejected';
+      }
+
       const newState: AIProgressState = {
         step: event.step,
         message: event.message ?? prev.message,
@@ -159,6 +191,8 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
         startTime: startTimeRef.current,
         error: event.error,
         log: newLog,
+        thinkingImage,
+        thinkingStatus,
       };
 
       return newState;
@@ -194,11 +228,27 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
     }));
   }, []);
 
+  const setThinkingImage = useCallback((image: string | null) => {
+    setState(prev => ({
+      ...prev,
+      thinkingImage: image,
+    }));
+  }, []);
+
+  const setThinkingStatus = useCallback((status: ThinkingStatus) => {
+    setState(prev => ({
+      ...prev,
+      thinkingStatus: status,
+    }));
+  }, []);
+
   const value: AIProgressContextType = {
     state,
     updateProgress,
     appendThinking,
     clearLog,
+    setThinkingImage,
+    setThinkingStatus,
   };
 
   return <AIProgressContext.Provider value={value}>{children}</AIProgressContext.Provider>;

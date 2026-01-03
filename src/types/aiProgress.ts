@@ -16,6 +16,15 @@ export type AIProgressStep =
   | 'error';            // Operation failed
 
 /**
+ * Thinking status for the overlay image display
+ */
+export type ThinkingStatus =
+  | 'idle'              // No thinking image to display
+  | 'thinking'          // Showing iteration image with pulsing animation
+  | 'accepted'          // Iteration accepted (green flash)
+  | 'rejected';         // Iteration rejected (red flash)
+
+/**
  * A single log entry in the AI console
  */
 export interface AILogEntry {
@@ -89,6 +98,12 @@ export interface AIProgressState {
 
   /** Persistent log of all AI operations (console style) */
   log: AILogEntry[];
+
+  /** Current thinking image to display in overlay (base64 data URL) */
+  thinkingImage: string | null;
+
+  /** Status of the thinking image overlay animation */
+  thinkingStatus: ThinkingStatus;
 }
 
 /**
@@ -125,4 +140,6 @@ export const initialAIProgressState: AIProgressState = {
   startTime: null,
   error: undefined,
   log: [],
+  thinkingImage: null,
+  thinkingStatus: 'idle',
 };
