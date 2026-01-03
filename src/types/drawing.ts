@@ -48,6 +48,17 @@ export const GenerativeFillSelectionTool = {
 
 export type GenerativeFillSelectionTool = typeof GenerativeFillSelectionTool[keyof typeof GenerativeFillSelectionTool];
 
+// AI Reference sub-tools (pin drops vs markup annotations)
+export const AIReferenceSubTool = {
+  PIN: 'pin',
+  PEN: 'pen',
+  LINE: 'line',
+  CIRCLE: 'circle',
+  RECTANGLE: 'rectangle'
+} as const;
+
+export type AIReferenceSubTool = typeof AIReferenceSubTool[keyof typeof AIReferenceSubTool];
+
 // Rectangle type for selections
 export interface Rectangle {
   x: number;
@@ -102,6 +113,7 @@ export interface BaseShape {
   zIndex: number; // Layer order - higher numbers are on top
   createdAt: number;
   updatedAt: number;
+  isMarkup?: boolean; // True for AI Reference markup annotations (sent to Gemini)
 }
 
 // Specific shape types
@@ -277,8 +289,11 @@ export interface DrawingState {
 
   // AI Reference Mode state
   aiReferenceMode: boolean;
+  aiReferenceSubTool: AIReferenceSubTool;
   referencePoints: ReferencePoint[];
   nextReferenceLabel: string;
+  // Markup shapes for AI Reference mode (separate from main shapes, not in undo history)
+  aiMarkupShapes: Shape[];
 
   // AI Move state
   aiMoveState: AiMoveState | null;

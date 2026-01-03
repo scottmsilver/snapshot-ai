@@ -102,7 +102,7 @@ function App(): React.ReactElement {
     deleteSelected,
     updateStyle,
   } = useDrawing();
-  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes, clearReferencePoints, setAiReferenceMode, setAiMoveState, clearAiMoveState } = useDrawingContext();
+  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes, clearReferencePoints, setAiReferenceMode, setAiMoveState, clearAiMoveState, clearAiMarkupShapes } = useDrawingContext();
   const { canUndo, canRedo, pushState, undo, redo, getCurrentState, currentIndex } = useHistory();
 
   const selectedShapes = useMemo(
@@ -1137,12 +1137,14 @@ function App(): React.ReactElement {
       const agenticService = new AgenticPainterService(effectiveGeminiKey, nanoBananaService);
 
       // Get the plan with annotations and descriptions
+      // Pass markup shapes so the AI knows about circles, lines, etc. the user drew
       const plan = await agenticService.planMoveOperation(
         imageDataUrl,
         referencePointsCopy,
         command,
         canvas.width,
-        canvas.height
+        canvas.height,
+        drawingState.aiMarkupShapes
       );
 
       setMovePlan(plan);
@@ -1199,13 +1201,23 @@ function App(): React.ReactElement {
         .map(d => `- "${d.description}" located at coordinates (${d.x}, ${d.y})`)
         .join('\n');
 
+      // Check if there are any markup shapes that will be visible in the image
+      const hasMarkupShapes = (drawingState.aiMarkupShapes?.length || 0) > 0;
+
+      const markupRemovalNote = hasMarkupShapes
+        ? `\n\nCRITICAL - MARKUP REMOVAL: The image contains bright orange freehand annotations (lines, circles, or rectangles) drawn by the user to indicate areas of interest. You MUST:
+1. Remove ALL orange markup lines/shapes from the output
+2. Restore the underlying content naturally where the markups were
+3. Execute the user's edit request as described above`
+        : '';
+
       const enrichedPrompt = `CONTEXT - Elements in this image that are relevant to the edit:
 ${descriptionsContext}
 
 TASK:
 ${movePlan.suggestedPrompt}
 
-IMPORTANT: Use the exact coordinates provided above to locate elements. The descriptions tell you precisely what each element looks like and where it is.`;
+IMPORTANT: Use the exact coordinates provided above to locate elements. The descriptions tell you precisely what each element looks like and where it is.${markupRemovalNote}`;
 
       updateProgress({
         step: 'processing',
@@ -1251,6 +1263,9 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
+
+      // Clear any markup shapes before adding the new image
+      clearAiMarkupShapes();
 
       addShape(imageShape);
       selectShape(imageShape.id);
@@ -1418,6 +1433,7 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
             onReferenceManipulate={handleOpenManipulationDialog}
             onReferenceClear={() => {
               clearReferencePoints();
+              clearAiMarkupShapes();
               setAiReferenceMode(false);
             }}
             onAiMoveClick={handleAiMoveClick}

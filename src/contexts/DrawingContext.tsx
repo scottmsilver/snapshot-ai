@@ -12,6 +12,7 @@ import {
   type AiMoveState,
   LayerOperation,
   GenerativeFillSelectionTool,
+  AIReferenceSubTool,
   getNextZIndex,
   reorderShapes
 } from '@/types/drawing';
@@ -79,6 +80,9 @@ export enum DrawingActionType {
   REMOVE_REFERENCE_POINT = 'REMOVE_REFERENCE_POINT',
   SET_AI_MOVE_STATE = 'SET_AI_MOVE_STATE',
   CLEAR_AI_MOVE_STATE = 'CLEAR_AI_MOVE_STATE',
+  SET_AI_REFERENCE_SUB_TOOL = 'SET_AI_REFERENCE_SUB_TOOL',
+  ADD_AI_MARKUP_SHAPE = 'ADD_AI_MARKUP_SHAPE',
+  CLEAR_AI_MARKUP_SHAPES = 'CLEAR_AI_MARKUP_SHAPES',
 }
 
 // Action definitions
@@ -128,7 +132,10 @@ type DrawingAction =
   | { type: DrawingActionType.CLEAR_REFERENCE_POINTS }
   | { type: DrawingActionType.REMOVE_REFERENCE_POINT; id: string }
   | { type: DrawingActionType.SET_AI_MOVE_STATE; state: Partial<AiMoveState> }
-  | { type: DrawingActionType.CLEAR_AI_MOVE_STATE };
+  | { type: DrawingActionType.CLEAR_AI_MOVE_STATE }
+  | { type: DrawingActionType.SET_AI_REFERENCE_SUB_TOOL; subTool: AIReferenceSubTool }
+  | { type: DrawingActionType.ADD_AI_MARKUP_SHAPE; shape: Shape }
+  | { type: DrawingActionType.CLEAR_AI_MARKUP_SHAPES };
 
 // Initial state
 export const initialState: DrawingState = {
@@ -159,8 +166,10 @@ export const initialState: DrawingState = {
   clipboard: [],
   generativeFillMode: null,
   aiReferenceMode: false,
+  aiReferenceSubTool: AIReferenceSubTool.PIN,
   referencePoints: [],
   nextReferenceLabel: 'A',
+  aiMarkupShapes: [],
   aiMoveState: null,
 };
 
@@ -582,6 +591,24 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
         aiMoveState: null,
       };
 
+    case DrawingActionType.SET_AI_REFERENCE_SUB_TOOL:
+      return {
+        ...state,
+        aiReferenceSubTool: action.subTool,
+      };
+
+    case DrawingActionType.ADD_AI_MARKUP_SHAPE:
+      return {
+        ...state,
+        aiMarkupShapes: [...state.aiMarkupShapes, action.shape],
+      };
+
+    case DrawingActionType.CLEAR_AI_MARKUP_SHAPES:
+      return {
+        ...state,
+        aiMarkupShapes: [],
+      };
+
     default:
       return state;
   }
@@ -643,6 +670,11 @@ export interface DrawingContextType {
   // AI Move
   setAiMoveState: (state: Partial<AiMoveState>) => void;
   clearAiMoveState: () => void;
+
+  // AI Reference markup
+  setAiReferenceSubTool: (subTool: AIReferenceSubTool) => void;
+  addAiMarkupShape: (shape: Shape) => void;
+  clearAiMarkupShapes: () => void;
 }
 
 // Create context

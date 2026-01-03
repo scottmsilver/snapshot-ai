@@ -2,6 +2,7 @@ import React from 'react';
 import { Stage, Layer, Rect, Line } from 'react-konva';
 import Konva from 'konva';
 import { DrawingLayer } from '@/components/Canvas/DrawingLayer';
+import { CoordinateMarker } from '@/components/Canvas/CoordinateMarker';
 import { ImageUploader } from '@/components/ImageUploader';
 import { PDFViewer } from '@/components/PDFViewer/PDFViewer';
 import { DrawingTool, type Point } from '@/types/drawing';
@@ -324,6 +325,12 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
           )}
           {/* AI Move drag preview overlay */}
           <DragPreview zoomLevel={zoomLevel} />
+          {/* Coordinate highlight marker (from AI console hover) */}
+          <CoordinateMarker
+            zoomLevel={zoomLevel}
+            canvasWidth={canvasSize.width}
+            canvasHeight={canvasSize.height}
+          />
         </div>
       </div>
 

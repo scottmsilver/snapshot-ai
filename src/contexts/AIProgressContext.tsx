@@ -12,13 +12,13 @@ import {
 export interface AIProgressContextType {
   /** Current progress state */
   state: AIProgressState;
-  
+
   /** Update progress with a new event */
   updateProgress: (event: AIProgressEvent) => void;
-  
+
   /** Append thinking text incrementally (for streaming) */
   appendThinking: (text: string) => void;
-  
+
   /** Clear the entire log history */
   clearLog: () => void;
 }
@@ -82,37 +82,37 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
   const updateProgress = useCallback((event: AIProgressEvent) => {
     const isCompletingOrError = event.step === 'complete' || event.step === 'error';
     const isActiveStep = event.step !== 'idle' && event.step !== 'complete' && event.step !== 'error';
-    
+
     // Determine if we need to start a new operation BEFORE entering setState
     // This prevents race conditions with multiple rapid calls
     const needsNewOperation = isActiveStep && !currentLogIdRef.current;
-    
+
     if (needsNewOperation) {
       startTimeRef.current = Date.now();
       currentLogIdRef.current = generateLogId();
-      console.log('📊 Created new log ID:', currentLogIdRef.current);
+      // Debug: console.log('📊 Created new log ID:', currentLogIdRef.current);
     }
-    
+
     // Stop timer on complete or error
     if (isCompletingOrError && timerRef.current) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    
+
     const currentLogId = currentLogIdRef.current;
-    
+
     // Reset refs on complete/error AFTER capturing the current ID
     if (isCompletingOrError) {
       currentLogIdRef.current = null;
       startTimeRef.current = null;
     }
-    
+
     setState(prev => {
       const elapsedMs = startTimeRef.current ? Date.now() - startTimeRef.current : prev.elapsedMs;
 
       // Build new log entry or update existing one
       let newLog = [...prev.log];
-      
+
       if (needsNewOperation && currentLogId) {
         // Create new log entry for this operation
         const newEntry: AILogEntry = {
@@ -123,13 +123,14 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
           thinkingText: event.thinkingText,
           iteration: event.iteration,
           error: event.error,
+          iterationImage: event.iterationImage,
         };
         newLog.push(newEntry);
-        console.log('📊 Created new log entry, total entries:', newLog.length);
+        // Debug: console.log('📊 Created new log entry, total entries:', newLog.length);
       } else if (currentLogId) {
         // Update the current log entry
         const currentIndex = newLog.findIndex(e => e.id === currentLogId);
-        console.log('📊 Updating log entry at index:', currentIndex, 'for ID:', currentLogId);
+        // Debug: console.log('📊 Updating log entry at index:', currentIndex, 'for ID:', currentLogId);
         if (currentIndex >= 0) {
           const currentEntry = newLog[currentIndex];
           newLog[currentIndex] = {
@@ -141,12 +142,13 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
             iteration: event.iteration || currentEntry.iteration,
             error: event.error,
             durationMs: isCompletingOrError ? elapsedMs : undefined,
+            // Keep latest iteration image if provided
+            iterationImage: event.iterationImage ?? currentEntry.iterationImage,
           };
-          console.log('📊 Updated entry thinkingText length:', newLog[currentIndex].thinkingText?.length || 0);
+          // Debug: console.log('📊 Updated entry thinkingText length:', newLog[currentIndex].thinkingText?.length || 0);
         }
-      } else {
-        console.log('📊 No log entry to update - no currentLogId');
       }
+      // No else needed - it's normal to have no currentLogId after operation ends
 
       const newState: AIProgressState = {
         step: event.step,
@@ -176,7 +178,7 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
           };
         }
       }
-      
+
       return {
         ...prev,
         thinkingText: prev.thinkingText + text,

@@ -1,9 +1,13 @@
-import { GoogleGenAI } from '@google/genai';
 import { GenerativeInpaintService } from './generativeApi';
 import { imageDataToBase64, base64ToImageData } from '@/utils/maskRendering';
 import { annotateImage, parseCommandForArrows } from '@/utils/imageAnnotation';
 import { aiLogService } from './aiLogService';
+import { createAIClient, type AIClient } from './aiClient';
+import { AI_MODELS, THINKING_BUDGETS } from '@/config/aiModels';
+import { detectEditRegions, formatEditRegionsForPrompt } from './imageCompareService';
 import type { AIProgressEvent } from '@/types/aiProgress';
+import type { Shape, PenShape, RectShape, CircleShape, ArrowShape } from '@/types/drawing';
+import { DrawingTool } from '@/types/drawing';
 
 /**
  * Result of the planning phase for AI Move operations
@@ -22,15 +26,13 @@ export interface MovePlan {
 }
 
 const MAX_ITERATIONS = 3;
-const HIGH_THINKING_BUDGET = 8192;
-const CHECK_THINKING_BUDGET = 4096;
 
 export class AgenticPainterService {
-    private genAI: GoogleGenAI;
+    private ai: AIClient;
     private underlyingService: GenerativeInpaintService;
 
     constructor(apiKey: string, underlyingService: GenerativeInpaintService) {
-        this.genAI = new GoogleGenAI({ apiKey });
+        this.ai = createAIClient(apiKey);
         this.underlyingService = underlyingService;
     }
 
@@ -97,45 +99,61 @@ You MUST call the gemini_image_painter tool.`;
         const parts = result.candidates?.[0]?.content?.parts || [];
         let evaluation = { satisfied: true, reasoning: '', suggestion: '' };
         let thinking = '';
+        let allText = '';
 
+        // Collect thinking and text from response
         for (const part of parts) {
             if (part.thought && part.text) {
                 thinking += `[Thought] ${part.text}\n\n`;
+            } else if (part.text) {
+                allText += part.text;
             }
-            if (part.functionCall) {
-                const name = part.functionCall.name;
-                const args = part.functionCall.args || {};
+        }
 
-                if (name === 'mark_satisfied') {
-                    evaluation.satisfied = true;
-                    evaluation.reasoning = args.reasoning || '';
-                    thinking += `[Action] Marked SATISFIED: ${evaluation.reasoning}`;
-                } else if (name === 'request_revision') {
-                    evaluation.satisfied = false;
-                    evaluation.reasoning = args.reasoning || '';
-                    evaluation.suggestion = args.revised_prompt || '';
-                    thinking += `[Action] Requested REVISION: ${evaluation.reasoning}`;
-                }
-            } else if (part.text && !part.thought) {
-                thinking += part.text;
-                // Try to parse from text if no function call
-                if (part.text.toLowerCase().includes('satisfied') && !part.text.toLowerCase().includes('not satisfied') && !part.text.toLowerCase().includes('request_revision')) {
-                    evaluation.satisfied = true;
-                    evaluation.reasoning = part.text;
-                } else if (part.text.toLowerCase().includes('not satisfied') || part.text.toLowerCase().includes('request_revision') || part.text.toLowerCase().includes('revision')) {
-                    evaluation.satisfied = false;
-                    evaluation.reasoning = part.text;
-
-                    // Try to extract the revised prompt from text like: request_revision "prompt here"
-                    const revisionMatch = part.text.match(/request_revision\s*"([^"]+)"/i) ||
-                                          part.text.match(/request_revision\s*\(\s*"([^"]+)"/i) ||
-                                          part.text.match(/revised[_\s]prompt[:\s]*"([^"]+)"/i);
-                    if (revisionMatch) {
-                        evaluation.suggestion = revisionMatch[1];
-                        console.log(`🤖 Agentic Service: Extracted revision prompt from text`);
+        // Extract JSON from code fence
+        const jsonMatch = allText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+        if (jsonMatch) {
+            try {
+                const parsed = JSON.parse(jsonMatch[1].trim());
+                evaluation.satisfied = parsed.satisfied === true;
+                evaluation.reasoning = parsed.reasoning || '';
+                evaluation.suggestion = parsed.revised_prompt || '';
+                console.log(`🤖 Self-check: Parsed JSON - satisfied=${evaluation.satisfied}, reasoning length=${evaluation.reasoning.length}`);
+            } catch (e) {
+                console.error('🤖 Self-check: Failed to parse JSON from code fence:', e);
+                // Fallback: try to find any JSON object in the text
+                const fallbackMatch = allText.match(/\{[\s\S]*"satisfied"[\s\S]*\}/);
+                if (fallbackMatch) {
+                    try {
+                        const parsed = JSON.parse(fallbackMatch[0]);
+                        evaluation.satisfied = parsed.satisfied === true;
+                        evaluation.reasoning = parsed.reasoning || '';
+                        evaluation.suggestion = parsed.revised_prompt || '';
+                        console.log(`🤖 Self-check: Parsed fallback JSON - satisfied=${evaluation.satisfied}`);
+                    } catch (e2) {
+                        console.error('🤖 Self-check: Fallback JSON parse also failed');
                     }
                 }
             }
+        } else {
+            // No code fence found - try to find raw JSON
+            const rawJsonMatch = allText.match(/\{[\s\S]*"satisfied"[\s\S]*\}/);
+            if (rawJsonMatch) {
+                try {
+                    const parsed = JSON.parse(rawJsonMatch[0]);
+                    evaluation.satisfied = parsed.satisfied === true;
+                    evaluation.reasoning = parsed.reasoning || '';
+                    evaluation.suggestion = parsed.revised_prompt || '';
+                    console.log(`🤖 Self-check: Parsed raw JSON - satisfied=${evaluation.satisfied}`);
+                } catch (e) {
+                    console.error('🤖 Self-check: Raw JSON parse failed');
+                }
+            }
+        }
+
+        // Ensure we always have some reasoning
+        if (!evaluation.reasoning) {
+            evaluation.reasoning = evaluation.satisfied ? 'Edit appears to meet the goal' : 'Edit may need improvement';
         }
 
         return { ...evaluation, thinking };
@@ -160,7 +178,10 @@ You MUST call the gemini_image_painter tool.`;
         const sourceKB = Math.round((sourceBase64.length * 3) / 4 / 1024);
         const maskKB = maskBase64 ? Math.round((maskBase64.length * 3) / 4 / 1024) : 0;
 
-        // Show the user what we're sending with image previews
+        // Start the agentic operation in aiLogService
+        aiLogService.startOperation('planning', `Editing: "${prompt}"`);
+
+        // Log the planning context to aiLogService (centralized logging)
         const planningContext = `## Planning Request
 
 **User prompt:** "${prompt}"
@@ -182,16 +203,16 @@ ${maskImage ? `**Mask Image:** ${maskImage.width} x ${maskImage.height} (${maskK
 ${systemPrompt}
 \`\`\`
 
-**Planning Model:** \`gemini-2.5-flash\` (thinking budget: ${HIGH_THINKING_BUDGET} tokens)
-**Image Generation Model:** \`gemini-3-pro-image-preview\`
+**Planning Model:** \`${AI_MODELS.PLANNING}\` (thinking budget: ${THINKING_BUDGETS.HIGH} tokens)
+**Image Generation Model:** \`${AI_MODELS.IMAGE_GENERATION}\`
 
 ---
-*Waiting for AI response...*`;
+`;
+        aiLogService.appendThinking(planningContext);
 
         onProgress?.({
             step: 'planning',
             message: 'Sending planning request to AI...',
-            thinkingText: planningContext,
             iteration: { current: 0, max: MAX_ITERATIONS }
         });
 
@@ -223,95 +244,76 @@ ${systemPrompt}
 
             console.log('🤖 Agentic Service: Planning edit with high thinking budget (streaming)...');
 
+            aiLogService.updateOperation({ step: 'calling_api', message: 'Waiting for AI planning response...' });
             onProgress?.({
                 step: 'calling_api',
                 message: 'Waiting for AI planning response...',
                 iteration: { current: 0, max: MAX_ITERATIONS }
             });
 
-            // Use streaming to show thinking tokens as they arrive
-            const stream = await this.genAI.models.generateContentStream({
-                model: 'gemini-2.5-flash',
+            // Use streaming with the wrapper - logs input images automatically at lowest level
+            const stream = this.ai.callStream({
+                model: AI_MODELS.PLANNING,
                 contents: [{ role: 'user', parts: contentParts }],
                 tools: [{ functionDeclarations: toolDeclarations }],
-                config: {
-                    thinkingConfig: {
-                        thinkingBudget: HIGH_THINKING_BUDGET,
-                        includeThoughts: true,
-                    },
-                },
-            } as any);
+                thinkingBudget: THINKING_BUDGETS.HIGH,
+                logLabel: 'Planning Edit',
+            });
 
             // Collect streaming response and show thinking in real-time
             let streamedThinking = '';
             let streamedText = '';
             let refinedPrompt = prompt;
-            let chunkCount = 0;
 
             // Send immediate update that we're starting to receive
+            aiLogService.updateOperation({ step: 'planning', message: 'Receiving AI response...' });
             onProgress?.({
                 step: 'planning',
                 message: 'Receiving AI response...',
-                thinkingText: `## AI Thinking\n\n*Waiting for thoughts...*`,
                 iteration: { current: 0, max: MAX_ITERATIONS }
             });
 
             for await (const chunk of stream) {
-                chunkCount++;
-                const parts = chunk.candidates?.[0]?.content?.parts || [];
+                streamedThinking = chunk.thinking;
+                streamedText = chunk.text;
 
-                console.log(`🤖 Stream chunk #${chunkCount}:`, parts.length, 'parts');
+                // Update UI with thinking as it streams (wrapper already logged to aiLogService)
+                if (streamedThinking) {
+                    onProgress?.({
+                        step: 'planning',
+                        message: `AI is thinking... (${streamedThinking.length} chars)`,
+                        iteration: { current: 0, max: MAX_ITERATIONS }
+                    });
+                }
 
-                for (const part of parts) {
-                    // Log what we're getting
-                    console.log(`🤖 Part: thought=${part.thought}, hasText=${!!part.text}, hasFunctionCall=${!!part.functionCall}`);
-
-                    // Check if this is a thought part
-                    if (part.thought && part.text) {
-                        streamedThinking += part.text;
-                        console.log(`🤖 Thought chunk: "${part.text.substring(0, 50)}..."`);
-
-                        // Update UI immediately with each thought chunk
-                        onProgress?.({
-                            step: 'planning',
-                            message: `AI is thinking... (${streamedThinking.length} chars)`,
-                            thinkingText: `## AI Thinking\n\n${streamedThinking}`,
-                            iteration: { current: 0, max: MAX_ITERATIONS }
-                        });
+                // Extract prompt from function call
+                if (chunk.functionCall) {
+                    const args = chunk.functionCall.args;
+                    if (typeof args.prompt === 'string') {
+                        refinedPrompt = args.prompt;
+                        console.log(`🤖 Got refined prompt from function call`);
                     }
-                    // Check for function call
-                    if (part.functionCall) {
-                        console.log(`🤖 Function call:`, part.functionCall.name);
-                        const args = (part.functionCall.args || {}) as Record<string, unknown>;
-                        if (typeof args.prompt === 'string') {
-                            refinedPrompt = args.prompt;
-                            console.log(`🤖 Got refined prompt from function call`);
-                        }
-                    }
-                    // Check for regular text (non-thought)
-                    if (part.text && !part.thought) {
-                        streamedText += part.text;
-                        console.log(`🤖 Text chunk: "${part.text.substring(0, 50)}..."`);
-                        // Try to extract prompt from text if no function call
-                        const match = part.text.match(/gemini_image_painter\s*\(\s*prompt\s*=\s*"([^"]+)"/);
-                        if (match) {
-                            refinedPrompt = match[1];
-                            console.log(`🤖 Got refined prompt from text`);
-                        }
+                }
+
+                // Try to extract prompt from text if no function call
+                if (streamedText && !chunk.functionCall) {
+                    const match = streamedText.match(/gemini_image_painter\s*\(\s*prompt\s*=\s*"([^"]+)"/);
+                    if (match) {
+                        refinedPrompt = match[1];
+                        console.log(`🤖 Got refined prompt from text`);
                     }
                 }
             }
 
-            console.log(`🤖 Stream complete: ${chunkCount} chunks, ${streamedThinking.length} thinking chars, ${streamedText.length} text chars`);
+            console.log(`🤖 Stream complete: ${streamedThinking.length} thinking chars, ${streamedText.length} text chars`);
 
             const planThinking = streamedThinking || streamedText;
 
-            // Send final update with all thinking
+            // Send final update (wrapper already logged thinking to aiLogService)
             if (planThinking) {
                 onProgress?.({
                     step: 'planning',
                     message: 'AI planning complete',
-                    thinkingText: `## AI Thinking\n\n${planThinking}`,
                     iteration: { current: 0, max: MAX_ITERATIONS }
                 });
             }
@@ -320,18 +322,13 @@ ${systemPrompt}
                 console.log(`🤖 Agentic Service: Agent thinking: ${planThinking.substring(0, 200)}...`);
             }
 
-            // Show the AI's response
-            const responseContext = `## AI Planning Response
+            // Log the AI's response context
+            aiLogService.appendThinking(`## AI Planning Response\n\n**AI's refined prompt:**\n> ${refinedPrompt}\n\n`);
 
-**AI's refined prompt:**
-> ${refinedPrompt}
-
-${planThinking ? `**AI Thinking:**\n${planThinking}` : ''}`;
-
+            aiLogService.updateOperation({ step: 'processing', message: 'AI planned the edit' });
             onProgress?.({
                 step: 'processing',
                 message: 'AI planned the edit',
-                thinkingText: responseContext,
                 iteration: { current: 0, max: MAX_ITERATIONS }
             });
 
@@ -341,21 +338,21 @@ ${planThinking ? `**AI Thinking:**\n${planThinking}` : ''}`;
             for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
                 console.log(`🤖 Agentic Service: Iteration ${iteration + 1}/${MAX_ITERATIONS}`);
 
-                // Show iteration start with the prompt being used
-                const iterationContext = `## Iteration ${iteration + 1}/${MAX_ITERATIONS}
+                // Log iteration start
+                aiLogService.appendThinking(`## Iteration ${iteration + 1}/${MAX_ITERATIONS}
 
 **Sending to image generator:**
 > ${refinedPrompt}
 
-**Model:** \`gemini-3-pro-image-preview\` (${maskImage ? 'inpainting mode' : 'text-only mode'})
+**Model:** \`${AI_MODELS.IMAGE_GENERATION}\` (${maskImage ? 'inpainting mode' : 'text-only mode'})
 
 ---
-*Generating image...*`;
+`);
 
+                aiLogService.updateOperation({ step: 'calling_api', message: `Generating image (attempt ${iteration + 1}/${MAX_ITERATIONS})...` });
                 onProgress?.({
                     step: 'calling_api',
                     message: `Generating image (attempt ${iteration + 1}/${MAX_ITERATIONS})...`,
-                    thinkingText: iterationContext,
                     iteration: { current: iteration + 1, max: MAX_ITERATIONS }
                 });
 
@@ -374,16 +371,17 @@ ${planThinking ? `**AI Thinking:**\n${planThinking}` : ''}`;
                     }
                 } catch (editError) {
                     console.error('🤖 Agentic Service: Edit failed:', editError);
-                    const errorContext = `## Generation Failed
+                    aiLogService.appendThinking(`## Generation Failed
 
 **Error:** ${editError instanceof Error ? editError.message : 'Unknown error'}
 
-${editError instanceof Error && editError.stack ? `**Stack:**\n\`\`\`\n${editError.stack}\n\`\`\`` : ''}`;
+${editError instanceof Error && editError.stack ? `**Stack:**\n\`\`\`\n${editError.stack}\n\`\`\`` : ''}
+`);
 
+                    aiLogService.endOperation('error', 'Image generation failed');
                     onProgress?.({
                         step: 'error',
                         message: 'Image generation failed',
-                        thinkingText: errorContext,
                         error: {
                             message: editError instanceof Error ? editError.message : 'Unknown error',
                             details: editError instanceof Error ? editError.stack : undefined
@@ -398,15 +396,36 @@ ${editError instanceof Error && editError.stack ? `**Stack:**\n\`\`\`\n${editErr
                     break;
                 }
 
+                // Convert result to base64 and show in progress
+                const iterationImageBase64 = imageDataToBase64(finalResult);
+                aiLogService.appendThinking(`## Image Generated (Iteration ${iteration + 1})
+
+**Prompt used:** "${refinedPrompt}"
+
+Generated image preview:
+
+![Generated Image](${iterationImageBase64})
+
+`);
+
+                aiLogService.updateOperation({ step: 'processing', message: `Image generated (attempt ${iteration + 1}/${MAX_ITERATIONS})` });
+                onProgress?.({
+                    step: 'processing',
+                    message: `Image generated (attempt ${iteration + 1}/${MAX_ITERATIONS})`,
+                    iteration: { current: iteration + 1, max: MAX_ITERATIONS },
+                    iterationImage: iterationImageBase64
+                });
+
                 // Self-check on last iteration is skipped (nothing to improve)
                 if (iteration >= MAX_ITERATIONS - 1) {
                     console.log('🤖 Agentic Service: Max iterations reached, using current result');
+                    aiLogService.appendThinking(`## Max Iterations Reached
+
+Used all ${MAX_ITERATIONS} attempts. Returning the last generated image.
+`);
                     onProgress?.({
                         step: 'processing',
                         message: 'Max iterations reached, using final result',
-                        thinkingText: `## Max Iterations Reached
-
-Used all ${MAX_ITERATIONS} attempts. Returning the last generated image.`,
                         iteration: { current: iteration + 1, max: MAX_ITERATIONS }
                     });
                     break;
@@ -415,35 +434,38 @@ Used all ${MAX_ITERATIONS} attempts. Returning the last generated image.`,
                 // Self-check: Did we meet the user's goal?
                 console.log('🤖 Agentic Service: Self-checking result...');
 
-                const selfCheckContext = `## Self-Evaluation
+                aiLogService.appendThinking(`## Self-Evaluation
 
 **Original request:** "${prompt}"
 **Prompt used:** "${refinedPrompt}"
 
-Asking AI to evaluate if the result meets the goal...`;
+Asking AI to evaluate if the result meets the goal...
 
+`);
+
+                aiLogService.updateOperation({ step: 'self_checking', message: 'AI is evaluating the result...' });
                 onProgress?.({
                     step: 'self_checking',
                     message: 'AI is evaluating the result...',
-                    thinkingText: selfCheckContext,
                     iteration: { current: iteration + 1, max: MAX_ITERATIONS }
                 });
 
-                const checkResult = await this.selfCheck(sourceImage, finalResult, prompt, refinedPrompt, maskImage);
+                const checkResult = await this.selfCheck(sourceImage, finalResult, prompt, refinedPrompt, maskImage, onProgress, { current: iteration + 1, max: MAX_ITERATIONS });
 
                 if (checkResult.satisfied) {
                     console.log(`🤖 Agentic Service: Self-check SATISFIED: ${checkResult.reasoning}`);
 
-                    const satisfiedContext = `## Self-Check: SATISFIED
+                    aiLogService.appendThinking(`## Self-Check: SATISFIED
 
 **Reasoning:** ${checkResult.reasoning}
 
-The AI is happy with the result. Completing edit.`;
+The AI is happy with the result. Completing edit.
+`);
 
+                    aiLogService.updateOperation({ step: 'processing', message: 'AI approved the result' });
                     onProgress?.({
                         step: 'processing',
                         message: 'AI approved the result',
-                        thinkingText: satisfiedContext,
                         iteration: { current: iteration + 1, max: MAX_ITERATIONS }
                     });
                     break;
@@ -451,19 +473,20 @@ The AI is happy with the result. Completing edit.`;
                     console.log(`🤖 Agentic Service: Self-check requested REVISION: ${checkResult.reasoning}`);
 
                     if (checkResult.suggestion) {
-                        const revisionContext = `## Self-Check: REVISION NEEDED
+                        aiLogService.appendThinking(`## Self-Check: REVISION NEEDED
 
 **Reasoning:** ${checkResult.reasoning}
 
 **New prompt for next attempt:**
 > ${checkResult.suggestion}
 
-Will try again with the revised prompt...`;
+Will try again with the revised prompt...
+`);
 
+                        aiLogService.updateOperation({ step: 'iterating', message: 'AI requested revision, trying again...' });
                         onProgress?.({
                             step: 'iterating',
                             message: 'AI requested revision, trying again...',
-                            thinkingText: revisionContext,
                             iteration: { current: iteration + 1, max: MAX_ITERATIONS }
                         });
 
@@ -472,14 +495,16 @@ Will try again with the revised prompt...`;
                     } else {
                         console.log('🤖 Agentic Service: No suggestion provided, using current result');
 
-                        onProgress?.({
-                            step: 'processing',
-                            message: 'No revision suggested, using current result',
-                            thinkingText: `## Self-Check: No Revision
+                        aiLogService.appendThinking(`## Self-Check: No Revision
 
 **Reasoning:** ${checkResult.reasoning}
 
-AI didn't provide a revised prompt. Using current result.`,
+AI didn't provide a revised prompt. Using current result.
+`);
+
+                        onProgress?.({
+                            step: 'processing',
+                            message: 'No revision suggested, using current result',
                             iteration: { current: iteration + 1, max: MAX_ITERATIONS }
                         });
                         break;
@@ -488,12 +513,14 @@ AI didn't provide a revised prompt. Using current result.`,
             }
 
             if (finalResult) {
+                aiLogService.appendThinking(`## Complete
+
+Image generation finished successfully.
+`);
+                aiLogService.endOperation('complete', 'Edit completed successfully!');
                 onProgress?.({
                     step: 'complete',
                     message: 'Edit completed successfully!',
-                    thinkingText: `## Complete
-
-Image generation finished successfully.`,
                     iteration: { current: MAX_ITERATIONS, max: MAX_ITERATIONS }
                 });
                 return finalResult;
@@ -501,29 +528,40 @@ Image generation finished successfully.`,
 
             // Fallback if nothing worked
             console.log('🤖 Agentic Service: Using fallback direct edit');
-            onProgress?.({
-                step: 'calling_api',
-                message: 'Using fallback edit method...',
-                thinkingText: `## Fallback Mode
+            aiLogService.appendThinking(`## Fallback Mode
 
 Primary generation didn't produce a result. Trying direct API call...
 
-**Prompt:** "${prompt}"`,
+**Prompt:** "${prompt}"
+`);
+            aiLogService.updateOperation({ step: 'calling_api', message: 'Using fallback edit method...' });
+            onProgress?.({
+                step: 'calling_api',
+                message: 'Using fallback edit method...',
                 iteration: { current: MAX_ITERATIONS, max: MAX_ITERATIONS }
             });
             const fallbackResult = await this.fallbackEdit(sourceImage, prompt, maskImage);
+            aiLogService.appendThinking(`## Complete (Fallback)
+
+Used fallback direct generation.
+`);
+            aiLogService.endOperation('complete', 'Fallback edit completed');
             onProgress?.({
                 step: 'complete',
                 message: 'Fallback edit completed',
-                thinkingText: `## Complete (Fallback)
-
-Used fallback direct generation.`,
                 iteration: { current: MAX_ITERATIONS, max: MAX_ITERATIONS }
             });
             return fallbackResult;
 
         } catch (error) {
             console.error('🤖 Agentic Service: Error in agentic flow:', error);
+            aiLogService.appendThinking(`## Error in AI Editing Flow
+
+**Error:** ${error instanceof Error ? error.message : 'Unknown error'}
+
+${error instanceof Error && error.stack ? `**Stack:**\n\`\`\`\n${error.stack}\n\`\`\`` : ''}
+`);
+            aiLogService.endOperation('error', 'Error in AI editing flow');
             onProgress?.({
                 step: 'error',
                 message: 'Error in AI editing flow',
@@ -541,10 +579,42 @@ Used fallback direct generation.`,
         resultImage: ImageData,
         userPrompt: string,
         editPrompt: string,
-        maskImage?: ImageData
+        maskImage?: ImageData,
+        onProgress?: (event: AIProgressEvent) => void,
+        iteration?: { current: number; max: number }
     ): Promise<{ satisfied: boolean; reasoning: string; suggestion: string }> {
         const originalBase64 = imageDataToBase64(originalImage);
         const resultBase64 = imageDataToBase64(resultImage);
+
+        // Detect where edits actually occurred using block-based comparison
+        // Block-based filtering helps ignore diffusion noise while catching real edits
+        const editRegions = detectEditRegions(originalImage, resultImage, {
+            useBlockComparison: true,
+            blockSize: 8,
+            minBlockDensity: 0.25, // Block needs 25% of pixels changed to count
+            minBlockCount: 2,      // Need at least 2 connected blocks to form a region
+            colorThreshold: 30,
+        });
+        const editRegionsText = formatEditRegionsForPrompt(editRegions);
+
+        // Log the detected regions
+        aiLogService.appendThinking(`### Detected Edit Regions (Block-Based Comparison)
+
+${editRegionsText}
+
+`);
+        console.log('🤖 Self-check detected edit regions:', editRegions.regions.length, 'regions,', editRegions.totalChangedPixels, 'pixels changed');
+
+        // Attach debug data for visualization in AI console
+        aiLogService.attachDebugData({
+            originalImage: originalBase64,
+            resultImage: resultBase64,
+            editRegions: editRegions.regions,
+            imageWidth: editRegions.imageWidth,
+            imageHeight: editRegions.imageHeight,
+            totalChangedPixels: editRegions.totalChangedPixels,
+            percentChanged: editRegions.percentChanged,
+        });
 
         const hasMask = !!maskImage;
         const maskContext = hasMask
@@ -559,56 +629,71 @@ EDIT THAT WAS ATTEMPTED: "${editPrompt}"
 
 ${maskContext}
 
-Evaluate the RESULT against what the user asked for:
-1. Does the edit accomplish what the user originally asked for ("${userPrompt}")?
-${hasMask ? '2. Was the edit applied to the correct area (as shown by the white region in the mask)?' : ''}
-${hasMask ? '3' : '2'}. Does the edited area look NATURAL and FIT SEAMLESSLY into the image?
-${hasMask ? '4' : '3'}. Is the edit clearly visible and significant enough?
-${hasMask ? '5' : '4'}. Does it match the style, lighting, and aesthetic of the surroundings?
+## Automatically Detected Changes
 
-If the edit is GOOD and meets the user's goal naturally, call mark_satisfied.
-If the edit needs improvement, call request_revision with a better prompt.
+The following regions were detected as changed by comparing the original and result images pixel-by-pixel:
 
-Be thoughtful - only request revision if there's a real problem. Consider whether the result genuinely achieves the user's intent.`;
+${editRegionsText}
 
-        const checkTools = [{
-            functionDeclarations: [
-                {
-                    name: 'mark_satisfied',
-                    description: 'The edit successfully accomplishes the user goal and looks natural.',
-                    parameters: {
-                        type: 'OBJECT' as const,
-                        properties: {
-                            reasoning: {
-                                type: 'STRING' as const,
-                                description: 'Brief explanation of why the edit is satisfactory.',
-                            },
-                        },
-                        required: ['reasoning'],
-                    },
-                },
-                {
-                    name: 'request_revision',
-                    description: 'The edit needs improvement. Provide a revised prompt.',
-                    parameters: {
-                        type: 'OBJECT' as const,
-                        properties: {
-                            reasoning: {
-                                type: 'STRING' as const,
-                                description: 'What is wrong or could be improved.',
-                            },
-                            revised_prompt: {
-                                type: 'STRING' as const,
-                                description: 'An improved, more specific prompt to try.',
-                            },
-                        },
-                        required: ['reasoning', 'revised_prompt'],
-                    },
-                },
-            ],
-        }];
+Use this information to verify the edit was applied to the CORRECT location.
+
+## Evaluation Criteria
+
+### 1. Location Accuracy
+Think carefully: WHERE did the user want changes to happen?
+- Compare the DETECTED EDIT LOCATIONS above with where the edit SHOULD have been applied
+- If the edit prompt contains COORDINATES (e.g., "at (150, 200)", "move to (300, 400)"), verify the detected regions are at or near those pixel locations
+- If the user referenced specific elements (e.g., "the button", "the header", "the red car"), verify the detected changes are in the region of THAT element
+- If a mask was provided, verify the detected changes are within the masked area
+- Check if there are unintended changes OUTSIDE the target area
+
+### 2. Cardinality Check
+Think carefully: Did the user's request imply ADDING, REMOVING, or REPLACING elements?
+- **REPLACE/MODIFY**: "Change X to Y", "Make X look like Y", "Update the color" → The COUNT of elements should stay the SAME
+- **ADD**: "Add a button", "Put text here", "Insert an icon" → There should be MORE elements than before
+- **REMOVE/DELETE**: "Remove the logo", "Delete the text", "Clear this area" → There should be FEWER elements than before
+
+Does the result match the expected cardinality? If the user said "remove" but the element is still there (or replaced with something else), that's wrong.
+
+### 3. Visual Quality
+${hasMask ? '- Was the edit applied to the correct area (as shown by the white region in the mask)?' : ''}
+- Does the edited area look NATURAL and FIT SEAMLESSLY into the image?
+- Is the edit clearly visible and significant enough?
+- Does it match the style, lighting, and aesthetic of the surroundings?
+
+## Your Response
+
+Think through each criterion carefully, then provide your evaluation as a JSON object in a code fence.
+
+If the edit is SATISFACTORY:
+\`\`\`json
+{
+  "satisfied": true,
+  "reasoning": "Explain why the edit meets all criteria: location accuracy, cardinality, and visual quality."
+}
+\`\`\`
+
+If the edit NEEDS REVISION:
+\`\`\`json
+{
+  "satisfied": false,
+  "reasoning": "Explain what is wrong - which criteria failed and why.",
+  "revised_prompt": "A better, more specific prompt that addresses the issues."
+}
+\`\`\`
+
+Be thoughtful - only request revision if there's a real problem. Consider whether the result genuinely achieves the user's intent.
+
+IMPORTANT: You MUST output exactly one JSON code block with your evaluation.`;
 
         try {
+            aiLogService.updateOperation({ step: 'self_checking', message: 'Evaluating result...' });
+            onProgress?.({
+                step: 'self_checking',
+                message: 'Evaluating result...',
+                iteration
+            });
+
             // Build the parts array with optional mask
             const contentParts: any[] = [
                 { text: checkPrompt },
@@ -628,22 +713,42 @@ Be thoughtful - only request revision if there's a real problem. Consider whethe
                 ? '\n\nCompare the images above. Did the edit accomplish the user\'s goal in the masked area?'
                 : '\n\nCompare the images above. Did the edit accomplish the user\'s goal?' });
 
-            const checkResult = await this.genAI.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: [{
-                    role: 'user',
-                    parts: contentParts,
-                }],
-                tools: checkTools,
-                config: {
-                    thinkingConfig: {
-                        thinkingBudget: CHECK_THINKING_BUDGET,
-                        includeThoughts: true,
-                    },
-                },
-            } as any);
+            // Use the wrapper - it automatically logs prompt, thinking, and response
+            // No tools - we ask for JSON output which is more reliable
+            const result = await this.ai.call({
+                model: AI_MODELS.PLANNING,
+                contents: [{ role: 'user', parts: contentParts }],
+                thinkingBudget: THINKING_BUDGETS.HIGH,
+                includeThoughts: true,
+                logLabel: 'Self-Check',
+            });
 
-            const evaluation = this.extractEvaluation(checkResult);
+            // Log what we got back for debugging
+            console.log('🤖 Self-check raw response:', {
+                hasThinking: !!result.thinking,
+                thinkingLength: result.thinking?.length || 0,
+                hasText: !!result.text,
+                textLength: result.text?.length || 0,
+                hasFunctionCall: !!result.functionCall,
+                functionCall: result.functionCall,
+            });
+
+            const evaluation = this.extractEvaluation(result.raw);
+
+            // Log decision to AI console (wrapper already logged prompt/response)
+            aiLogService.appendThinking(`## Decision: ${evaluation.satisfied ? '✅ SATISFIED' : '⚠️ NEEDS REVISION'}
+
+**Reasoning:** ${evaluation.reasoning}${!evaluation.satisfied && evaluation.suggestion ? `
+
+**Suggested revision:** ${evaluation.suggestion}` : ''}
+`);
+
+            onProgress?.({
+                step: 'self_checking',
+                message: evaluation.satisfied ? 'Self-check passed' : 'Self-check requested revision',
+                iteration
+            });
+
             return {
                 satisfied: evaluation.satisfied,
                 reasoning: evaluation.reasoning,
@@ -651,6 +756,20 @@ Be thoughtful - only request revision if there's a real problem. Consider whethe
             };
         } catch (error) {
             console.error('🤖 Agentic Service: Self-check failed:', error);
+
+            aiLogService.appendThinking(`## Self-Check Error
+
+${error instanceof Error ? error.message : 'Unknown error'}
+
+Assuming satisfied to avoid infinite loops.
+`);
+
+            onProgress?.({
+                step: 'error',
+                message: 'Self-check failed',
+                iteration
+            });
+
             // If self-check fails, assume satisfied to avoid infinite loops
             return { satisfied: true, reasoning: 'Self-check failed, assuming satisfied', suggestion: '' };
         }
@@ -709,27 +828,21 @@ Respond with a single paragraph. Examples:
 Do NOT mention any pin markers, letters A/B/C, or overlay elements in your description.`;
 
         try {
-            const result = await this.genAI.models.generateContent({
-                model: 'gemini-2.5-flash',
+            // Use the wrapper - it automatically logs prompt, thinking, and response
+            const result = await this.ai.call({
+                model: AI_MODELS.PLANNING,
                 contents: [{
                     role: 'user',
                     parts: [
                         { text: prompt },
                         { inlineData: { mimeType: 'image/png', data: imageData.split(',')[1] } }
                     ]
-                }]
+                }],
+                thinkingBudget: THINKING_BUDGETS.LOW,
+                logLabel: `Identify Element at (${x}, ${y})`,
             });
 
-            const parts = result.candidates?.[0]?.content?.parts || [];
-            let description = '';
-
-            for (const part of parts) {
-                if (part.text) {
-                    description += part.text;
-                }
-            }
-
-            const cleanDescription = description.trim();
+            const cleanDescription = result.text.trim();
             console.log(`🤖 Agentic Service: Element identified: "${cleanDescription}"`);
             return cleanDescription;
 
@@ -759,10 +872,22 @@ Do NOT mention any pin markers, letters A/B/C, or overlay elements in your descr
         console.log(`🤖 Reference points:`, referencePoints);
         console.log(`🤖 Command: "${command}"`);
 
+        // Start an operation if one isn't already active
+        const needsOperation = !aiLogService.isActive();
+        if (needsOperation) {
+            aiLogService.startOperation('processing', `Resolving: "${command}"`);
+        }
+
+        aiLogService.appendThinking(`## Reference Resolution\n\n**Command:** "${command}"\n\n**Reference points:** ${referencePoints.map(p => p.label).join(', ')}\n\n---\n\n`);
+
         // Step 1: Identify what's at each reference point
         const resolvedReferences: Array<{label: string, x: number, y: number, description: string}> = [];
 
+        aiLogService.appendThinking(`### Step 1: Identifying Elements\n\n`);
+
         for (const point of referencePoints) {
+            aiLogService.appendThinking(`**Point ${point.label}** at (${point.x}, ${point.y}):\n`);
+
             const description = await this.identifyElementAtPoint(
                 imageData,
                 point.x,
@@ -777,6 +902,8 @@ Do NOT mention any pin markers, letters A/B/C, or overlay elements in your descr
                 y: point.y,
                 description
             });
+
+            aiLogService.appendThinking(`→ "${description}"\n\n`);
         }
 
         // Step 2: Build context string
@@ -803,11 +930,12 @@ Instead, describe the elements by what they actually are. For example:
 Respond with ONLY the clean editing prompt, nothing else. Do not include coordinates, point labels, or explanations.`;
 
         console.log('🤖 Agentic Service: Sending resolution prompt to Gemini');
+        aiLogService.updateOperation({ step: 'calling_api', message: 'Translating command...' });
 
         try {
-            // Step 4: Send to Gemini and return response
-            const result = await this.genAI.models.generateContent({
-                model: 'gemini-2.5-flash',
+            // Use the wrapper - it automatically logs prompt, thinking, and response
+            const result = await this.ai.call({
+                model: AI_MODELS.PLANNING,
                 contents: [{
                     role: 'user',
                     parts: [
@@ -815,31 +943,78 @@ Respond with ONLY the clean editing prompt, nothing else. Do not include coordin
                         { inlineData: { mimeType: 'image/png', data: imageData.split(',')[1] } }
                     ]
                 }],
-                config: {
-                    thinkingConfig: {
-                        thinkingBudget: CHECK_THINKING_BUDGET,
-                        includeThoughts: true,
-                    },
-                }
-            } as any);
+                thinkingBudget: THINKING_BUDGETS.MEDIUM,
+                logLabel: 'Translate Reference Command',
+            });
 
-            const parts = result.candidates?.[0]?.content?.parts || [];
-            let response = '';
+            const cleanResponse = result.text.trim();
+            console.log(`🤖 Agentic Service: Resolution response: "${cleanResponse.substring(0, 150)}..."`);
 
-            for (const part of parts) {
-                if (part.text && !part.thought) {
-                    response += part.text;
-                }
+            if (needsOperation) {
+                aiLogService.endOperation('complete', 'Reference resolution complete');
             }
 
-            const cleanResponse = response.trim();
-            console.log(`🤖 Agentic Service: Resolution response: "${cleanResponse.substring(0, 150)}..."`);
             return cleanResponse;
 
         } catch (error) {
             console.error('🤖 Agentic Service: Reference resolution failed:', error);
+
+            if (needsOperation) {
+                aiLogService.endOperation('error', 'Resolution failed');
+            }
+
             throw new Error(`Failed to resolve references: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
+    }
+
+    /**
+     * Build descriptions of markup shapes for the AI prompt
+     */
+    private describeMarkupShapes(markupShapes: Shape[]): string {
+        if (!markupShapes || markupShapes.length === 0) {
+            return '';
+        }
+
+        const descriptions: string[] = [];
+
+        for (const shape of markupShapes) {
+            if (!shape.isMarkup) continue;
+
+            switch (shape.type) {
+                case DrawingTool.PEN: {
+                    const penShape = shape as PenShape;
+                    if (penShape.points.length >= 4) {
+                        // Calculate bounding box from points
+                        const xs = penShape.points.filter((_, i) => i % 2 === 0);
+                        const ys = penShape.points.filter((_, i) => i % 2 === 1);
+                        const minX = Math.round(Math.min(...xs));
+                        const minY = Math.round(Math.min(...ys));
+                        const maxX = Math.round(Math.max(...xs));
+                        const maxY = Math.round(Math.max(...ys));
+                        descriptions.push(`- **Freehand drawing** (orange pen stroke) spanning from (${minX}, ${minY}) to (${maxX}, ${maxY})`);
+                    }
+                    break;
+                }
+                case DrawingTool.RECTANGLE: {
+                    const rectShape = shape as RectShape;
+                    descriptions.push(`- **Rectangle markup** (orange outline) at (${Math.round(rectShape.x)}, ${Math.round(rectShape.y)}) with size ${Math.round(rectShape.width)}x${Math.round(rectShape.height)} pixels`);
+                    break;
+                }
+                case DrawingTool.CIRCLE: {
+                    const circleShape = shape as CircleShape;
+                    descriptions.push(`- **Circle/ellipse markup** (orange outline) centered at (${Math.round(circleShape.x)}, ${Math.round(circleShape.y)}) with radius ${Math.round(circleShape.radiusX)}x${Math.round(circleShape.radiusY)} pixels`);
+                    break;
+                }
+                case DrawingTool.ARROW: {
+                    const arrowShape = shape as ArrowShape;
+                    const [x1, y1, x2, y2] = arrowShape.points;
+                    descriptions.push(`- **Line/arrow markup** (orange) from (${Math.round(x1)}, ${Math.round(y1)}) to (${Math.round(x2)}, ${Math.round(y2)})`);
+                    break;
+                }
+            }
+        }
+
+        return descriptions.join('\n');
     }
 
     /**
@@ -850,6 +1025,7 @@ Respond with ONLY the clean editing prompt, nothing else. Do not include coordin
      * @param command User's natural language command
      * @param imageWidth Width of the image in pixels
      * @param imageHeight Height of the image in pixels
+     * @param markupShapes Optional array of markup shapes drawn by user
      * @returns MovePlan with annotated image, descriptions, and suggested prompt
      */
     async planMoveOperation(
@@ -857,17 +1033,31 @@ Respond with ONLY the clean editing prompt, nothing else. Do not include coordin
         referencePoints: Array<{label: string, x: number, y: number}>,
         command: string,
         imageWidth: number,
-        imageHeight: number
+        imageHeight: number,
+        markupShapes?: Shape[]
     ): Promise<MovePlan> {
         console.log('🤖 Agentic Service: Planning move operation');
         console.log(`🤖 Reference points:`, referencePoints);
+        console.log(`🤖 Markup shapes:`, markupShapes?.length || 0);
         console.log(`🤖 Command: "${command}"`);
 
         // Start logging this operation
         aiLogService.startOperation('planning', `Planning: "${command}"`);
 
-        const pointLabels = referencePoints.map(p => p.label).join(', ');
-        aiLogService.appendThinking(`## Move Operation Planning\n\n**Command:** "${command}"\n\n**Reference points:** ${pointLabels}\n\n---\n`);
+        const pointLabels = referencePoints.map(p => p.label).join(', ') || '(none)';
+        const markupDescriptions = this.describeMarkupShapes(markupShapes || []);
+
+        let inputSummary = `## Move Operation Planning\n\n**Command:** "${command}"\n\n`;
+        inputSummary += `**Reference points (pins):** ${pointLabels}\n\n`;
+
+        if (markupDescriptions) {
+            inputSummary += `**Markup annotations:**\n${markupDescriptions}\n\n`;
+        } else {
+            inputSummary += `**Markup annotations:** (none)\n\n`;
+        }
+
+        inputSummary += `---\n`;
+        aiLogService.appendThinking(inputSummary);
 
         // Step 1: Parse command to detect arrows for visualization
         const labels = referencePoints.map(p => p.label);
@@ -922,42 +1112,65 @@ Respond with ONLY the clean editing prompt, nothing else. Do not include coordin
             .map(ref => `- **${ref.label}** at coordinates (${ref.x}, ${ref.y}): ${ref.description}`)
             .join('\n');
 
+        // Build markup shapes context
+        const markupContext = this.describeMarkupShapes(markupShapes || []);
+        const hasMarkups = markupContext.length > 0;
+
         // Step 5: Ask AI to interpret the command and explain what it will do
         aiLogService.updateOperation({ step: 'calling_api', message: 'Interpreting command...' });
         aiLogService.appendThinking(`**Step 3:** Sending to AI for interpretation...\n\n`);
+
+        // Build the reference section - pins and/or markups
+        let annotationsSection = '';
+        if (descriptions.length > 0) {
+            annotationsSection += `The user marked labeled points on the image:\n\n${referenceContext}\n\n`;
+        }
+        if (hasMarkups) {
+            annotationsSection += `The user also drew markup annotations (in bright orange) to highlight areas of interest:\n\n${markupContext}\n\n`;
+            annotationsSection += `**Important:** These orange markups are visual indicators only - they should be REMOVED from the final output while executing the edit.\n\n`;
+        }
+
         const interpretationPrompt = `You are translating a user's reference-based command into an image editing instruction.
 
-The user marked points on an image. Here is what exists at each marked location:
-
-${referenceContext}
-
-User's command: "${command}"
+${annotationsSection}User's command: "${command}"
 
 CRITICAL RULES:
 - The letters A, B, C are ONLY labels the user used to mark locations
 - Your output must NEVER contain the letters A, B, C, or phrases like "Point A", "marker A", "location A"
 - Replace every reference to a letter with the FULL description of what's actually there
-- The editing AI will NOT see any labels - only the raw image
+- The editing AI will NOT see any labels - only the raw image${hasMarkups ? `
+- When the user refers to "what I circled", "what I drew", "the marked area", etc., refer to the orange markup annotations
+- The markup annotations indicate areas the user wants you to focus on or modify
+- In your EDITING_PROMPT, be sure to instruct the editor to REMOVE the orange markups from the final output` : ''}
 
 OUTPUT FORMAT:
 
-INTERPRETATION: [One sentence describing the action using actual element names and coordinates - NO LETTERS]
+INTERPRETATION: [2-4 sentences explaining what will be done, describing the elements involved, their visual appearance, exact locations, and the transformation. Be specific and detailed - NO LETTERS]
 
-EDITING_PROMPT: [Complete instruction using only element descriptions, coordinates, colors, and sizes - NO LETTERS ALLOWED]
+EDITING_PROMPT: [Detailed instruction for the image editor. Include: precise coordinates, visual descriptions (colors, sizes, textures), what to preserve, what to modify, how to handle edges/transitions, and any cleanup needed. Multiple sentences encouraged - NO LETTERS ALLOWED]
 
 EXAMPLE:
 User command: "Move A to B"
 Where A = "blue Submit button at (150, 200)" and B = "gray sidebar at (50, 300)"
 
-INTERPRETATION: I will move the blue Submit button from (150, 200) to the gray sidebar area at (50, 300).
+INTERPRETATION: I will relocate the blue Submit button from its current position at (150, 200) to the gray sidebar area at (50, 300). The button is a rectangular element with white text on a blue background. The destination is a vertical gray panel on the left side of the interface.
 
-EDITING_PROMPT: Move the blue Submit button currently located at coordinates (150, 200) to the gray sidebar area at coordinates (50, 300). Maintain the button's original appearance. Fill the vacated area at (150, 200) with appropriate background.
+EDITING_PROMPT: Move the blue Submit button currently located at coordinates (150, 200) to the gray sidebar area at coordinates (50, 300). The button is approximately 80x30 pixels with rounded corners, white "Submit" text, and a #4285f4 blue background. Place it within the gray sidebar while maintaining its original size and appearance. Fill the vacated area at (150, 200) by extending the surrounding white background naturally. Ensure clean edges where the button integrates into the sidebar.${hasMarkups ? `
+
+EXAMPLE WITH MARKUPS:
+User command: "Remove what I circled"
+Where there is a circle markup around an ad banner at (200, 100) to (500, 180)
+
+INTERPRETATION: I will remove the ad banner that the user highlighted with the orange circle markup. The banner spans from coordinates (200, 100) to (500, 180) and appears to be a promotional element. The orange markup annotation itself must also be removed from the final output.
+
+EDITING_PROMPT: Remove the ad banner located in the region from (200, 100) to (500, 180). This is a rectangular promotional element approximately 300x80 pixels. Fill the area naturally by extending the surrounding background content - match the texture, color, and any patterns from adjacent areas. Remove all bright orange markup lines or shapes from the image. Ensure the filled region blends seamlessly with no visible seams or artifacts.` : ''}
 
 YOUR RESPONSE:`;
 
         try {
-            const result = await this.genAI.models.generateContent({
-                model: 'gemini-2.5-flash',
+            // Use the wrapper - it automatically logs prompt, thinking, and response
+            const result = await this.ai.call({
+                model: AI_MODELS.PLANNING,
                 contents: [{
                     role: 'user',
                     parts: [
@@ -965,22 +1178,11 @@ YOUR RESPONSE:`;
                         { inlineData: { mimeType: 'image/png', data: annotatedImage.split(',')[1] } }
                     ]
                 }],
-                config: {
-                    thinkingConfig: {
-                        thinkingBudget: CHECK_THINKING_BUDGET,
-                        includeThoughts: true,
-                    },
-                }
-            } as any);
+                thinkingBudget: THINKING_BUDGETS.MEDIUM,
+                logLabel: 'Interpret Move Command',
+            });
 
-            const parts = result.candidates?.[0]?.content?.parts || [];
-            let response = '';
-
-            for (const part of parts) {
-                if (part.text && !part.thought) {
-                    response += part.text;
-                }
-            }
+            const response = result.text;
 
             // Parse the response
             const interpretationMatch = response.match(/INTERPRETATION:\s*(.+?)(?=EDITING_PROMPT:|$)/s);

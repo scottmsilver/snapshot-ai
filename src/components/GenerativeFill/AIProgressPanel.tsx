@@ -1,9 +1,11 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { marked } from 'marked';
 import { useAIProgress } from '@/contexts/AIProgressContext';
 import { aiLogService, type AILogState } from '@/services/aiLogService';
+import { useCoordinateHighlightOptional } from '@/contexts/CoordinateHighlightContext';
 import type { AIProgressStep, AILogEntry } from '@/types/aiProgress';
-import { Brain, Zap, Cog, CheckCircle, AlertCircle, RefreshCw, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Brain, Zap, Cog, CheckCircle, AlertCircle, RefreshCw, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, X, Bug, Copy, Check } from 'lucide-react';
+import { EditRegionDebugOverlay } from './EditRegionDebugOverlay';
 
 // Configure marked for safe rendering
 marked.setOptions({
@@ -47,14 +49,57 @@ const formatDuration = (ms: number): string => {
 };
 
 /**
- * Render markdown content safely
+ * Pre-process markdown to wrap coordinates in spans with data attributes
+ * This allows us to use event delegation to detect hovers
  */
-const MarkdownContent: React.FC<{ content: string }> = ({ content }) => {
+const wrapCoordinatesInHtml = (html: string): string => {
+  // Match patterns like (123, 456) or (123,456) but NOT inside base64 data or URLs
+  // We look for coordinates that are surrounded by word boundaries or common punctuation
+  return html.replace(
+    /(?<![A-Za-z0-9+/=])(\((\d{1,5}),\s*(\d{1,5})\))(?![A-Za-z0-9+/=])/g,
+    (match, full, x, y) => {
+      return `<span class="coord-highlight" data-x="${x}" data-y="${y}" style="cursor:pointer;background:rgba(33,150,243,0.15);border-radius:3px;padding:0 2px;font-family:monospace;color:#1976d2;border-bottom:1px dashed #1976d2;">${full}</span>`;
+    }
+  );
+};
+
+/**
+ * Render markdown content safely with interactive coordinates
+ */
+const MarkdownContent: React.FC<{
+  content: string;
+}> = ({ content }) => {
+  const coordContext = useCoordinateHighlightOptional();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Parse markdown and wrap coordinates
   const html = marked.parse(content) as string;
+  const processedHtml = wrapCoordinatesInHtml(html);
+
+  // Handle mouse events on coordinate spans via event delegation
+  const handleMouseOver = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('coord-highlight')) {
+      const x = parseInt(target.dataset.x || '0', 10);
+      const y = parseInt(target.dataset.y || '0', 10);
+      coordContext?.setHighlightedCoord({ x, y });
+    }
+  }, [coordContext]);
+
+  const handleMouseOut = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('coord-highlight')) {
+      coordContext?.setHighlightedCoord(null);
+    }
+  }, [coordContext]);
+
   return (
     <div
+      ref={containerRef}
       className="markdown-content"
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: processedHtml }}
+      onMouseOver={handleMouseOver}
+      onMouseOut={handleMouseOut}
       style={{
         fontSize: '12px',
         lineHeight: '1.5',
@@ -68,10 +113,22 @@ const MarkdownContent: React.FC<{ content: string }> = ({ content }) => {
 /**
  * Single log entry component
  */
-const LogEntryComponent: React.FC<{ entry: AILogEntry; isLatest: boolean }> = ({ entry, isLatest }) => {
+const LogEntryComponent: React.FC<{
+  entry: AILogEntry;
+  isLatest: boolean;
+  onShowDebug?: (debugData: AILogEntry['debugData']) => void;
+}> = ({ entry, isLatest, onShowDebug }) => {
   const [expanded, setExpanded] = useState(isLatest);
   const stepConfig = STEP_CONFIG[entry.step];
   const hasThinking = entry.thinkingText && entry.thinkingText.trim().length > 0;
+  const hasDebugData = !!entry.debugData;
+
+  // Debug: log when we have debug data
+  useEffect(() => {
+    if (hasDebugData) {
+      console.log('📊 LogEntryComponent: Entry has debugData', entry.id, 'regions:', entry.debugData?.editRegions?.length);
+    }
+  }, [hasDebugData, entry.id, entry.debugData]);
 
   // Auto-expand latest entry when it gets content
   useEffect(() => {
@@ -116,8 +173,33 @@ const LogEntryComponent: React.FC<{ entry: AILogEntry; isLatest: boolean }> = ({
             {formatDuration(entry.durationMs)}
           </span>
         )}
+        {hasDebugData && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowDebug?.(entry.debugData);
+            }}
+            style={{
+              background: 'none',
+              border: '1px solid #FF6B00',
+              color: '#FF6B00',
+              cursor: 'pointer',
+              padding: '2px 6px',
+              borderRadius: '3px',
+              fontSize: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+              marginLeft: entry.durationMs ? '8px' : 'auto',
+            }}
+            title="View edit regions debug overlay"
+          >
+            <Bug size={10} />
+            Debug
+          </button>
+        )}
         {hasThinking && (
-          <span style={{ color: '#666', marginLeft: hasThinking && !entry.durationMs ? 'auto' : '8px' }}>
+          <span style={{ color: '#666', marginLeft: hasThinking && !entry.durationMs && !hasDebugData ? 'auto' : '8px' }}>
             {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </span>
         )}
@@ -163,6 +245,39 @@ const LogEntryComponent: React.FC<{ entry: AILogEntry; isLatest: boolean }> = ({
           <MarkdownContent content={entry.thinkingText!} />
         </div>
       )}
+
+      {/* Iteration image preview */}
+      {entry.iterationImage && expanded && (
+        <div
+          style={{
+            marginTop: '8px',
+            paddingLeft: '20px',
+            marginLeft: '6px',
+          }}
+        >
+          <div
+            style={{
+              fontSize: '11px',
+              fontWeight: '500',
+              color: '#666',
+              marginBottom: '4px',
+            }}
+          >
+            Generated Image:
+          </div>
+          <img
+            src={entry.iterationImage}
+            alt="Generated iteration"
+            style={{
+              maxWidth: '100%',
+              maxHeight: '200px',
+              borderRadius: '4px',
+              border: '1px solid rgba(0, 0, 0, 0.1)',
+              objectFit: 'contain',
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };
@@ -182,6 +297,8 @@ export const AIProgressPanel: React.FC = () => {
   const [isDismissed, setIsDismissed] = useState(false);
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  const [debugData, setDebugData] = useState<AILogEntry['debugData'] | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Subscribe to aiLogService for entries from agenticService
   const [serviceLog, setServiceLog] = useState<AILogEntry[]>([]);
@@ -258,6 +375,53 @@ export const AIProgressPanel: React.FC = () => {
     aiLogService.clearLog();
   };
 
+  // Copy log content to clipboard
+  const handleCopyLog = useCallback(() => {
+    // Build plain text representation of the log
+    const logText = mergedLog.map(entry => {
+      const lines: string[] = [];
+      const stepConfig = STEP_CONFIG[entry.step];
+
+      // Header line
+      lines.push(`[${formatTime(entry.timestamp)}] ${stepConfig.label}${entry.iteration ? ` [${entry.iteration.current}/${entry.iteration.max}]` : ''}${entry.durationMs ? ` (${formatDuration(entry.durationMs)})` : ''}`);
+
+      // Message
+      if (entry.message) {
+        lines.push(`  ${entry.message}`);
+      }
+
+      // Error
+      if (entry.error) {
+        lines.push(`  ERROR: ${entry.error.message}`);
+        if (entry.error.details) {
+          lines.push(`  ${entry.error.details}`);
+        }
+      }
+
+      // Thinking text - strip markdown and excessive whitespace
+      if (entry.thinkingText) {
+        // Strip images (base64 data) but keep the alt text
+        const stripped = entry.thinkingText
+          .replace(/!\[([^\]]*)\]\([^)]+\)/g, '[Image: $1]') // Replace images with placeholder
+          .replace(/```[\s\S]*?```/g, (match) => match) // Keep code blocks
+          .trim();
+        if (stripped) {
+          lines.push('');
+          lines.push(stripped);
+        }
+      }
+
+      return lines.join('\n');
+    }).join('\n\n---\n\n');
+
+    navigator.clipboard.writeText(logText).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(err => {
+      console.error('Failed to copy log:', err);
+    });
+  }, [mergedLog]);
+
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
@@ -274,6 +438,7 @@ export const AIProgressPanel: React.FC = () => {
   }
 
   return (
+    <>
     <aside
       style={{
         width: isMinimized ? '48px' : `${panelWidth}px`,
@@ -386,21 +551,38 @@ export const AIProgressPanel: React.FC = () => {
             </div>
             <div style={{ display: 'flex', gap: '4px' }}>
               {mergedLog.length > 0 && (
-                <button
-                  onClick={handleClearLog}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#888',
-                    cursor: 'pointer',
-                    padding: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                  title="Clear log"
-                >
-                  <Trash2 size={14} />
-                </button>
+                <>
+                  <button
+                    onClick={handleCopyLog}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: copied ? '#27ae60' : '#888',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title={copied ? 'Copied!' : 'Copy log to clipboard'}
+                  >
+                    {copied ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
+                  <button
+                    onClick={handleClearLog}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#888',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title="Clear log"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </>
               )}
               <button
                 onClick={() => setIsMinimized(true)}
@@ -460,6 +642,7 @@ export const AIProgressPanel: React.FC = () => {
                 key={entry.id}
                 entry={entry}
                 isLatest={index === mergedLog.length - 1}
+                onShowDebug={setDebugData}
               />
             ))
           )}
@@ -566,5 +749,14 @@ export const AIProgressPanel: React.FC = () => {
       </style>
       </div>
     </aside>
+
+    {/* Debug overlay - rendered outside aside so it's not constrained */}
+    {debugData && (
+      <EditRegionDebugOverlay
+        debugData={debugData}
+        onClose={() => setDebugData(null)}
+      />
+    )}
+    </>
   );
 };

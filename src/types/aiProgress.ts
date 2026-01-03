@@ -5,7 +5,7 @@
 /**
  * Progress step enum representing the current phase of AI operation
  */
-export type AIProgressStep = 
+export type AIProgressStep =
   | 'idle'              // No operation in progress
   | 'planning'          // Agent is planning the edit (high thinking budget)
   | 'calling_api'       // Making API call to generative model
@@ -34,6 +34,26 @@ export interface AILogEntry {
   };
   /** Duration in ms (set when operation completes) */
   durationMs?: number;
+  /** Generated image from this iteration (base64 data URL) */
+  iterationImage?: string;
+  /** Debug data for self-check visualization */
+  debugData?: {
+    originalImage: string;  // base64 data URL
+    resultImage: string;    // base64 data URL
+    editRegions: Array<{
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      centerX: number;
+      centerY: number;
+      pixelCount: number;
+    }>;
+    imageWidth: number;
+    imageHeight: number;
+    totalChangedPixels: number;
+    percentChanged: number;
+  };
 }
 
 /**
@@ -42,31 +62,31 @@ export interface AILogEntry {
 export interface AIProgressState {
   /** Current step in the AI operation pipeline */
   step: AIProgressStep;
-  
+
   /** Human-readable message describing current activity */
   message: string;
-  
+
   /** Streamed thinking tokens from the AI (for extended thinking mode) */
   thinkingText: string;
-  
+
   /** Current iteration information */
   iteration: {
     current: number;
     max: number;
   };
-  
+
   /** Elapsed time in milliseconds since operation started */
   elapsedMs: number;
-  
+
   /** Timestamp when operation started (null if idle) */
   startTime: number | null;
-  
+
   /** Error information if step is 'error' */
   error?: {
     message: string;
     details?: string;
   };
-  
+
   /** Persistent log of all AI operations (console style) */
   log: AILogEntry[];
 }
@@ -86,6 +106,8 @@ export interface AIProgressEvent {
     message: string;
     details?: string;
   };
+  /** Generated image from this iteration (base64 data URL) */
+  iterationImage?: string;
 }
 
 /**

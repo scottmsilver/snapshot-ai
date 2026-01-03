@@ -5,6 +5,7 @@ import {
   type Shape,
   type Point,
   LayerOperation,
+  AIReferenceSubTool,
   getNextZIndex,
   sortShapesByZIndex,
 } from '@/types/drawing';
@@ -155,6 +156,18 @@ export const DrawingProvider: React.FC<DrawingProviderProps> = ({ children }) =>
     dispatch({ type: DrawingActionType.CLEAR_AI_MOVE_STATE });
   }, []);
 
+  const setAiReferenceSubTool = useCallback((subTool: AIReferenceSubTool) => {
+    dispatch({ type: DrawingActionType.SET_AI_REFERENCE_SUB_TOOL, subTool });
+  }, []);
+
+  const addAiMarkupShape = useCallback((shape: Shape) => {
+    dispatch({ type: DrawingActionType.ADD_AI_MARKUP_SHAPE, shape });
+  }, []);
+
+  const clearAiMarkupShapes = useCallback(() => {
+    dispatch({ type: DrawingActionType.CLEAR_AI_MARKUP_SHAPES });
+  }, []);
+
   const value: DrawingContextType = {
     state,
     dispatch,
@@ -184,6 +197,9 @@ export const DrawingProvider: React.FC<DrawingProviderProps> = ({ children }) =>
     removeReferencePoint,
     setAiMoveState,
     clearAiMoveState,
+    setAiReferenceSubTool,
+    addAiMarkupShape,
+    clearAiMarkupShapes,
   };
 
   return <DrawingContext.Provider value={value}>{children}</DrawingContext.Provider>;

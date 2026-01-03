@@ -1,5 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { base64ToImageData, imageDataToBase64 } from '@/utils/maskRendering';
+import { AI_MODELS, THINKING_BUDGETS } from '@/config/aiModels';
+import { aiLogService } from './aiLogService';
+import { createAIClient, type AIClient } from './aiClient';
 
 export interface InpaintRequest {
   sourceImage: string;  // Base64 PNG
@@ -43,6 +46,7 @@ export class GenerativeInpaintService {
   private googleCloudProjectId?: string;
   private inpaintingModel?: AIModel;
   private textOnlyModel?: AIModel;
+  private ai: AIClient;
 
   constructor(
     apiKey: string,
@@ -58,6 +62,7 @@ export class GenerativeInpaintService {
     this.googleCloudProjectId = googleCloudProjectId;
     this.inpaintingModel = inpaintingModel;
     this.textOnlyModel = textOnlyModel;
+    this.ai = createAIClient(apiKey);
   }
 
   /**
@@ -67,8 +72,6 @@ export class GenerativeInpaintService {
     sourceImage: ImageData,
     prompt: string
   ): Promise<ImageData> {
-    const ai = new GoogleGenAI({ apiKey: this.apiKey });
-
     // Convert ImageData to base64
     const sourceBase64 = imageDataToBase64(sourceImage);
 
@@ -80,8 +83,9 @@ export class GenerativeInpaintService {
 Make SIGNIFICANT, VISIBLE changes to create the requested modification. The result should look clearly different from the original.`;
 
     try {
-      const result = await ai.models.generateContent({
-        model: 'gemini-3-pro-image-preview',
+      // Use the wrapper with isImageGeneration flag - logs automatically at lowest level
+      const result = await this.ai.call({
+        model: AI_MODELS.IMAGE_GENERATION,
         contents: [
           {
             role: 'user',
@@ -99,18 +103,21 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
         ],
         generationConfig: {
           responseModalities: ['image'],
-        } as Record<string, unknown>,
-      } as Parameters<typeof ai.models.generateContent>[0]);
+        },
+        isImageGeneration: true,
+        logLabel: 'Text-Only Image Edit',
+      });
 
-      // Extract image from response
-      if (result.candidates && result.candidates.length > 0) {
-        const candidate = result.candidates[0];
+      // Extract image from response (result.raw contains the API response)
+      if (result.raw.candidates && result.raw.candidates.length > 0) {
+        const candidate = result.raw.candidates[0];
 
         if (candidate.content && candidate.content.parts) {
           for (const part of candidate.content.parts) {
             if (part.inlineData && part.inlineData.data) {
               const generatedBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
               let resultImageData = await base64ToImageData(generatedBase64);
+              // Wrapper already logged success, just log dimensions
 
               // Resize if needed
               if (resultImageData.width !== sourceImage.width || resultImageData.height !== sourceImage.height) {
@@ -390,8 +397,6 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
     sourceImage: ImageData,
     maskImage: ImageData
   ): Promise<string> {
-    const ai = new GoogleGenAI({ apiKey: this.apiKey });
-
     // Create marked image with red outline
     const markedImageBase64 = this.createMarkedImage(sourceImage, maskImage);
     const markedBase64Data = markedImageBase64.split(',')[1];
@@ -403,9 +408,24 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
 
     console.log('🔍 DEBUG: Describing selected area with marker...');
 
+    const describePrompt = `This image contains a red outline marking a specific area.
+
+Your task: Identify and describe what is inside the red outline in great detail, relative to everything else in the image.
+
+IMPORTANT: In your description, DO NOT mention the red outline itself. Describe ONLY the actual content (objects, areas) that are marked, as if the red outline doesn't exist. The red outline is just a tool to help you identify what to describe.
+
+Include:
+- What specific object or area is marked
+- Its precise location relative to other elements in the image (e.g., "the third window from the left", "the door in the bottom right corner", "the central building among five buildings")
+- Distinctive visual features that differentiate it from similar objects nearby
+- Spatial relationships to surrounding elements
+
+Be extremely specific and detailed so this object can be unambiguously identified in the original image WITHOUT needing to see the red outline.`;
+
     try {
-      const result = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+      // Use the wrapper - it automatically logs prompt, thinking, and response
+      const result = await this.ai.call({
+        model: AI_MODELS.PRO,
         contents: [
           {
             role: 'user',
@@ -417,19 +437,21 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
                   data: markedBase64Data,
                 },
               },
-              { text: 'This image contains a red outline marking a specific area.\n\nYour task: Identify and describe what is inside the red outline in great detail, relative to everything else in the image.\n\nIMPORTANT: In your description, DO NOT mention the red outline itself. Describe ONLY the actual content (objects, areas) that are marked, as if the red outline doesn\'t exist. The red outline is just a tool to help you identify what to describe.\n\nInclude:\n- What specific object or area is marked\n- Its precise location relative to other elements in the image (e.g., "the third window from the left", "the door in the bottom right corner", "the central building among five buildings")\n- Distinctive visual features that differentiate it from similar objects nearby\n- Spatial relationships to surrounding elements\n\nBe extremely specific and detailed so this object can be unambiguously identified in the original image WITHOUT needing to see the red outline.' },
+              { text: describePrompt },
             ],
           },
         ],
-      } as Parameters<typeof ai.models.generateContent>[0]);
+        thinkingBudget: THINKING_BUDGETS.LOW,
+        logLabel: 'Describe Selected Area',
+      });
 
-      const description = result.text || '';
+      const description = result.text || 'the selected area';
       console.log('🔍 DEBUG: Area description:', description);
 
       // Store for debug dialog
       (window as any).geminiDebug = (window as any).geminiDebug || {};
       (window as any).geminiDebug.step1MarkedImage = markedImageBase64;
-      (window as any).geminiDebug.step1Prompt = 'This image contains a red outline marking a specific area.\n\nYour task: Identify and describe what is inside the red outline in great detail, relative to everything else in the image.\n\nIMPORTANT: In your description, DO NOT mention the red outline itself. Describe ONLY the actual content (objects, areas) that are marked, as if the red outline doesn\'t exist. The red outline is just a tool to help you identify what to describe.\n\nInclude:\n- What specific object or area is marked\n- Its precise location relative to other elements in the image\n- Distinctive visual features that differentiate it from similar objects nearby\n- Spatial relationships to surrounding elements\n\nBe extremely specific and detailed so this object can be unambiguously identified in the original image WITHOUT needing to see the red outline.';
+      (window as any).geminiDebug.step1Prompt = describePrompt;
       (window as any).geminiDebug.step1Response = description;
 
       return description;
@@ -450,14 +472,12 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
     maskImage: ImageData,
     prompt: string
   ): Promise<ImageData> {
-    const ai = new GoogleGenAI({ apiKey: this.apiKey });
-
     // Convert ImageData to base64
     const sourceBase64 = imageDataToBase64(sourceImage);
-    
+
     console.log('🔍 DEBUG: sourceBase64 length:', sourceBase64.length);
     console.log('🔍 DEBUG: sourceBase64 prefix:', sourceBase64.substring(0, 50));
-    
+
     const base64Data = sourceBase64.split(',')[1];
     if (!base64Data) {
         console.error('❌ ERROR: Failed to extract base64 data from source image data URL');
@@ -520,11 +540,10 @@ Return the edited image.`;
     console.log('═══════════════════════════════════════════════════');
 
     try {
-
-      // Use Gemini 2.5 Flash with image editing
+      // Use the wrapper with isImageGeneration flag - logs automatically at lowest level
       // Step 2: Send clean original image (not marked) with description-based instruction
-      const result = await ai.models.generateContent({
-        model: 'gemini-3-pro-image-preview',
+      const result = await this.ai.call({
+        model: AI_MODELS.IMAGE_GENERATION,
         contents: [
           {
             role: 'user',
@@ -542,12 +561,14 @@ Return the edited image.`;
         ],
         generationConfig: {
           responseModalities: ['image'],
-        } as Record<string, unknown>,
-      } as Parameters<typeof ai.models.generateContent>[0]);
+        },
+        isImageGeneration: true,
+        logLabel: 'Inpaint Image Edit',
+      });
 
-      // Extract image from response
-      if (result.candidates && result.candidates.length > 0) {
-        const candidate = result.candidates[0];
+      // Extract image from response (result.raw contains the API response)
+      if (result.raw.candidates && result.raw.candidates.length > 0) {
+        const candidate = result.raw.candidates[0];
 
         if (candidate.content && candidate.content.parts) {
           for (const part of candidate.content.parts) {
@@ -619,6 +640,7 @@ Return the edited image.`;
                 // Otherwise keep the source pixel (already copied from sourceImage.data)
               }
 
+              // Wrapper already logged success
               return compositedImageData;
             }
           }
@@ -628,6 +650,7 @@ Return the edited image.`;
       throw new Error('No image data returned from Gemini');
     } catch (error) {
       console.error('Gemini inpainting error:', error);
+      // Wrapper already logged the error
       throw new Error(`Gemini inpainting failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }

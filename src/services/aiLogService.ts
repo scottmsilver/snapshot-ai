@@ -141,6 +141,28 @@ class AILogService {
   }
 
   /**
+   * Attach debug data to current operation (for self-check visualization)
+   */
+  attachDebugData(debugData: AILogEntry['debugData']): void {
+    if (!this.currentOperationId) {
+      console.warn('📊 attachDebugData: No current operation ID');
+      return;
+    }
+
+    const index = this.log.findIndex(e => e.id === this.currentOperationId);
+    if (index >= 0) {
+      this.log[index] = {
+        ...this.log[index],
+        debugData,
+      };
+      console.log('📊 attachDebugData: Attached debug data to entry', this.currentOperationId, 'regions:', debugData?.editRegions?.length);
+      this.notifyLogListeners();
+    } else {
+      console.warn('📊 attachDebugData: Could not find entry for ID', this.currentOperationId);
+    }
+  }
+
+  /**
    * Log a discrete entry (for operations that don't need start/end tracking)
    */
   logEntry(options: LogEntryOptions): string {
