@@ -1,5 +1,5 @@
 import React from 'react';
-import { Palette, Copy, Settings } from 'lucide-react';
+import { Palette, Copy, Settings, MessageSquare } from 'lucide-react';
 import { SaveIndicator } from '@/components/SaveIndicator';
 import { FileMenu } from '@/components/FileMenu/FileMenu';
 import { EditMenu } from '@/components/EditMenu';
@@ -23,6 +23,10 @@ interface WorkspaceHeaderProps {
   onOpenSettings: () => void;
   fileMenuProps: FileMenuProps;
   editMenuProps?: EditMenuProps;
+  /** Whether the AI console drawer is visible */
+  isAIDrawerVisible?: boolean;
+  /** Toggle AI console drawer visibility */
+  onToggleAIDrawer?: () => void;
 }
 
 export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
@@ -39,6 +43,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   onOpenSettings,
   fileMenuProps,
   editMenuProps,
+  isAIDrawerVisible,
+  onToggleAIDrawer,
 }) => {
   return (
     <div style={{ backgroundColor: '#ffffff', borderBottom: '1px solid #e0e0e0', display: 'flex' }}>
@@ -134,32 +140,66 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         }}
       >
         {isCanvasInitialized && (
-          <div
-            onClick={onCopyCanvas}
-            style={{
-              padding: '0.375rem',
-              backgroundColor: 'transparent',
-              border: '1px solid #ddd',
-              cursor: 'pointer',
-              color: '#5f6368',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              position: 'relative',
-              zIndex: 10,
-            }}
-            onMouseEnter={event => {
-              event.currentTarget.style.backgroundColor = '#f1f3f4';
-            }}
-            onMouseLeave={event => {
-              event.currentTarget.style.backgroundColor = 'transparent';
-            }}
-            role="button"
-            title="Copy canvas to clipboard"
-          >
-            <Copy size={18} style={{ pointerEvents: 'none' }} />
-          </div>
+          <>
+            <div
+              onClick={onCopyCanvas}
+              style={{
+                padding: '0.375rem',
+                backgroundColor: 'transparent',
+                border: '1px solid #ddd',
+                cursor: 'pointer',
+                color: '#5f6368',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative',
+                zIndex: 10,
+              }}
+              onMouseEnter={event => {
+                event.currentTarget.style.backgroundColor = '#f1f3f4';
+              }}
+              onMouseLeave={event => {
+                event.currentTarget.style.backgroundColor = 'transparent';
+              }}
+              role="button"
+              title="Copy canvas to clipboard"
+            >
+              <Copy size={18} style={{ pointerEvents: 'none' }} />
+            </div>
+            {onToggleAIDrawer && (
+              <div
+                onClick={onToggleAIDrawer}
+                style={{
+                  padding: '0.375rem',
+                  backgroundColor: isAIDrawerVisible ? '#e3f2fd' : 'transparent',
+                  border: `1px solid ${isAIDrawerVisible ? '#2196f3' : '#ddd'}`,
+                  cursor: 'pointer',
+                  color: isAIDrawerVisible ? '#2196f3' : '#5f6368',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  position: 'relative',
+                  zIndex: 10,
+                }}
+                onMouseEnter={event => {
+                  if (!isAIDrawerVisible) {
+                    event.currentTarget.style.backgroundColor = '#f1f3f4';
+                  }
+                }}
+                onMouseLeave={event => {
+                  if (!isAIDrawerVisible) {
+                    event.currentTarget.style.backgroundColor = 'transparent';
+                  }
+                }}
+                role="button"
+                title={isAIDrawerVisible ? 'Hide AI Console' : 'Show AI Console'}
+              >
+                <MessageSquare size={18} style={{ pointerEvents: 'none' }} />
+              </div>
+            )}
+          </>
         )}
         <div
           onClick={onOpenSettings}

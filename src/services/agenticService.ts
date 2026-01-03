@@ -595,21 +595,33 @@ ${error instanceof Error && error.stack ? `**Stack:**\n\`\`\`\n${error.stack}\n\
             minBlockCount: 2,      // Need at least 2 connected blocks to form a region
             colorThreshold: 30,
         });
-        const editRegionsText = formatEditRegionsForPrompt(editRegions);
 
-        // Log the detected regions
-        aiLogService.appendThinking(`### Detected Edit Regions (Block-Based Comparison)
+        // Filter to only significant regions to avoid overwhelming the AI
+        // Based on testing: meaningful edits typically have significance 40+, noise is 15-30
+        const MIN_SIGNIFICANCE_THRESHOLD = 35;
+        const significantRegions = editRegions.regions.filter(r => r.significance >= MIN_SIGNIFICANCE_THRESHOLD);
+        const filteredResult = {
+            ...editRegions,
+            regions: significantRegions,
+        };
+        const editRegionsText = formatEditRegionsForPrompt(filteredResult);
+
+        // Log the detected regions (show both filtered and total counts)
+        const filteredNote = significantRegions.length < editRegions.regions.length
+            ? ` (filtered from ${editRegions.regions.length} total, threshold: significance >= ${MIN_SIGNIFICANCE_THRESHOLD})`
+            : '';
+        aiLogService.appendThinking(`### Detected Edit Regions (Block-Based Comparison)${filteredNote}
 
 ${editRegionsText}
 
 `);
-        console.log('🤖 Self-check detected edit regions:', editRegions.regions.length, 'regions,', editRegions.totalChangedPixels, 'pixels changed');
+        console.log('🤖 Self-check detected edit regions:', significantRegions.length, 'significant regions (of', editRegions.regions.length, 'total),', editRegions.totalChangedPixels, 'pixels changed');
 
-        // Attach debug data for visualization in AI console
+        // Attach debug data for visualization in AI console (use filtered significant regions)
         aiLogService.attachDebugData({
             originalImage: originalBase64,
             resultImage: resultBase64,
-            editRegions: editRegions.regions,
+            editRegions: significantRegions, // Only significant regions shown
             imageWidth: editRegions.imageWidth,
             imageHeight: editRegions.imageHeight,
             totalChangedPixels: editRegions.totalChangedPixels,
@@ -645,9 +657,17 @@ Think carefully: WHERE did the user want changes to happen?
 - If the edit prompt contains COORDINATES (e.g., "at (150, 200)", "move to (300, 400)"), verify the detected regions are at or near those pixel locations
 - If the user referenced specific elements (e.g., "the button", "the header", "the red car"), verify the detected changes are in the region of THAT element
 - If a mask was provided, verify the detected changes are within the masked area
-- Check if there are unintended changes OUTSIDE the target area
 
-### 2. Cardinality Check
+### 2. Unintended Substantial Changes (CRITICAL)
+CAREFULLY examine the detected edit regions. Are there SUBSTANTIAL changes OUTSIDE the intended edit area?
+- If the user wanted to edit region X, but regions Y and Z also changed significantly, that's a PROBLEM
+- Look for large changes on the edges of the image, far from the target area, or in unrelated parts
+- Focus on substantial changes - major artifacts, missing elements, structural distortions, large color shifts
+- Ignore minor pixel-level noise or subtle compression artifacts - only flag changes that are visually noticeable
+
+**If there are substantial unintended changes outside the target area (high significance score, large region, or visually obvious), the edit should be marked as UNSATISFACTORY and revised with a prompt that explicitly instructs the model to preserve unchanged areas.**
+
+### 3. Cardinality Check
 Think carefully: Did the user's request imply ADDING, REMOVING, or REPLACING elements?
 - **REPLACE/MODIFY**: "Change X to Y", "Make X look like Y", "Update the color" → The COUNT of elements should stay the SAME
 - **ADD**: "Add a button", "Put text here", "Insert an icon" → There should be MORE elements than before
@@ -655,7 +675,7 @@ Think carefully: Did the user's request imply ADDING, REMOVING, or REPLACING ele
 
 Does the result match the expected cardinality? If the user said "remove" but the element is still there (or replaced with something else), that's wrong.
 
-### 3. Visual Quality
+### 4. Visual Quality
 ${hasMask ? '- Was the edit applied to the correct area (as shown by the white region in the mask)?' : ''}
 - Does the edited area look NATURAL and FIT SEAMLESSLY into the image?
 - Is the edit clearly visible and significant enough?
@@ -669,7 +689,7 @@ If the edit is SATISFACTORY:
 \`\`\`json
 {
   "satisfied": true,
-  "reasoning": "Explain why the edit meets all criteria: location accuracy, cardinality, and visual quality."
+  "reasoning": "Explain why the edit meets all criteria: location accuracy, no substantial unintended changes, cardinality, and visual quality."
 }
 \`\`\`
 
@@ -677,12 +697,12 @@ If the edit NEEDS REVISION:
 \`\`\`json
 {
   "satisfied": false,
-  "reasoning": "Explain what is wrong - which criteria failed and why.",
-  "revised_prompt": "A better, more specific prompt that addresses the issues."
+  "reasoning": "Explain what is wrong - which criteria failed and why. Be specific about any substantial unintended changes detected.",
+  "revised_prompt": "A better, more specific prompt that addresses the issues. If there were unintended changes, add explicit instructions like 'DO NOT modify any other part of the image' or 'Preserve all areas outside of [target region]'."
 }
 \`\`\`
 
-Be thoughtful - only request revision if there's a real problem. Consider whether the result genuinely achieves the user's intent.
+Be thoughtful - only flag substantial unintended changes that are visually noticeable, not minor noise.
 
 IMPORTANT: You MUST output exactly one JSON code block with your evaluation.`;
 
@@ -1148,6 +1168,8 @@ OUTPUT FORMAT:
 INTERPRETATION: [2-4 sentences explaining what will be done, describing the elements involved, their visual appearance, exact locations, and the transformation. Be specific and detailed - NO LETTERS]
 
 EDITING_PROMPT: [Detailed instruction for the image editor. Include: precise coordinates, visual descriptions (colors, sizes, textures), what to preserve, what to modify, how to handle edges/transitions, and any cleanup needed. Multiple sentences encouraged - NO LETTERS ALLOWED]
+
+IMPORTANT: Always include actual pixel coordinates like (x, y) or regions like "from (x1, y1) to (x2, y2)" whenever possible. These coordinates help verify the edit was applied correctly. Look at the image and estimate coordinates for elements you reference.
 
 EXAMPLE:
 User command: "Move A to B"

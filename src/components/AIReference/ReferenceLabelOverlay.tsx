@@ -1,6 +1,6 @@
 import React from 'react';
 import { useDrawingContext } from '@/contexts/DrawingContext';
-import type { Point } from '@/types/drawing';
+import { AIReferenceSubTool, type Point } from '@/types/drawing';
 import './ReferenceLabelOverlay.css';
 
 interface ReferenceLabelOverlayProps {
@@ -16,14 +16,17 @@ export const ReferenceLabelOverlay: React.FC<ReferenceLabelOverlayProps> = ({
   zoomLevel = 1,
   canvasContainerRef
 }) => {
-  const { state: drawingState } = useDrawingContext();
+  const { state: drawingState, setAiReferenceSubTool } = useDrawingContext();
 
-  // Get reference points from state (will be added by another worker)
+  // Get reference points and sub-tool from state
   const referencePoints = (drawingState as any).referencePoints || [];
+  const currentSubTool = drawingState.aiReferenceSubTool || AIReferenceSubTool.PIN;
 
-  if (!referencePoints || referencePoints.length === 0) {
-    return null;
-  }
+  // Check if there are any markup shapes
+  const hasMarkupShapes = (drawingState.aiMarkupShapes?.length || 0) > 0;
+
+  // Show action buttons when we have pins or markup
+  const hasAnnotations = referencePoints.length > 0 || hasMarkupShapes;
 
   // Convert point index to letter label (A, B, C, ...)
   const getLabel = (index: number): string => {
@@ -99,8 +102,69 @@ export const ReferenceLabelOverlay: React.FC<ReferenceLabelOverlayProps> = ({
         );
       })}
 
+      {/* Sub-tool toggle toolbar at top */}
+      <div
+        className="reference-subtool-toolbar"
+        style={{
+          position: 'fixed',
+          top: '70px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          display: 'flex',
+          gap: '4px',
+          padding: '4px',
+          backgroundColor: 'rgba(255, 255, 255, 0.9)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid rgba(0, 0, 0, 0.1)',
+          borderRadius: '6px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+          zIndex: 10002,
+        }}
+      >
+        {[
+          { tool: AIReferenceSubTool.PIN, label: 'Pin', icon: '📍' },
+          { tool: AIReferenceSubTool.PEN, label: 'Draw', icon: '✏️' },
+          { tool: AIReferenceSubTool.LINE, label: 'Line', icon: '╱' },
+          { tool: AIReferenceSubTool.CIRCLE, label: 'Circle', icon: '⭕' },
+          { tool: AIReferenceSubTool.RECTANGLE, label: 'Rect', icon: '▢' },
+        ].map(({ tool, label, icon }) => (
+          <button
+            key={tool}
+            onClick={() => setAiReferenceSubTool(tool)}
+            style={{
+              padding: '4px 8px',
+              fontSize: '0.7rem',
+              fontWeight: '500',
+              backgroundColor: currentSubTool === tool ? '#2196f3' : 'transparent',
+              color: currentSubTool === tool ? 'white' : '#666',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+            onMouseEnter={(e) => {
+              if (currentSubTool !== tool) {
+                e.currentTarget.style.backgroundColor = 'rgba(33, 150, 243, 0.1)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentSubTool !== tool) {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }
+            }}
+          >
+            <span style={{ fontSize: '0.8rem' }}>{icon}</span>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Floating toolbar for actions */}
-      {referencePoints.length >= 1 && (
+      {hasAnnotations && (
         <div
           className="reference-toolbar"
           style={{

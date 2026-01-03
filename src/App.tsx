@@ -78,6 +78,7 @@ function App(): React.ReactElement {
   const [calibrationDialogOpen, setCalibrationDialogOpen] = useState(false);
   const [pendingCalibrationLine, setPendingCalibrationLine] = useState<MeasurementLineShape | null>(null);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [aiDrawerVisible, setAIDrawerVisible] = useState(true);
   const [manipulationDialogOpen, setManipulationDialogOpen] = useState(false);
   const [manipulationPreviewImage, setManipulationPreviewImage] = useState<string | null>(null);
   const [moveConfirmationOpen, setMoveConfirmationOpen] = useState(false);
@@ -1386,6 +1387,8 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
           onOpenSettings={() => setSettingsDialogOpen(true)}
           fileMenuProps={fileMenuProps}
           editMenuProps={editMenuProps}
+          isAIDrawerVisible={aiDrawerVisible}
+          onToggleAIDrawer={() => setAIDrawerVisible(v => !v)}
         />
 
         <WorkspaceToolbar
@@ -1441,7 +1444,7 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
           />
 
           {/* AI Console - side panel for AI operation logs */}
-          <AIProgressPanel />
+          {aiDrawerVisible && <AIProgressPanel />}
         </main>
 
         <WorkspaceDialogs

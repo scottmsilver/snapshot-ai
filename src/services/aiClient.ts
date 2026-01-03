@@ -61,18 +61,18 @@ export function createAIClient(apiKey: string) {
       isImageGeneration = false,
     } = options;
 
-    // Extract prompt text and images for logging
-    const { text: promptText, images: inputImages } = extractPromptParts(contents);
+    // Extract prompt text and image info for logging
+    const { text: promptText, imageInfos } = extractPromptParts(contents);
 
-    // Log the call with input images (no truncation)
+    // Log the call with image summary (not full base64)
     let logContent = `### ${logLabel}\n\n`;
 
-    // Show input images first
-    if (inputImages.length > 0) {
-      logContent += `**Input Images:** (${inputImages.length})\n\n`;
-      inputImages.forEach((img, i) => {
-        logContent += `![Input ${i + 1}](${img})\n\n`;
-      });
+    // Show image summary (not full base64 to keep logs clean)
+    if (imageInfos.length > 0) {
+      const imageSummary = imageInfos.map((img, i) =>
+        `Image ${i + 1}: ${img.sizeKB}KB (${img.mimeType.split('/')[1] || 'unknown'})`
+      ).join(', ');
+      logContent += `**Input Images:** ${imageInfos.length} (${imageSummary})\n\n`;
     }
 
     logContent += `**Prompt:**\n\`\`\`\n${promptText}\n\`\`\`\n\n`;
@@ -171,17 +171,17 @@ export function createAIClient(apiKey: string) {
       logLabel = 'AI Call (Streaming)',
     } = options;
 
-    // Extract prompt text and images for logging
-    const { text: promptText, images: inputImages } = extractPromptParts(contents);
+    // Extract prompt text and image info for logging
+    const { text: promptText, imageInfos } = extractPromptParts(contents);
 
-    // Log the call with input images (no truncation)
+    // Log the call with image summary (not full base64)
     let logContent = `### ${logLabel}\n\n`;
 
-    if (inputImages.length > 0) {
-      logContent += `**Input Images:** (${inputImages.length})\n\n`;
-      inputImages.forEach((img, i) => {
-        logContent += `![Input ${i + 1}](${img})\n\n`;
-      });
+    if (imageInfos.length > 0) {
+      const imageSummary = imageInfos.map((img, i) =>
+        `Image ${i + 1}: ${img.sizeKB}KB (${img.mimeType.split('/')[1] || 'unknown'})`
+      ).join(', ');
+      logContent += `**Input Images:** ${imageInfos.length} (${imageSummary})\n\n`;
     }
 
     logContent += `**Prompt:**\n\`\`\`\n${promptText}\n\`\`\`\n\n*Streaming response...*\n\n`;
@@ -270,11 +270,22 @@ export function createAIClient(apiKey: string) {
 }
 
 /**
- * Extract text and images from contents array for logging
+ * Image info for logging (without full base64 data)
  */
-function extractPromptParts(contents: any[]): { text: string; images: string[] } {
+interface ImageInfo {
+  /** Estimated size in KB */
+  sizeKB: number;
+  /** MIME type */
+  mimeType: string;
+}
+
+/**
+ * Extract text and image info from contents array for logging
+ * Returns image metadata instead of full base64 to keep logs clean
+ */
+function extractPromptParts(contents: any[]): { text: string; imageInfos: ImageInfo[] } {
   const textParts: string[] = [];
-  const images: string[] = [];
+  const imageInfos: ImageInfo[] = [];
 
   for (const content of contents) {
     if (content.parts) {
@@ -282,11 +293,13 @@ function extractPromptParts(contents: any[]): { text: string; images: string[] }
         if (part.text) {
           textParts.push(part.text);
         } else if (part.inlineData) {
-          // Extract image as data URL
+          // Extract image metadata (not full base64)
           const mimeType = part.inlineData.mimeType || 'image/png';
           const data = part.inlineData.data;
           if (data) {
-            images.push(`data:${mimeType};base64,${data}`);
+            // Estimate size: base64 is ~4/3 of binary size
+            const sizeKB = Math.round((data.length * 3) / 4 / 1024);
+            imageInfos.push({ sizeKB, mimeType });
           }
         }
       }
@@ -295,14 +308,7 @@ function extractPromptParts(contents: any[]): { text: string; images: string[] }
     }
   }
 
-  return { text: textParts.join('\n'), images };
-}
-
-/**
- * Extract text content from contents array for logging (legacy)
- */
-function extractPromptText(contents: any[]): string {
-  return extractPromptParts(contents).text;
+  return { text: textParts.join('\n'), imageInfos };
 }
 
 /**

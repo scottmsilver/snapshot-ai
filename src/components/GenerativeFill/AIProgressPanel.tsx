@@ -4,7 +4,7 @@ import { useAIProgress } from '@/contexts/AIProgressContext';
 import { aiLogService, type AILogState } from '@/services/aiLogService';
 import { useCoordinateHighlightOptional } from '@/contexts/CoordinateHighlightContext';
 import type { AIProgressStep, AILogEntry } from '@/types/aiProgress';
-import { Brain, Zap, Cog, CheckCircle, AlertCircle, RefreshCw, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, X, Bug, Copy, Check } from 'lucide-react';
+import { Brain, Zap, Cog, CheckCircle, AlertCircle, RefreshCw, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, X, Bug, Copy, Check, ArrowDownToLine, ListEnd, FileCode } from 'lucide-react';
 import { EditRegionDebugOverlay } from './EditRegionDebugOverlay';
 
 // Configure marked for safe rendering
@@ -49,22 +49,36 @@ const formatDuration = (ms: number): string => {
 };
 
 /**
- * Pre-process markdown to wrap coordinates in spans with data attributes
+ * Pre-process markdown to wrap coordinates and regions in spans with data attributes
  * This allows us to use event delegation to detect hovers
  */
 const wrapCoordinatesInHtml = (html: string): string => {
-  // Match patterns like (123, 456) or (123,456) but NOT inside base64 data or URLs
-  // We look for coordinates that are surrounded by word boundaries or common punctuation
-  return html.replace(
-    /(?<![A-Za-z0-9+/=])(\((\d{1,5}),\s*(\d{1,5})\))(?![A-Za-z0-9+/=])/g,
+  // First, wrap region patterns: "Region from (x1, y1) to (x2, y2)"
+  // Use HTML entities for parentheses in the display text to prevent the coordinate
+  // regex from matching them again
+  let processed = html.replace(
+    /Region from \((\d{1,5}),\s*(\d{1,5})\) to \((\d{1,5}),\s*(\d{1,5})\)/g,
+    (match, x1, y1, x2, y2) => {
+      // Replace parentheses with HTML entities in the visible text to prevent double-wrapping
+      const displayText = `Region from &#40;${x1}, ${y1}&#41; to &#40;${x2}, ${y2}&#41;`;
+      return `<span class="region-highlight" data-x1="${x1}" data-y1="${y1}" data-x2="${x2}" data-y2="${y2}" style="cursor:pointer;background:rgba(255,107,0,0.15);border-radius:3px;padding:0 2px;font-family:monospace;color:#e65100;border-bottom:1px dashed #e65100;">${displayText}</span>`;
+    }
+  );
+
+  // Then wrap remaining standalone coordinates: (123, 456) or (123,456)
+  // but NOT inside base64 data or URLs
+  processed = processed.replace(
+    /(?<![A-Za-z0-9+/="])(\((\d{1,5}),\s*(\d{1,5})\))(?![A-Za-z0-9+/=])/g,
     (match, full, x, y) => {
       return `<span class="coord-highlight" data-x="${x}" data-y="${y}" style="cursor:pointer;background:rgba(33,150,243,0.15);border-radius:3px;padding:0 2px;font-family:monospace;color:#1976d2;border-bottom:1px dashed #1976d2;">${full}</span>`;
     }
   );
+
+  return processed;
 };
 
 /**
- * Render markdown content safely with interactive coordinates
+ * Render markdown content safely with interactive coordinates and regions
  */
 const MarkdownContent: React.FC<{
   content: string;
@@ -76,21 +90,45 @@ const MarkdownContent: React.FC<{
   const html = marked.parse(content) as string;
   const processedHtml = wrapCoordinatesInHtml(html);
 
-  // Handle mouse events on coordinate spans via event delegation
+  // Handle mouse events on coordinate/region spans via event delegation
   const handleMouseOver = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
+
+    // Handle region highlights
+    if (target.classList.contains('region-highlight')) {
+      const x1 = parseInt(target.dataset.x1 || '0', 10);
+      const y1 = parseInt(target.dataset.y1 || '0', 10);
+      const x2 = parseInt(target.dataset.x2 || '0', 10);
+      const y2 = parseInt(target.dataset.y2 || '0', 10);
+      coordContext?.setHighlightedCoord({ type: 'region', x1, y1, x2, y2 });
+      return;
+    }
+
+    // Handle point coordinates
     if (target.classList.contains('coord-highlight')) {
       const x = parseInt(target.dataset.x || '0', 10);
       const y = parseInt(target.dataset.y || '0', 10);
-      coordContext?.setHighlightedCoord({ x, y });
+      coordContext?.setHighlightedCoord({ type: 'point', x, y });
     }
   }, [coordContext]);
 
   const handleMouseOut = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
-    if (target.classList.contains('coord-highlight')) {
+    const relatedTarget = e.relatedTarget as HTMLElement | null;
+
+    // Only clear if we're leaving a highlight element
+    if (target.classList.contains('coord-highlight') || target.classList.contains('region-highlight')) {
+      // Check if we're moving to another highlight element - if so, don't clear yet
+      if (relatedTarget?.classList.contains('coord-highlight') || relatedTarget?.classList.contains('region-highlight')) {
+        return;
+      }
       coordContext?.setHighlightedCoord(null);
     }
+  }, [coordContext]);
+
+  // Fallback: clear when mouse leaves the entire markdown content area
+  const handleMouseLeave = useCallback(() => {
+    coordContext?.setHighlightedCoord(null);
   }, [coordContext]);
 
   return (
@@ -100,6 +138,7 @@ const MarkdownContent: React.FC<{
       dangerouslySetInnerHTML={{ __html: processedHtml }}
       onMouseOver={handleMouseOver}
       onMouseOut={handleMouseOut}
+      onMouseLeave={handleMouseLeave}
       style={{
         fontSize: '12px',
         lineHeight: '1.5',
@@ -299,6 +338,8 @@ export const AIProgressPanel: React.FC = () => {
   const [isResizing, setIsResizing] = useState(false);
   const [debugData, setDebugData] = useState<AILogEntry['debugData'] | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedRaw, setCopiedRaw] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(true);
 
   // Subscribe to aiLogService for entries from agenticService
   const [serviceLog, setServiceLog] = useState<AILogEntry[]>([]);
@@ -328,12 +369,19 @@ export const AIProgressPanel: React.FC = () => {
     (contextState.step !== 'idle' && contextState.step !== 'complete' && contextState.step !== 'error');
   const elapsedMs = serviceState.isActive ? serviceState.elapsedMs : contextState.elapsedMs;
 
-  // Auto-scroll to bottom when new entries are added
+  // Auto-scroll to bottom when new entries are added (if enabled)
   useEffect(() => {
-    if (scrollRef.current && !isMinimized) {
+    if (scrollRef.current && !isMinimized && autoScroll) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [mergedLog, isMinimized]);
+  }, [mergedLog, isMinimized, autoScroll]);
+
+  // Manual scroll to bottom
+  const handleScrollToBottom = useCallback(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, []);
 
   // Show panel when new activity starts
   useEffect(() => {
@@ -419,6 +467,55 @@ export const AIProgressPanel: React.FC = () => {
       setTimeout(() => setCopied(false), 2000);
     }).catch(err => {
       console.error('Failed to copy log:', err);
+    });
+  }, [mergedLog]);
+
+  // Copy raw log content to clipboard (including base64 data)
+  const handleCopyRawLog = useCallback(() => {
+    // Build plain text representation with ALL content including base64
+    const logText = mergedLog.map(entry => {
+      const lines: string[] = [];
+      const stepConfig = STEP_CONFIG[entry.step];
+
+      // Header line
+      lines.push(`[${formatTime(entry.timestamp)}] ${stepConfig.label}${entry.iteration ? ` [${entry.iteration.current}/${entry.iteration.max}]` : ''}${entry.durationMs ? ` (${formatDuration(entry.durationMs)})` : ''}`);
+
+      // Message
+      if (entry.message) {
+        lines.push(`  ${entry.message}`);
+      }
+
+      // Error
+      if (entry.error) {
+        lines.push(`  ERROR: ${entry.error.message}`);
+        if (entry.error.details) {
+          lines.push(`  ${entry.error.details}`);
+        }
+      }
+
+      // Thinking text - include everything without stripping
+      if (entry.thinkingText) {
+        const rawText = entry.thinkingText.trim();
+        if (rawText) {
+          lines.push('');
+          lines.push(rawText);
+        }
+      }
+
+      // Include iteration image data if present
+      if (entry.iterationImage) {
+        lines.push('');
+        lines.push(`Generated Image Data: ${entry.iterationImage}`);
+      }
+
+      return lines.join('\n');
+    }).join('\n\n---\n\n');
+
+    navigator.clipboard.writeText(logText).then(() => {
+      setCopiedRaw(true);
+      setTimeout(() => setCopiedRaw(false), 2000);
+    }).catch(err => {
+      console.error('Failed to copy raw log:', err);
     });
   }, [mergedLog]);
 
@@ -568,6 +665,21 @@ export const AIProgressPanel: React.FC = () => {
                     {copied ? <Check size={14} /> : <Copy size={14} />}
                   </button>
                   <button
+                    onClick={handleCopyRawLog}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: copiedRaw ? '#27ae60' : '#888',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title={copiedRaw ? 'Copied raw data!' : 'Copy raw log with base64 data'}
+                  >
+                    {copiedRaw ? <Check size={14} /> : <FileCode size={14} />}
+                  </button>
+                  <button
                     onClick={handleClearLog}
                     style={{
                       background: 'none',
@@ -581,6 +693,37 @@ export const AIProgressPanel: React.FC = () => {
                     title="Clear log"
                   >
                     <Trash2 size={14} />
+                  </button>
+                  <div style={{ width: '1px', height: '14px', backgroundColor: '#ddd', margin: '0 2px' }} />
+                  <button
+                    onClick={() => setAutoScroll(v => !v)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: autoScroll ? '#2196f3' : '#888',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title={autoScroll ? 'Auto-scroll ON (click to disable)' : 'Auto-scroll OFF (click to enable)'}
+                  >
+                    <ListEnd size={14} />
+                  </button>
+                  <button
+                    onClick={handleScrollToBottom}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#888',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title="Scroll to bottom"
+                  >
+                    <ArrowDownToLine size={14} />
                   </button>
                 </>
               )}

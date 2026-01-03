@@ -1,14 +1,33 @@
 import React, { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
 /**
- * Highlighted coordinate state
+ * Highlighted coordinate (point)
  */
-export interface HighlightedCoordinate {
+export interface HighlightedPoint {
+  type: 'point';
   x: number;
   y: number;
   /** Source image to show (base64 data URL) - optional, used for reference */
   sourceImage?: string;
 }
+
+/**
+ * Highlighted region (bounding box)
+ */
+export interface HighlightedRegion {
+  type: 'region';
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  /** Source image to show (base64 data URL) - optional, used for reference */
+  sourceImage?: string;
+}
+
+/**
+ * Highlighted coordinate state - can be a point or a region
+ */
+export type HighlightedCoordinate = HighlightedPoint | HighlightedRegion;
 
 /**
  * Context type for coordinate highlighting

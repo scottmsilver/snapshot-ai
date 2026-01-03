@@ -16,6 +16,12 @@ export interface EditRegion {
   centerX: number;     // Center X coordinate
   centerY: number;     // Center Y coordinate
   pixelCount: number;  // Number of changed pixels in this region
+  /** Average color difference (0-255) across changed pixels - measures edit intensity */
+  avgColorDiff: number;
+  /** Maximum color difference found in this region */
+  maxColorDiff: number;
+  /** Perceptual significance score (0-100) combining size and intensity */
+  significance: number;
 }
 
 /**
@@ -125,6 +131,14 @@ export function detectEditRegions(
   );
 }
 
+/** Per-block statistics for color difference tracking */
+interface BlockStats {
+  changed: boolean;
+  changedPixelCount: number;
+  totalColorDiff: number;  // Sum of max(r,g,b) diffs for changed pixels
+  maxColorDiff: number;    // Maximum single-pixel color diff in block
+}
+
 /**
  * Block-based comparison (like video codecs).
  * More robust against diffusion noise.
@@ -146,12 +160,15 @@ function detectEditRegionsBlockBased(
   const blocksY = Math.ceil(height / blockSize);
   const totalBlocks = blocksX * blocksY;
 
-  // Step 1: For each block, calculate change density
+  // Step 1: For each block, calculate change density and color difference stats
+  const blockStats: BlockStats[] = new Array(totalBlocks);
   const blockChangedMask = new Uint8Array(totalBlocks);
   let totalChangedPixels = 0;
 
   for (let by = 0; by < blocksY; by++) {
     for (let bx = 0; bx < blocksX; bx++) {
+      const blockIdx = by * blocksX + bx;
+
       // Calculate block bounds (handle edge blocks that may be smaller)
       const startX = bx * blockSize;
       const startY = by * blockSize;
@@ -159,8 +176,10 @@ function detectEditRegionsBlockBased(
       const endY = Math.min(startY + blockSize, height);
       const blockPixelCount = (endX - startX) * (endY - startY);
 
-      // Count changed pixels in this block
+      // Track stats for this block
       let changedInBlock = 0;
+      let totalColorDiff = 0;
+      let maxColorDiff = 0;
 
       for (let y = startY; y < endY; y++) {
         for (let x = startX; x < endX; x++) {
@@ -169,18 +188,30 @@ function detectEditRegionsBlockBased(
           const rDiff = Math.abs(original.data[idx] - edited.data[idx]);
           const gDiff = Math.abs(original.data[idx + 1] - edited.data[idx + 1]);
           const bDiff = Math.abs(original.data[idx + 2] - edited.data[idx + 2]);
+          const pixelDiff = Math.max(rDiff, gDiff, bDiff);
 
-          if (rDiff > colorThreshold || gDiff > colorThreshold || bDiff > colorThreshold) {
+          if (pixelDiff > colorThreshold) {
             changedInBlock++;
             totalChangedPixels++;
+            totalColorDiff += pixelDiff;
+            maxColorDiff = Math.max(maxColorDiff, pixelDiff);
           }
         }
       }
 
       // Block is "changed" if density exceeds threshold
       const density = changedInBlock / blockPixelCount;
-      if (density >= minBlockDensity) {
-        blockChangedMask[by * blocksX + bx] = 1;
+      const isChanged = density >= minBlockDensity;
+
+      blockStats[blockIdx] = {
+        changed: isChanged,
+        changedPixelCount: changedInBlock,
+        totalColorDiff,
+        maxColorDiff,
+      };
+
+      if (isChanged) {
+        blockChangedMask[blockIdx] = 1;
       }
     }
   }
@@ -205,10 +236,12 @@ function detectEditRegionsBlockBased(
         );
 
         if (regionBlocks.length >= minBlockCount) {
-          // Convert block coordinates to pixel coordinates
+          // Convert block coordinates to pixel coordinates and aggregate stats
           const region = computeBoundingBoxFromBlocks(
             regionBlocks,
             blockSize,
+            blockStats,
+            blocksX,
             width,
             height
           );
@@ -218,8 +251,8 @@ function detectEditRegionsBlockBased(
     }
   }
 
-  // Sort regions by size (largest first)
-  regions.sort((a, b) => b.pixelCount - a.pixelCount);
+  // Sort regions by significance (most significant first)
+  regions.sort((a, b) => b.significance - a.significance);
 
   return {
     regions,
@@ -244,22 +277,26 @@ function detectEditRegionsPixelBased(
   const height = original.height;
   const totalPixels = width * height;
 
-  // Step 1: Create a binary mask of changed pixels
+  // Step 1: Create a mask of changed pixels with their color differences
   const changedMask = new Uint8Array(totalPixels);
+  const colorDiffs = new Uint8Array(totalPixels); // Store max channel diff per pixel
   let totalChangedPixels = 0;
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
+      const maskIdx = y * width + x;
 
       // Compare RGB values (ignore alpha)
       const rDiff = Math.abs(original.data[idx] - edited.data[idx]);
       const gDiff = Math.abs(original.data[idx + 1] - edited.data[idx + 1]);
       const bDiff = Math.abs(original.data[idx + 2] - edited.data[idx + 2]);
+      const pixelDiff = Math.max(rDiff, gDiff, bDiff);
 
       // Consider changed if any channel differs beyond threshold
-      if (rDiff > colorThreshold || gDiff > colorThreshold || bDiff > colorThreshold) {
-        changedMask[y * width + x] = 1;
+      if (pixelDiff > colorThreshold) {
+        changedMask[maskIdx] = 1;
+        colorDiffs[maskIdx] = pixelDiff;
         totalChangedPixels++;
       }
     }
@@ -278,15 +315,15 @@ function detectEditRegionsPixelBased(
         const regionPixels = floodFill(changedMask, visited, width, height, x, y);
 
         if (regionPixels.length >= minRegionSize) {
-          const region = computeBoundingBox(regionPixels);
+          const region = computeBoundingBox(regionPixels, colorDiffs, width);
           regions.push(region);
         }
       }
     }
   }
 
-  // Sort regions by size (largest first)
-  regions.sort((a, b) => b.pixelCount - a.pixelCount);
+  // Sort regions by significance (most significant first)
+  regions.sort((a, b) => b.significance - a.significance);
 
   return {
     regions,
@@ -336,10 +373,13 @@ function floodFillBlocks(
 
 /**
  * Compute bounding box from a list of blocks, converting to pixel coordinates.
+ * Also aggregates color difference statistics from block stats.
  */
 function computeBoundingBoxFromBlocks(
   blocks: Array<{ bx: number; by: number }>,
   blockSize: number,
+  blockStats: BlockStats[],
+  blocksX: number,
   imageWidth: number,
   imageHeight: number
 ): EditRegion {
@@ -348,11 +388,22 @@ function computeBoundingBoxFromBlocks(
   let maxBx = -Infinity;
   let maxBy = -Infinity;
 
+  // Aggregate color difference stats across all blocks in region
+  let totalColorDiff = 0;
+  let totalChangedPixels = 0;
+  let maxColorDiff = 0;
+
   for (const { bx, by } of blocks) {
     if (bx < minBx) minBx = bx;
     if (bx > maxBx) maxBx = bx;
     if (by < minBy) minBy = by;
     if (by > maxBy) maxBy = by;
+
+    const blockIdx = by * blocksX + bx;
+    const stats = blockStats[blockIdx];
+    totalColorDiff += stats.totalColorDiff;
+    totalChangedPixels += stats.changedPixelCount;
+    maxColorDiff = Math.max(maxColorDiff, stats.maxColorDiff);
   }
 
   // Convert to pixel coordinates
@@ -364,8 +415,22 @@ function computeBoundingBoxFromBlocks(
   const width = rightEdge - x;
   const height = bottomEdge - y;
 
-  // Estimate pixel count based on block count (not exact but useful)
-  const pixelCount = blocks.length * blockSize * blockSize;
+  // Calculate average color difference (0-255 scale)
+  const avgColorDiff = totalChangedPixels > 0
+    ? Math.round(totalColorDiff / totalChangedPixels)
+    : 0;
+
+  // Calculate significance score (0-100)
+  // Combines: region size (area), color intensity, and pixel density
+  const area = width * height;
+  const areaNormalized = Math.min(area / 10000, 1); // Normalize to ~100x100 being "full"
+  const intensityNormalized = avgColorDiff / 255;   // 0-1 scale
+  const densityNormalized = totalChangedPixels / area; // What fraction of region changed
+
+  // Weighted combination: 40% size, 40% intensity, 20% density
+  const significance = Math.round(
+    (areaNormalized * 0.4 + intensityNormalized * 0.4 + densityNormalized * 0.2) * 100
+  );
 
   return {
     x,
@@ -374,7 +439,10 @@ function computeBoundingBoxFromBlocks(
     height,
     centerX: Math.round(x + width / 2),
     centerY: Math.round(y + height / 2),
-    pixelCount,
+    pixelCount: totalChangedPixels,
+    avgColorDiff,
+    maxColorDiff,
+    significance,
   };
 }
 
@@ -416,23 +484,53 @@ function floodFill(
 }
 
 /**
- * Compute bounding box from a list of pixels
+ * Compute bounding box from a list of pixels with color difference stats.
  */
-function computeBoundingBox(pixels: Array<{ x: number; y: number }>): EditRegion {
+function computeBoundingBox(
+  pixels: Array<{ x: number; y: number }>,
+  colorDiffs: Uint8Array,
+  imageWidth: number
+): EditRegion {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
+
+  // Aggregate color difference stats
+  let totalColorDiff = 0;
+  let maxColorDiff = 0;
 
   for (const { x, y } of pixels) {
     if (x < minX) minX = x;
     if (x > maxX) maxX = x;
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
+
+    const idx = y * imageWidth + x;
+    const diff = colorDiffs[idx];
+    totalColorDiff += diff;
+    maxColorDiff = Math.max(maxColorDiff, diff);
   }
 
   const width = maxX - minX + 1;
   const height = maxY - minY + 1;
+
+  // Calculate average color difference (0-255 scale)
+  const avgColorDiff = pixels.length > 0
+    ? Math.round(totalColorDiff / pixels.length)
+    : 0;
+
+  // Calculate significance score (0-100)
+  // Combines: region size (area), color intensity, and pixel density
+  const area = width * height;
+  const areaNormalized = Math.min(area / 10000, 1); // Normalize to ~100x100 being "full"
+  const intensityNormalized = avgColorDiff / 255;   // 0-1 scale
+  const densityNormalized = pixels.length / area;   // What fraction of region changed
+
+  // Weighted combination: 40% size, 40% intensity, 20% density
+  const significance = Math.round(
+    (areaNormalized * 0.4 + intensityNormalized * 0.4 + densityNormalized * 0.2) * 100
+  );
 
   // Center is the midpoint between min and max (inclusive pixel coordinates)
   // For a 1x1 region at (5,5): center = (5+5)/2 = 5
@@ -445,6 +543,9 @@ function computeBoundingBox(pixels: Array<{ x: number; y: number }>): EditRegion
     centerX: Math.round((minX + maxX) / 2),
     centerY: Math.round((minY + maxY) / 2),
     pixelCount: pixels.length,
+    avgColorDiff,
+    maxColorDiff,
+    significance,
   };
 }
 
@@ -461,10 +562,11 @@ export function formatEditRegionsForPrompt(result: EditDetectionResult): string 
     const bottomRight = `(${r.x + r.width - 1}, ${r.y + r.height - 1})`;
     const center = `(${r.centerX}, ${r.centerY})`;
     const size = `${r.width}x${r.height}`;
-    return `  ${i + 1}. Region from ${topLeft} to ${bottomRight}, center: ${center}, size: ${size}, ${r.pixelCount} pixels changed`;
+    const intensity = `avg=${r.avgColorDiff}, max=${r.maxColorDiff}`;
+    return `  ${i + 1}. Region from ${topLeft} to ${bottomRight}, center: ${center}, size: ${size}, ${r.pixelCount} pixels changed, intensity: ${intensity}, significance: ${r.significance}/100`;
   });
 
-  return `DETECTED EDIT LOCATIONS:
+  return `DETECTED EDIT LOCATIONS (sorted by significance):
 ${regionDescriptions.join('\n')}
 
 Total: ${result.totalChangedPixels} pixels changed (${result.percentChanged.toFixed(1)}% of image)

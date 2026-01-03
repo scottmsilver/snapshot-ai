@@ -4,7 +4,7 @@ import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
 import { useDrawingContext, DrawingActionType } from '@/contexts/DrawingContext';
 import { useSelectionMachine } from '@/hooks/useSelectionMachine';
-import { DrawingTool } from '@/types/drawing';
+import { DrawingTool, AIReferenceSubTool } from '@/types/drawing';
 import { SelectionOverlay } from '@/components/GenerativeFill/SelectionOverlay';
 import { ResultOverlay } from '@/components/GenerativeFill/ResultOverlay';
 import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, StarShape, MeasurementLineShape, ImageShape, Point } from '@/types/drawing';
@@ -102,10 +102,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     clearSelection,
   } = useDrawing();
 
-  const { state: drawingState, dispatch, addReferencePoint } = useDrawingContext();
+  const { state: drawingState, dispatch, addReferencePoint, addAiMarkupShape } = useDrawingContext();
 
   // Track if mouse is down for generative fill
   const [isGenerativeFillDrawing, setIsGenerativeFillDrawing] = useState(false);
+
+  // Track markup drawing state for AI Reference mode
+  const [isMarkupDrawing, setIsMarkupDrawing] = useState(false);
+  const [markupStartPoint, setMarkupStartPoint] = useState<Point | null>(null);
+  const [markupTempPoints, setMarkupTempPoints] = useState<Point[]>([]);
 
   const {
     context: selectionContext,
@@ -367,9 +372,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         y: pos.y / zoomLevel
       };
 
-      // Early check: if AI Reference Mode is active, capture the click as a reference point
+      // Early check: if AI Reference Mode is active, handle pin drops or markup drawing
       if (drawingState.aiReferenceMode) {
-        addReferencePoint(adjustedPos);
+        if (drawingState.aiReferenceSubTool === AIReferenceSubTool.PIN) {
+          // Drop a pin at the click location
+          addReferencePoint(adjustedPos);
+        } else {
+          // Start markup drawing for pen/circle/rectangle sub-tools
+          setIsMarkupDrawing(true);
+          setMarkupStartPoint(adjustedPos);
+          setMarkupTempPoints([adjustedPos]);
+        }
         return; // Bypass all normal drawing behavior
       }
 
@@ -444,6 +457,19 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         y: pos.y / zoomLevel
       };
 
+      // Handle markup drawing for AI Reference mode
+      if (isMarkupDrawing && drawingState.aiReferenceMode) {
+        const subTool = drawingState.aiReferenceSubTool;
+        if (subTool === AIReferenceSubTool.PEN) {
+          // For pen, accumulate points
+          setMarkupTempPoints(prev => [...prev, adjustedPos]);
+        } else {
+          // For line/circle/rectangle, just update the end point
+          setMarkupTempPoints(prev => prev.length > 0 ? [prev[0], adjustedPos] : [adjustedPos]);
+        }
+        return;
+      }
+
       if (activeTool === DrawingTool.SELECT) {
         // Handle hover
         const target = e.target;
@@ -480,6 +506,132 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       if (isTransformerClick || isControlPoint) {
         // Don't process mouseup from transformer handles or control points
+        return;
+      }
+
+      // Handle markup drawing completion for AI Reference mode
+      if (isMarkupDrawing && drawingState.aiReferenceMode) {
+        const subTool = drawingState.aiReferenceSubTool;
+        const startPt = markupStartPoint;
+        const points = markupTempPoints;
+
+        // Reset markup drawing state
+        setIsMarkupDrawing(false);
+        setMarkupStartPoint(null);
+        setMarkupTempPoints([]);
+
+        if (!startPt || points.length === 0) return;
+
+        // Get the current mouse position
+        const pos = stage.getPointerPosition();
+        const endPt = pos ? { x: pos.x / zoomLevel, y: pos.y / zoomLevel } : points[points.length - 1];
+
+        // Bright orange markup style
+        const markupStyle = {
+          stroke: '#FF6B00',
+          strokeWidth: 3,
+          opacity: 1,
+          lineCap: 'round' as const,
+          lineJoin: 'round' as const,
+        };
+
+        const timestamp = Date.now();
+        const shapeId = `markup_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+
+        let newShape: Shape | null = null;
+
+        if (subTool === AIReferenceSubTool.PEN) {
+          // Create pen shape from accumulated points
+          if (points.length > 1) {
+            const flatPoints: number[] = [];
+            points.forEach(p => {
+              flatPoints.push(p.x, p.y);
+            });
+
+            newShape = {
+              id: shapeId,
+              type: DrawingTool.PEN,
+              points: flatPoints,
+              style: markupStyle,
+              visible: true,
+              locked: true,
+              zIndex: 0,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              tension: 0.5,
+              isMarkup: true,
+            } as PenShape;
+          }
+        } else if (subTool === AIReferenceSubTool.LINE) {
+          // Create straight line from start to end point
+          const lineLength = Math.sqrt(Math.pow(endPt.x - startPt.x, 2) + Math.pow(endPt.y - startPt.y, 2));
+          if (lineLength > 5) {
+            newShape = {
+              id: shapeId,
+              type: DrawingTool.PEN,
+              points: [startPt.x, startPt.y, endPt.x, endPt.y],
+              style: markupStyle,
+              visible: true,
+              locked: true,
+              zIndex: 0,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              isMarkup: true,
+            } as PenShape;
+          }
+        } else if (subTool === AIReferenceSubTool.CIRCLE) {
+          // Create circle/ellipse from start and end points
+          const dx = endPt.x - startPt.x;
+          const dy = endPt.y - startPt.y;
+          const radiusX = Math.abs(dx) / 2;
+          const radiusY = Math.abs(dy) / 2;
+          const centerX = startPt.x + dx / 2;
+          const centerY = startPt.y + dy / 2;
+
+          if (radiusX > 2 && radiusY > 2) {
+            newShape = {
+              id: shapeId,
+              type: DrawingTool.CIRCLE,
+              x: centerX,
+              y: centerY,
+              radiusX: radiusX,
+              radiusY: radiusY,
+              style: { ...markupStyle, fill: undefined },
+              visible: true,
+              locked: true,
+              zIndex: 0,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              isMarkup: true,
+            } as CircleShape;
+          }
+        } else if (subTool === AIReferenceSubTool.RECTANGLE) {
+          // Create rectangle from start and end points
+          const width = Math.abs(endPt.x - startPt.x);
+          const height = Math.abs(endPt.y - startPt.y);
+
+          if (width > 2 && height > 2) {
+            newShape = {
+              id: shapeId,
+              type: DrawingTool.RECTANGLE,
+              x: Math.min(startPt.x, endPt.x),
+              y: Math.min(startPt.y, endPt.y),
+              width: width,
+              height: height,
+              style: { ...markupStyle, fill: undefined },
+              visible: true,
+              locked: true,
+              zIndex: 0,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              isMarkup: true,
+            } as RectShape;
+          }
+        }
+
+        if (newShape) {
+          addAiMarkupShape(newShape);
+        }
         return;
       }
 
@@ -608,7 +760,104 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     selectedShapeIds,
     selectMultiple,
     zoomLevel,
+    isMarkupDrawing,
+    markupStartPoint,
+    markupTempPoints,
+    drawingState.aiReferenceMode,
+    drawingState.aiReferenceSubTool,
+    addAiMarkupShape,
   ]);
+
+  // Render markup preview for AI Reference mode
+  const renderMarkupPreview = (): React.ReactNode => {
+    if (!isMarkupDrawing || !drawingState.aiReferenceMode || markupTempPoints.length === 0) {
+      return null;
+    }
+
+    const subTool = drawingState.aiReferenceSubTool;
+    const markupStyle = {
+      stroke: '#FF6B00',
+      strokeWidth: 3,
+      opacity: 0.8,
+    };
+
+    if (subTool === AIReferenceSubTool.PEN) {
+      if (markupTempPoints.length < 2) return null;
+      const penPoints = markupTempPoints.flatMap(p => [p.x, p.y]);
+      return (
+        <Line
+          points={penPoints}
+          stroke={markupStyle.stroke}
+          strokeWidth={markupStyle.strokeWidth}
+          opacity={markupStyle.opacity}
+          lineCap="round"
+          lineJoin="round"
+          tension={0.5}
+          listening={false}
+        />
+      );
+    } else if (subTool === AIReferenceSubTool.LINE) {
+      if (markupTempPoints.length < 2) return null;
+      const startPt = markupTempPoints[0];
+      const endPt = markupTempPoints[markupTempPoints.length - 1];
+      return (
+        <Line
+          points={[startPt.x, startPt.y, endPt.x, endPt.y]}
+          stroke={markupStyle.stroke}
+          strokeWidth={markupStyle.strokeWidth}
+          opacity={markupStyle.opacity}
+          lineCap="round"
+          listening={false}
+        />
+      );
+    } else if (subTool === AIReferenceSubTool.CIRCLE) {
+      if (markupTempPoints.length < 2) return null;
+      const startPt = markupTempPoints[0];
+      const endPt = markupTempPoints[markupTempPoints.length - 1];
+      const dx = endPt.x - startPt.x;
+      const dy = endPt.y - startPt.y;
+      const radiusX = Math.abs(dx) / 2;
+      const radiusY = Math.abs(dy) / 2;
+      const centerX = startPt.x + dx / 2;
+      const centerY = startPt.y + dy / 2;
+
+      return (
+        <Circle
+          x={centerX}
+          y={centerY}
+          radiusX={radiusX}
+          radiusY={radiusY}
+          stroke={markupStyle.stroke}
+          strokeWidth={markupStyle.strokeWidth}
+          opacity={markupStyle.opacity}
+          listening={false}
+        />
+      );
+    } else if (subTool === AIReferenceSubTool.RECTANGLE) {
+      if (markupTempPoints.length < 2) return null;
+      const startPt = markupTempPoints[0];
+      const endPt = markupTempPoints[markupTempPoints.length - 1];
+      const x = Math.min(startPt.x, endPt.x);
+      const y = Math.min(startPt.y, endPt.y);
+      const width = Math.abs(endPt.x - startPt.x);
+      const height = Math.abs(endPt.y - startPt.y);
+
+      return (
+        <Rect
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          stroke={markupStyle.stroke}
+          strokeWidth={markupStyle.strokeWidth}
+          opacity={markupStyle.opacity}
+          listening={false}
+        />
+      );
+    }
+
+    return null;
+  };
 
   // Render temporary drawing preview
   const renderTempDrawing = (): React.ReactNode => {
@@ -1235,12 +1484,16 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       }
     };
 
+    // Disable shape interaction when in AI Reference mode with a drawing sub-tool
+    const isAiReferenceDrawing = drawingState.aiReferenceMode &&
+      drawingState.aiReferenceSubTool !== AIReferenceSubTool.PIN;
+
     const commonProps: ShapeCommonProps = {
       id: shape.id,
       opacity: shape.style.opacity,
       visible: shape.visible,
-      listening: currentlyDraggingShapeId === shape.id || (!currentlyDraggingShapeId && activeTool === DrawingTool.SELECT),
-      draggable: activeTool === DrawingTool.SELECT && !isDraggingControlPoint,
+      listening: !isAiReferenceDrawing && (currentlyDraggingShapeId === shape.id || (!currentlyDraggingShapeId && activeTool === DrawingTool.SELECT)),
+      draggable: !isAiReferenceDrawing && activeTool === DrawingTool.SELECT && !isDraggingControlPoint,
       onClick: (e: Konva.KonvaEventObject<MouseEvent>) => {
         if (activeTool === DrawingTool.SELECT) {
           const isSelected = drawingSelectedShapeIds.includes(shape.id);
@@ -2923,9 +3176,17 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       {/* Render all shapes in z-order */}
       {getSortedShapes().map(renderShape)}
 
+      {/* Render AI markup shapes (separate from main shapes, not in undo history) */}
+      {drawingState.aiMarkupShapes.map(renderShape)}
+
       {/* Render temporary drawing preview - with high z-index */}
       <Group listening={false} zIndex={999999}>
         {renderTempDrawing()}
+      </Group>
+
+      {/* Render markup preview for AI Reference mode */}
+      <Group listening={false} zIndex={999998}>
+        {renderMarkupPreview()}
       </Group>
 
       {/* Render generative fill selection overlay */}
@@ -2961,8 +3222,9 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         />
       )}
 
-      {/* Render transformer for selected shapes */}
-      {activeTool === DrawingTool.SELECT && drawingSelectedShapeIds.length > 0 && (
+      {/* Render transformer for selected shapes (hidden in AI Reference drawing mode) */}
+      {activeTool === DrawingTool.SELECT && drawingSelectedShapeIds.length > 0 &&
+       !(drawingState.aiReferenceMode && drawingState.aiReferenceSubTool !== AIReferenceSubTool.PIN) && (
         <Transformer
           key={drawingSelectedShapeIds.join(',')}
           ref={transformerRef}
