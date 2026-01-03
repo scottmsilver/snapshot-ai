@@ -318,6 +318,9 @@ describe('imageCompareService', () => {
           centerX: 50,
           centerY: 65,
           pixelCount: 600,
+          avgColorDiff: 50,
+          maxColorDiff: 128,
+          significance: 75,
         }],
         totalChangedPixels: 600,
         percentChanged: 6,
@@ -340,8 +343,8 @@ describe('imageCompareService', () => {
     it('should format multiple regions', () => {
       const result: EditDetectionResult = {
         regions: [
-          { x: 0, y: 0, width: 10, height: 10, centerX: 5, centerY: 5, pixelCount: 100 },
-          { x: 90, y: 90, width: 10, height: 10, centerX: 95, centerY: 95, pixelCount: 100 },
+          { x: 0, y: 0, width: 10, height: 10, centerX: 5, centerY: 5, pixelCount: 100, avgColorDiff: 40, maxColorDiff: 100, significance: 60 },
+          { x: 90, y: 90, width: 10, height: 10, centerX: 95, centerY: 95, pixelCount: 100, avgColorDiff: 45, maxColorDiff: 120, significance: 65 },
         ],
         totalChangedPixels: 200,
         percentChanged: 2,
