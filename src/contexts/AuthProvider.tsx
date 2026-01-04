@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
-import type { UseGoogleLoginOptionsImplicitFlow } from '@react-oauth/google';
+import type { NonOAuthError, TokenResponse, UseGoogleLoginOptionsImplicitFlow } from '@react-oauth/google';
 import {
   storeSession,
   getStoredSession,
@@ -27,6 +27,9 @@ const isOAuthError = (value: unknown): value is OAuthError => {
 interface AuthProviderInnerProps {
   children: ReactNode;
 }
+
+type TokenSuccessResponse = Omit<TokenResponse, 'error' | 'error_description' | 'error_uri'>;
+type TokenErrorResponse = Pick<TokenResponse, 'error' | 'error_description' | 'error_uri'>;
 
 const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -153,7 +156,7 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
   }, [logout]);
 
   const loginConfig = {
-    onSuccess: async (response): Promise<void> => {
+    onSuccess: async (response: TokenSuccessResponse): Promise<void> => {
       console.log('🎉 onSuccess called!', response);
       const token = response.access_token;
       if (!token) {
@@ -173,12 +176,12 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
         setAccessToken(null);
       }
     },
-    onError: (error): void => {
+    onError: (error: TokenErrorResponse): void => {
       console.log('❌ onError called!');
       console.error('Login failed:', error);
       console.error('Error details:', JSON.stringify(error, null, 2));
     },
-    onNonOAuthError: (error): void => {
+    onNonOAuthError: (error: NonOAuthError): void => {
       console.log('⚠️ onNonOAuthError called!');
       console.error('Non-OAuth error:', error);
       if (isOAuthError(error)) {
