@@ -1,5 +1,4 @@
 import React from 'react';
-import Konva from 'konva';
 import { Line, Rect } from 'react-konva';
 import { GenerativeFillSelectionTool, type Point, type Rectangle } from '@/types/drawing';
 

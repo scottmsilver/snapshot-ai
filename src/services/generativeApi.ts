@@ -1,7 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
 import { base64ToImageData, imageDataToBase64 } from '@/utils/maskRendering';
 import { AI_MODELS, THINKING_BUDGETS } from '@/config/aiModels';
-import { aiLogService } from './aiLogService';
 import { createAIClient, type AIClient } from './aiClient';
 
 export interface InpaintRequest {
@@ -15,24 +13,6 @@ export interface InpaintResponse {
   error?: string;
 }
 
-// Helper to convert ImageData to a format Google GenAI expects
-function imageDataToBlob(imageData: ImageData): Promise<Blob> {
-  const canvas = document.createElement('canvas');
-  canvas.width = imageData.width;
-  canvas.height = imageData.height;
-  const ctx = canvas.getContext('2d')!;
-  ctx.putImageData(imageData, 0, 0);
-
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) {
-        resolve(blob);
-      } else {
-        reject(new Error('Failed to convert canvas to blob'));
-      }
-    }, 'image/png');
-  });
-}
 
 /**
  * Service for AI-powered inpainting using external APIs
@@ -485,8 +465,6 @@ Be extremely specific and detailed so this object can be unambiguously identifie
     }
     console.log('🔍 DEBUG: Extracted base64 data length:', base64Data.length);
 
-    const maskBase64 = imageDataToBase64(maskImage);
-
     // DEBUG: Log what we're sending to Gemini
     console.log('🔍 DEBUG: Source image size:', sourceImage.width, 'x', sourceImage.height);
     console.log('🔍 DEBUG: Mask image size:', maskImage.width, 'x', maskImage.height);
@@ -494,9 +472,6 @@ Be extremely specific and detailed so this object can be unambiguously identifie
 
     // Step 1: Describe the selected area
     const areaDescription = await this.describeSelectedArea(sourceImage, maskImage);
-
-    // Create marked image for step 2
-    const markedImageBase64 = this.createMarkedImage(sourceImage, maskImage);
 
     // Create data URLs for debugging
     const sourceCanvas = document.createElement('canvas');
@@ -848,6 +823,9 @@ Return the edited image.`;
     _maskImage: ImageData,
     _prompt: string
   ): Promise<ImageData> {
+    // Suppress unused parameter warnings - these match the real API signature
+    void _maskImage;
+    void _prompt;
     // Create a mock result (colored overlay)
     const canvas = document.createElement('canvas');
     canvas.width = sourceImage.width;

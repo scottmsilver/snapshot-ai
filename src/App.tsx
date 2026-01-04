@@ -15,7 +15,7 @@ import { useClipboardPaste } from '@/hooks/useClipboardPaste';
 import { useMeasurementEffects } from '@/hooks/useMeasurementEffects';
 import { useFileImports } from '@/hooks/useFileImports';
 import { useAIProgress } from '@/contexts/AIProgressContext';
-import { copyCanvasToClipboard, downloadCanvasAsImage, captureCleanCanvas, captureCleanCanvasAsDataURL } from '@/utils/exportUtils';
+import { copyCanvasToClipboard, downloadCanvasAsImage, captureCleanCanvas } from '@/utils/exportUtils';
 import {
   DrawingTool,
   GenerativeFillSelectionTool,
@@ -35,7 +35,6 @@ import { WorkspaceCanvas } from '@/components/App/WorkspaceCanvas';
 import { WorkspaceDialogs } from '@/components/App/WorkspaceDialogs';
 import { GenerativeFillToolbar } from '@/components/GenerativeFill/GenerativeFillToolbar';
 import { GenerativeFillDialog } from '@/components/GenerativeFill/GenerativeFillDialog';
-import { GenerativeFillResultToolbar } from '@/components/GenerativeFill/GenerativeFillResultToolbar';
 import { AIProgressPanel } from '@/components/GenerativeFill/AIProgressPanel';
 import { SettingsDialog } from '@/components/Settings';
 import { createGenerativeService } from '@/services/generativeApi';
@@ -51,13 +50,16 @@ const CANVAS_PADDING = 100;
 
 type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
 
+// Wrapper component to handle test mode routing without violating hooks rules
 function App(): React.ReactElement {
-  // Test Playground Route
   const isTestMode = new URLSearchParams(window.location.search).has('test');
   if (isTestMode) {
     return <InlineTextPlayground />;
   }
+  return <MainApp />;
+}
 
+function MainApp(): React.ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -103,7 +105,7 @@ function App(): React.ReactElement {
     deleteSelected,
     updateStyle,
   } = useDrawing();
-  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes, clearReferencePoints, setAiReferenceMode, setAiMoveState, clearAiMoveState, clearAiMarkupShapes } = useDrawingContext();
+  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes, clearReferencePoints, setAiReferenceMode, clearAiMoveState, clearAiMarkupShapes } = useDrawingContext();
   const { canUndo, canRedo, pushState, undo, redo, getCurrentState, currentIndex } = useHistory();
 
   const selectedShapes = useMemo(
@@ -288,7 +290,7 @@ function App(): React.ReactElement {
     setPendingCalibrationLine(null);
   }, [deleteShapes, pendingCalibrationLine]);
 
-  const handleAiMoveClick = useCallback(async (_x: number, _y: number) => {
+  const handleAiMoveClick = useCallback(async () => {
     // AI Move requires SAM (Segment Anything Model) which is not yet implemented
     console.log('AI Move: Not yet implemented - SAM service needs to be integrated');
     clearAiMoveState();
@@ -849,9 +851,6 @@ function App(): React.ReactElement {
           }
         }
 
-        // Use appropriate API key/token based on model
-        const apiKeyOrToken = modelToValidate === 'imagen' ? oauthAccessToken : geminiApiKey;
-
         // Call API service with both model preferences
         // Resolve Gemini API Key for the Agent (and Nano Banana tool)
         const effectiveGeminiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
@@ -936,73 +935,6 @@ function App(): React.ReactElement {
     });
     // Need to close dialog - we'll dispatch a new action or handle via state
     dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-  }, [dispatch, drawingState.generativeFillMode]);
-
-  const handleGenerativeFillAccept = useCallback(() => {
-    // Apply the result to the canvas by adding it as an ImageShape
-    if (!drawingState.generativeFillMode?.generatedResult) return;
-
-    const { imageData, bounds } = drawingState.generativeFillMode.generatedResult;
-
-    const imageShape: Shape = {
-      id: `image-${Date.now()}`,
-      type: DrawingTool.IMAGE,
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
-      imageData: imageData,
-      style: {
-        stroke: 'transparent',
-        strokeWidth: 0,
-        opacity: 1,
-      },
-      visible: true,
-      locked: false,
-      zIndex: drawingState.maxZIndex + 1,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    dispatch({ type: DrawingActionType.ADD_SHAPE, shape: imageShape });
-    dispatch({ type: DrawingActionType.APPLY_GENERATIVE_FILL_RESULT });
-    dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-    setActiveTool(DrawingTool.SELECT);
-  }, [dispatch, setActiveTool, drawingState.generativeFillMode, drawingState.maxZIndex]);
-
-  const handleGenerativeFillReject = useCallback(() => {
-    // Discard the result and go back to selection
-    if (!drawingState.generativeFillMode) return;
-    dispatch({
-      type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
-    });
-    // Clear the result but keep the selection for retry
-    const updatedMode = {
-      ...drawingState.generativeFillMode,
-      generatedResult: null,
-      isGenerating: false,
-      showPromptDialog: true, // Show dialog again to allow retry
-    };
-    // We need a way to update just the generated result - for now cancel and restart
-    dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-  }, [dispatch, drawingState.generativeFillMode]);
-
-  const handleGenerativeFillRegenerate = useCallback(() => {
-    // Re-open dialog with same prompt to regenerate
-    if (!drawingState.generativeFillMode) return;
-
-    // Clear the result and show dialog again
-    dispatch({
-      type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
-    });
-    // Reset to show dialog - we'll use the existing prompt and preview images
-    if (drawingState.generativeFillMode.previewImages) {
-      dispatch({
-        type: DrawingActionType.COMPLETE_GENERATIVE_FILL_SELECTION,
-        sourceImage: drawingState.generativeFillMode.previewImages.sourceImage,
-        maskImage: drawingState.generativeFillMode.previewImages.maskImage,
-      });
-    }
   }, [dispatch, drawingState.generativeFillMode]);
 
   // Store reference points and canvas data for the confirmation flow

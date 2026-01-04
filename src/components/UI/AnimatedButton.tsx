@@ -64,14 +64,23 @@ export const AnimatedButton: React.FC<AnimatedButtonProps> = ({
     className,
     title,
     type,
-    onAnimationStart,
-    onAnimationEnd,
-    onAnimationIteration,
-    onDrag,
-    onDragEnd,
-    onDragStart,
+    // These are intentionally destructured and not used to prevent passing
+    // React animation/drag handlers to framer-motion which has conflicting types
+    onAnimationStart: _onAnimationStart,
+    onAnimationEnd: _onAnimationEnd,
+    onAnimationIteration: _onAnimationIteration,
+    onDrag: _onDrag,
+    onDragEnd: _onDragEnd,
+    onDragStart: _onDragStart,
     ...otherProps
   } = props;
+  // Suppress unused variable warnings for intentionally excluded props
+  void _onAnimationStart;
+  void _onAnimationEnd;
+  void _onAnimationIteration;
+  void _onDrag;
+  void _onDragEnd;
+  void _onDragStart;
 
   return (
     <motion.button

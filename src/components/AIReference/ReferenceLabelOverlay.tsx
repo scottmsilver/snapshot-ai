@@ -7,19 +7,17 @@ interface ReferenceLabelOverlayProps {
   onManipulate?: () => void;
   onClear?: () => void;
   zoomLevel?: number;
-  canvasContainerRef?: React.RefObject<HTMLDivElement>;
 }
 
 export const ReferenceLabelOverlay: React.FC<ReferenceLabelOverlayProps> = ({
   onManipulate,
   onClear,
   zoomLevel = 1,
-  canvasContainerRef
 }) => {
   const { state: drawingState, setAiReferenceSubTool } = useDrawingContext();
 
   // Get reference points and sub-tool from state
-  const referencePoints = (drawingState as any).referencePoints || [];
+  const referencePoints = drawingState.referencePoints || [];
   const currentSubTool = drawingState.aiReferenceSubTool || AIReferenceSubTool.PIN;
 
   // Check if there are any markup shapes

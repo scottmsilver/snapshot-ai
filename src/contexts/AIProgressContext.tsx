@@ -118,7 +118,7 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
       const elapsedMs = startTimeRef.current ? Date.now() - startTimeRef.current : prev.elapsedMs;
 
       // Build new log entry or update existing one
-      let newLog = [...prev.log];
+      const newLog = [...prev.log];
 
       if (needsNewOperation && currentLogId) {
         // Create new log entry for this operation
@@ -201,7 +201,7 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
   const appendThinking = useCallback((text: string) => {
     setState(prev => {
       // Also append to current log entry
-      let newLog = [...prev.log];
+      const newLog = [...prev.log];
       if (currentLogIdRef.current) {
         const currentIndex = newLog.findIndex(e => e.id === currentLogIdRef.current);
         if (currentIndex >= 0) {

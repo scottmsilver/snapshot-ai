@@ -31,6 +31,7 @@ export default tseslint.config(
           allowHigherOrderFunctions: true,
         },
       ],
+      '@typescript-eslint/no-explicit-any': 'warn',
       'no-case-declarations': 'off',
     },
   },

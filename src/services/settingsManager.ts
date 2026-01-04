@@ -125,7 +125,7 @@ export class SettingsManager {
         });
         this.spreadsheetId = cachedId;
         return cachedId;
-      } catch (error) {
+      } catch {
         // Cached spreadsheet not found, will create new one
         localStorage.removeItem(SPREADSHEET_ID_KEY);
       }

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Eye, Layers } from 'lucide-react';
+import { X } from 'lucide-react';
 
 interface EditRegion {
   x: number;

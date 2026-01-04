@@ -1,5 +1,5 @@
 import { GenerativeInpaintService } from './generativeApi';
-import { imageDataToBase64, base64ToImageData } from '@/utils/maskRendering';
+import { imageDataToBase64 } from '@/utils/maskRendering';
 import { annotateImage, parseCommandForArrows } from '@/utils/imageAnnotation';
 import { aiLogService } from './aiLogService';
 import { createAIClient, type AIClient } from './aiClient';
@@ -97,7 +97,7 @@ You MUST call the gemini_image_painter tool.`;
 
     private extractEvaluation(result: any): { satisfied: boolean; reasoning: string; suggestion: string; thinking: string } {
         const parts = result.candidates?.[0]?.content?.parts || [];
-        let evaluation = { satisfied: true, reasoning: '', suggestion: '' };
+        const evaluation = { satisfied: true, reasoning: '', suggestion: '' };
         let thinking = '';
         let allText = '';
 
@@ -130,7 +130,7 @@ You MUST call the gemini_image_painter tool.`;
                         evaluation.reasoning = parsed.reasoning || '';
                         evaluation.suggestion = parsed.revised_prompt || '';
                         console.log(`🤖 Self-check: Parsed fallback JSON - satisfied=${evaluation.satisfied}`);
-                    } catch (e2) {
+                    } catch {
                         console.error('🤖 Self-check: Fallback JSON parse also failed');
                     }
                 }
@@ -145,7 +145,7 @@ You MUST call the gemini_image_painter tool.`;
                     evaluation.reasoning = parsed.reasoning || '';
                     evaluation.suggestion = parsed.revised_prompt || '';
                     console.log(`🤖 Self-check: Parsed raw JSON - satisfied=${evaluation.satisfied}`);
-                } catch (e) {
+                } catch {
                     console.error('🤖 Self-check: Raw JSON parse failed');
                 }
             }
@@ -1223,11 +1223,11 @@ YOUR RESPONSE:`;
                     .trim();
             };
 
-            let interpretation = interpretationMatch
+            const interpretation = interpretationMatch
                 ? stripLetterReferences(interpretationMatch[1].trim())
                 : 'Unable to interpret the command. Please try rephrasing.';
 
-            let suggestedPrompt = editingPromptMatch
+            const suggestedPrompt = editingPromptMatch
                 ? stripLetterReferences(editingPromptMatch[1].trim())
                 : await this.resolveReferencesAndExecute(imageData, referencePoints, command, imageWidth, imageHeight);
 

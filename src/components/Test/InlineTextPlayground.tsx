@@ -223,7 +223,7 @@ export const InlineTextPlayground: React.FC = () => {
                         onChange={handleTextChange}
                         onFontSizeChange={(newSize) => setTextState(prev => ({ ...prev, fontSize: newSize }))}
                         onBlur={() => { }} // DEBUG: Keep open for slider adjustment
-                        // @ts-ignore - adding temp prop
+                        // @ts-expect-error - adding temp prop for debugging
                         style={showDebugBorders ? { border: '1px solid red', background: 'rgba(255,0,0,0.1)' } : undefined}
                     />
                 )}

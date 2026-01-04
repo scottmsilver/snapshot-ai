@@ -12,7 +12,7 @@ export const GenerativeFillResultToolbar: React.FC<GenerativeFillResultToolbarPr
   onReject,
   onRegenerate,
 }) => {
-  const buttonStyle = (bgColor: string, hoverColor: string): React.CSSProperties => ({
+  const buttonStyle = (bgColor: string): React.CSSProperties => ({
     padding: '12px 24px',
     border: 'none',
     borderRadius: '4px',
@@ -57,7 +57,7 @@ export const GenerativeFillResultToolbar: React.FC<GenerativeFillResultToolbarPr
 
       <button
         onClick={onReject}
-        style={buttonStyle('#dc3545', '#c82333')}
+        style={buttonStyle('#dc3545')}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = '#c82333';
         }}
@@ -71,7 +71,7 @@ export const GenerativeFillResultToolbar: React.FC<GenerativeFillResultToolbarPr
 
       <button
         onClick={onRegenerate}
-        style={buttonStyle('#6c757d', '#5a6268')}
+        style={buttonStyle('#6c757d')}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = '#5a6268';
         }}
@@ -85,7 +85,7 @@ export const GenerativeFillResultToolbar: React.FC<GenerativeFillResultToolbarPr
 
       <button
         onClick={onAccept}
-        style={buttonStyle('#28a745', '#218838')}
+        style={buttonStyle('#28a745')}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = '#218838';
         }}

@@ -70,7 +70,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
   const { state: aiProgressState } = useAIProgress();
 
   // Handle mouse move during AI Move drag phase
-  const handleMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  const handleMouseMove = React.useCallback(() => {
     const aiMoveState = drawingState.aiMoveState;
     if (!aiMoveState || aiMoveState.phase !== 'dragging') {
       return;

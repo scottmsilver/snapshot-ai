@@ -5,7 +5,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import { aiLogService } from './aiLogService';
-import { AI_MODELS, THINKING_BUDGETS } from '@/config/aiModels';
+import { THINKING_BUDGETS } from '@/config/aiModels';
 
 export interface AICallOptions {
   /** The model to use */

@@ -164,7 +164,6 @@ const RegionMarker: React.FC<{
 
   // Center of the region for label placement
   const centerX = (screenX1 + screenX2) / 2;
-  const centerY = (screenY1 + screenY2) / 2;
 
   return (
     <div

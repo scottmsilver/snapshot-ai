@@ -244,7 +244,6 @@ export function parseCommandForArrows(
   availableLabels: string[]
 ): AnnotationArrow[] {
   const arrows: AnnotationArrow[] = [];
-  const normalizedCommand = command.toLowerCase();
 
   // Patterns to detect move commands
   const movePatterns = [

@@ -4,7 +4,6 @@ import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
 import { useDrawingContext, DrawingActionType } from '@/contexts/DrawingContext';
 import { useSelectionMachine } from '@/hooks/useSelectionMachine';
-import { useAIProgress } from '@/contexts/AIProgressContext';
 import { DrawingTool, AIReferenceSubTool } from '@/types/drawing';
 import { SelectionOverlay } from '@/components/GenerativeFill/SelectionOverlay';
 import { ResultOverlay } from '@/components/GenerativeFill/ResultOverlay';
@@ -104,8 +103,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   } = useDrawing();
 
   const { state: drawingState, dispatch, addReferencePoint, addAiMarkupShape } = useDrawingContext();
-
-  const { state: aiProgressState } = useAIProgress();
 
   // Track if mouse is down for generative fill
   const [isGenerativeFillDrawing, setIsGenerativeFillDrawing] = useState(false);
