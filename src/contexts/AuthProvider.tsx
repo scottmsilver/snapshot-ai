@@ -106,10 +106,6 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent): void => {
-      console.log('📨 postMessage received:', {
-        origin: event.origin,
-        data: typeof event.data === 'string' ? event.data.substring(0, 200) : event.data
-      });
       if (event.origin !== 'https://accounts.google.com' || typeof event.data !== 'string') {
         return;
       }
@@ -126,7 +122,6 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
           const expiresIn = parseInt(String(authResult?.expires_in ?? '3600'), 10);
 
           if (token) {
-            console.log('🎉 Token found in postMessage!');
             setAccessToken(token);
             void fetchUserInfo(token)
               .then(fetchedUser => {
@@ -199,7 +194,6 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
 
   const loginConfig = {
     onSuccess: async (response: TokenSuccessResponse): Promise<void> => {
-      console.log('🎉 onSuccess called!', response);
       const token = response.access_token;
       if (!token) {
         console.error('No access token in response');
@@ -219,12 +213,10 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
       }
     },
     onError: (error: TokenErrorResponse): void => {
-      console.log('❌ onError called!');
       console.error('Login failed:', error);
       console.error('Error details:', JSON.stringify(error, null, 2));
     },
     onNonOAuthError: (error: NonOAuthError): void => {
-      console.log('⚠️ onNonOAuthError called!');
       console.error('Non-OAuth error:', error);
       if (isOAuthError(error)) {
         if (error.type) {
@@ -245,7 +237,6 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
   const googleLogin = useGoogleLogin(loginConfig);
 
   const login = (): void => {
-    console.log('🚀 login() called, starting OAuth flow...');
     googleLogin();
   };
 
