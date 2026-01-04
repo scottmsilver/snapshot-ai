@@ -16,6 +16,16 @@ interface OAuthError {
   message?: string;
 }
 
+interface GoogleIdpMessage {
+  method?: string;
+  params?: {
+    authResult?: {
+      access_token?: string;
+      expires_in?: string | number;
+    };
+  };
+}
+
 const isOAuthError = (value: unknown): value is OAuthError => {
   return (
     typeof value === 'object' &&
@@ -24,6 +34,13 @@ const isOAuthError = (value: unknown): value is OAuthError => {
   );
 };
 
+const isGoogleIdpMessage = (value: unknown): value is GoogleIdpMessage => {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'method' in value
+  );
+};
 interface AuthProviderInnerProps {
   children: ReactNode;
 }
@@ -93,12 +110,37 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
         origin: event.origin,
         data: typeof event.data === 'string' ? event.data.substring(0, 200) : event.data
       });
-      if (typeof event.data === 'string') {
-        try {
-          JSON.parse(event.data);
-        } catch {
-          // ignore
+      if (event.origin !== 'https://accounts.google.com' || typeof event.data !== 'string') {
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(event.data) as unknown;
+        if (!isGoogleIdpMessage(payload)) {
+          return;
         }
+
+        if (payload.method === 'fireIdpEvent') {
+          const authResult = payload.params?.authResult;
+          const token = authResult?.access_token;
+          const expiresIn = parseInt(String(authResult?.expires_in ?? '3600'), 10);
+
+          if (token) {
+            console.log('🎉 Token found in postMessage!');
+            setAccessToken(token);
+            void fetchUserInfo(token)
+              .then(fetchedUser => {
+                storeSession(token, fetchedUser, expiresIn);
+                setUser(fetchedUser);
+              })
+              .catch(error => {
+                console.error('Failed to fetch user info from postMessage:', error);
+                setAccessToken(null);
+              });
+          }
+        }
+      } catch {
+        // ignore non-JSON messages
       }
     };
 
