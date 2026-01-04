@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
+import type { UseGoogleLoginOptionsImplicitFlow } from '@react-oauth/google';
 import {
   storeSession,
   getStoredSession,
@@ -151,7 +152,7 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
     void handleRedirectCallback();
   }, [logout]);
 
-  const googleLogin = useGoogleLogin({
+  const loginConfig = {
     onSuccess: async (response): Promise<void> => {
       console.log('🎉 onSuccess called!', response);
       const token = response.access_token;
@@ -192,7 +193,11 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
     },
     scope: 'openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/cloud-platform',
     flow: 'implicit',
-  });
+    ux_mode: 'redirect',
+    redirect_uri: window.location.origin,
+  } as unknown as UseGoogleLoginOptionsImplicitFlow;
+
+  const googleLogin = useGoogleLogin(loginConfig);
 
   const login = (): void => {
     console.log('🚀 login() called, starting OAuth flow...');
