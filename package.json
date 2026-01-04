@@ -14,7 +14,8 @@
     "test:coverage": "vitest --coverage",
     "deploy:vercel": "./scripts/deploy-vercel.sh",
     "deploy:netlify": "npm run build && netlify deploy --prod",
-    "serve": "vite preview"
+    "serve": "vite preview",
+    "prepare": "husky"
   },
   "dependencies": {
     "@google/genai": "^1.33.0",
@@ -50,6 +51,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
     "globals": "^16.0.0",
+    "husky": "^9.1.7",
     "jsdom": "^26.1.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.30.1",

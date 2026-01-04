@@ -1,0 +1,17 @@
+#!/bin/sh
+
+echo "Running pre-push checks..."
+
+# Run lint
+echo "Linting..."
+npm run lint || exit 1
+
+# Run tests
+echo "Running tests..."
+npm test || exit 1
+
+# Run build
+echo "Building..."
+npm run build || exit 1
+
+echo "All checks passed!"
