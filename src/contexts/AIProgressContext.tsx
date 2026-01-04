@@ -161,25 +161,24 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
       let thinkingImage = prev.thinkingImage;
       let thinkingStatus = prev.thinkingStatus;
 
-      // When iteration image arrives, set it as the thinking image
-      if (event.iterationImage) {
-        thinkingImage = event.iterationImage;
+      // START: When transitioning FROM idle/complete/error to any active step
+      // This ensures the overlay shows for EVERY new operation, not just the first one
+      const isFromInactiveState = prev.step === 'idle' || prev.step === 'complete' || prev.step === 'error';
+      if (isFromInactiveState && isActiveStep) {
+        console.log('🎨 Setting thinkingStatus to thinking');
         thinkingStatus = 'thinking';
       }
 
-      // When iteration completes successfully (moving to self_checking or complete)
-      if (prev.step === 'processing' && event.step === 'self_checking') {
-        thinkingStatus = 'accepted';
+      // When iteration image arrives, set it as the thinking image
+      if (event.iterationImage) {
+        console.log('🎨 Setting thinkingImage, length:', event.iterationImage.length);
+        thinkingImage = event.iterationImage;
       }
 
-      // When complete or error, clear thinking state after brief delay handled by component
+      // END: When complete or error, clear thinking state
       if (event.step === 'complete' || event.step === 'error') {
-        // Component will handle clearing after animation
-      }
-
-      // When iterating (retrying), mark as rejected
-      if (event.step === 'iterating') {
-        thinkingStatus = 'rejected';
+        thinkingStatus = 'idle';
+        thinkingImage = null;
       }
 
       const newState: AIProgressState = {

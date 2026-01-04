@@ -7,8 +7,10 @@ import { ImageUploader } from '@/components/ImageUploader';
 import { PDFViewer } from '@/components/PDFViewer/PDFViewer';
 import { DrawingTool, type Point } from '@/types/drawing';
 import { useDrawingContext } from '@/contexts/DrawingContext';
+import { useAIProgress } from '@/contexts/AIProgressContext';
 import { ReferenceLabelOverlay } from '@/components/AIReference';
 import { DragPreview } from '@/components/AIMove';
+import { ThinkingOverlay } from '@/components/GenerativeFill/ThinkingOverlay';
 
 interface CanvasSize {
   width: number;
@@ -65,6 +67,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
   isManipulationDialogOpen,
 }) => {
   const { state: drawingState, setAiMoveState } = useDrawingContext();
+  const { state: aiProgressState } = useAIProgress();
 
   // Handle mouse move during AI Move drag phase
   const handleMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -279,6 +282,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
         )}
         <div
           style={{
+            position: 'relative',
             width: canvasSize.width * zoomLevel,
             height: canvasSize.height * zoomLevel,
             overflow: 'visible',
@@ -330,6 +334,14 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
             zoomLevel={zoomLevel}
             canvasWidth={canvasSize.width}
             canvasHeight={canvasSize.height}
+          />
+          {/* Apple Intelligence-style gradient border when AI is thinking */}
+          <ThinkingOverlay
+            status={aiProgressState.thinkingStatus}
+            canvasWidth={canvasSize.width}
+            canvasHeight={canvasSize.height}
+            zoomLevel={zoomLevel}
+            image={aiProgressState.thinkingImage}
           />
         </div>
       </div>
