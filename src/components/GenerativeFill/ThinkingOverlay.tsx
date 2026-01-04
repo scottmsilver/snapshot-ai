@@ -12,6 +12,8 @@ interface ThinkingOverlayProps {
   zoomLevel?: number;
   /** Interim image to show as semi-transparent overlay (base64 string) */
   image?: string | null;
+  /** Whether to show the rainbow border animation */
+  showRainbowBorder?: boolean;
 }
 
 /**
@@ -31,6 +33,7 @@ export const ThinkingOverlay: React.FC<ThinkingOverlayProps> = ({
   canvasHeight,
   zoomLevel = 1,
   image = null,
+  showRainbowBorder = false,
 }) => {
   // Track flash animation state
   const [showFlash, setShowFlash] = useState(false);
@@ -74,15 +77,18 @@ export const ThinkingOverlay: React.FC<ThinkingOverlayProps> = ({
   // Determine the border style based on status
   let borderClass = 'apple-intelligence-border';
   if (status === 'thinking') {
-    borderClass += ' thinking';
+    if (showRainbowBorder) {
+      borderClass += ' thinking';
+    }
   } else if (status === 'accepted') {
     borderClass += ' accepted';
   } else if (status === 'rejected') {
     borderClass += ' rejected';
   }
+  const shouldRenderBorder = status !== 'thinking' || showRainbowBorder;
 
-  // Wrapper class with flash state
-  const wrapperClass = `thinking-overlay-wrapper${showFlash ? ' flash-active' : ''}`;
+  // Wrapper class with flash state (only flash if rainbow border is enabled)
+  const wrapperClass = `thinking-overlay-wrapper${showFlash && showRainbowBorder ? ' flash-active' : ''}`;
 
   return (
     <div
@@ -107,13 +113,15 @@ export const ThinkingOverlay: React.FC<ThinkingOverlayProps> = ({
       />
 
       {/* Animated gradient border with rotating glow */}
-      <div
-        className={borderClass}
-        style={{
-          width: `${width}px`,
-          height: `${height}px`,
-        }}
-      />
+      {shouldRenderBorder && (
+        <div
+          className={borderClass}
+          style={{
+            width: `${width}px`,
+            height: `${height}px`,
+          }}
+        />
+      )}
 
       {/* Semi-transparent interim image overlay */}
       {image && (
