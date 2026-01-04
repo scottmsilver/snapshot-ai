@@ -102,10 +102,38 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  // Handle OAuth redirect callback (token in URL hash)
   useEffect(() => {
-    const checkSession = async (): Promise<void> => {
-      const session = getStoredSession();
+    const handleRedirectCallback = async (): Promise<void> => {
+      const hash = window.location.hash;
+      if (hash && hash.includes('access_token')) {
+        console.log('🔄 OAuth redirect detected, parsing token from URL...');
+        const params = new URLSearchParams(hash.substring(1));
+        const token = params.get('access_token');
+        const expiresIn = parseInt(params.get('expires_in') || '3600', 10);
 
+        if (token) {
+          console.log('🎉 Token found in redirect URL!');
+          // Clear the hash from URL
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+          setAccessToken(token);
+          try {
+            const fetchedUser = await fetchUserInfo(token);
+            storeSession(token, fetchedUser, expiresIn);
+            setUser(fetchedUser);
+            console.log('✅ Login successful via redirect!');
+          } catch (error) {
+            console.error('Failed to fetch user info after redirect:', error);
+            setAccessToken(null);
+          }
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // Check stored session
+      const session = getStoredSession();
       if (session && isSessionValid()) {
         setUser(session.user);
         setAccessToken(session.token);
@@ -120,7 +148,7 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
       setIsLoading(false);
     };
 
-    void checkSession();
+    void handleRedirectCallback();
   }, [logout]);
 
   const googleLogin = useGoogleLogin({
