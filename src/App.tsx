@@ -1016,8 +1016,9 @@ function App(): React.ReactElement {
 
   // AI Reference Mode - Manipulation Handler (now with confirmation)
   const handleManipulationSubmit = useCallback(async (command: string) => {
-    // Capture reference points BEFORE closing dialog
+    // Capture reference points and markup shapes BEFORE closing dialog
     const referencePointsCopy = [...drawingState.referencePoints];
+    const markupShapesCopy = [...drawingState.aiMarkupShapes];
 
     // Close the command dialog but keep reference mode active
     setManipulationDialogOpen(false);
@@ -1084,7 +1085,7 @@ function App(): React.ReactElement {
         command,
         canvas.width,
         canvas.height,
-        drawingState.aiMarkupShapes
+        markupShapesCopy
       );
 
       setMovePlan(plan);
@@ -1097,7 +1098,7 @@ function App(): React.ReactElement {
       setMovePlan(null);
       alert('Failed to plan operation: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
-  }, [drawingState.referencePoints, authContext]);
+  }, [drawingState.referencePoints, drawingState.aiMarkupShapes, authContext]);
 
   // Handler for confirming the move operation
   const handleMoveConfirm = useCallback(async () => {
@@ -1231,7 +1232,7 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
       setMovePlan(null);
       pendingManipulationRef.current = null;
     }
-  }, [movePlan, clearReferencePoints, setAiReferenceMode, updateProgress, shapes, addShape, selectShape]);
+  }, [movePlan, clearReferencePoints, setAiReferenceMode, updateProgress, shapes, addShape, selectShape, drawingState.aiMarkupShapes, clearAiMarkupShapes]);
 
   // Handler for editing the command (go back to manipulation dialog)
   const handleMoveEditCommand = useCallback(() => {
