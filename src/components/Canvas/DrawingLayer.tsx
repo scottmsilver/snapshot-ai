@@ -35,7 +35,7 @@ type ShapeCommonProps = {
   listening: boolean;
   draggable: boolean;
   onClick: (e: Konva.KonvaEventObject<MouseEvent>) => void;
-  onTap: (e: Konva.KonvaEventObject<MouseEvent>) => void;
+  onTap: (e: Konva.KonvaEventObject<TouchEvent>) => void;
   onMouseUp: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onDragStart: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onDragMove: (e: Konva.KonvaEventObject<DragEvent>) => void;
