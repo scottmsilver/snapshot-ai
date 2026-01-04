@@ -85,6 +85,10 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent): void => {
+      console.log('📨 postMessage received:', {
+        origin: event.origin,
+        data: typeof event.data === 'string' ? event.data.substring(0, 200) : event.data
+      });
       if (typeof event.data === 'string') {
         try {
           JSON.parse(event.data);
@@ -121,6 +125,7 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
 
   const googleLogin = useGoogleLogin({
     onSuccess: async (response): Promise<void> => {
+      console.log('🎉 onSuccess called!', response);
       const token = response.access_token;
       if (!token) {
         console.error('No access token in response');
@@ -140,10 +145,12 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
       }
     },
     onError: (error): void => {
+      console.log('❌ onError called!');
       console.error('Login failed:', error);
       console.error('Error details:', JSON.stringify(error, null, 2));
     },
     onNonOAuthError: (error): void => {
+      console.log('⚠️ onNonOAuthError called!');
       console.error('Non-OAuth error:', error);
       if (isOAuthError(error)) {
         if (error.type) {
@@ -160,6 +167,7 @@ const AuthProviderInner: React.FC<AuthProviderInnerProps> = ({ children }) => {
   });
 
   const login = (): void => {
+    console.log('🚀 login() called, starting OAuth flow...');
     googleLogin();
   };
 
