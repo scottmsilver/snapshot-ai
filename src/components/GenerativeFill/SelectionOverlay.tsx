@@ -27,6 +27,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
     const flatPoints = selectionPoints.flatMap((p) => [p.x, p.y]);
     return (
       <Line
+        name="selectionOverlay"
         points={flatPoints}
         stroke="rgba(74, 144, 226, 0.8)"
         strokeWidth={brushWidth}
@@ -47,6 +48,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
   ) {
     return (
       <Rect
+        name="selectionOverlay"
         x={selectionRectangle.x}
         y={selectionRectangle.y}
         width={selectionRectangle.width}
@@ -68,6 +70,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
     const flatPoints = selectionPoints.flatMap((p) => [p.x, p.y]);
     return (
       <Line
+        name="selectionOverlay"
         points={flatPoints}
         stroke="rgba(74, 144, 226, 0.8)"
         strokeWidth={2}

@@ -15,7 +15,7 @@ import { useClipboardPaste } from '@/hooks/useClipboardPaste';
 import { useMeasurementEffects } from '@/hooks/useMeasurementEffects';
 import { useFileImports } from '@/hooks/useFileImports';
 import { useAIProgress } from '@/contexts/AIProgressContext';
-import { copyCanvasToClipboard, downloadCanvasAsImage } from '@/utils/exportUtils';
+import { copyCanvasToClipboard, downloadCanvasAsImage, captureCleanCanvas, captureCleanCanvasAsDataURL } from '@/utils/exportUtils';
 import {
   DrawingTool,
   GenerativeFillSelectionTool,
@@ -360,8 +360,8 @@ function App(): React.ReactElement {
           return;
         }
 
-        // Capture clean canvas
-        const canvas = stage.toCanvas();
+        // Capture clean canvas (without grid, selection UI, etc.)
+        const canvas = captureCleanCanvas(stage);
         const ctx = canvas.getContext('2d')!;
         const sourceImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
@@ -713,46 +713,10 @@ function App(): React.ReactElement {
       const stage = stageRef.current;
       const { selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
 
-      // Find the DrawingLayer which contains both shapes AND SelectionOverlay
-      // Find the DrawingLayer which contains both shapes AND SelectionOverlay
-      const drawingLayer = stage.findOne('.drawingLayer') as Konva.Layer;
-      if (!drawingLayer) {
-        console.error('Could not find drawing layer');
-        return;
-      }
-
-      // Find all Shape nodes (Line, Rect) that have blue selection fill
-      // Temporarily hide them by setting visible=false
-      const overlayNodes = drawingLayer.find((node: any) => {
-        // Find nodes with the blue selection color (rgba(74, 144, 226, ...))
-        const fill = node.fill?.();
-        const stroke = node.stroke?.();
-        return (
-          (typeof fill === 'string' && fill.includes('74, 144, 226')) ||
-          (typeof stroke === 'string' && stroke.includes('74, 144, 226'))
-        );
-      });
-
-      // Hide overlay nodes temporarily
-      const previousVisibility = overlayNodes.map((node: any) => node.visible());
-      overlayNodes.forEach((node: any) => node.visible(false));
-
-      // Get clean canvas WITHOUT the selection overlay
-      const canvas = stage.toCanvas();
+      // Capture clean canvas (without grid, selection UI, overlays, etc.)
+      const canvas = captureCleanCanvas(stage);
 
       console.log('🔍 DEBUG: Captured canvas size:', canvas.width, 'x', canvas.height);
-
-      // Verify canvas has content (simple check of center pixel)
-      const checkCtx = canvas.getContext('2d');
-      if (checkCtx) {
-        const pixel = checkCtx.getImageData(canvas.width / 2, canvas.height / 2, 1, 1).data;
-        console.log(`🔍 DEBUG: Center pixel color: rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3]})`);
-      } else {
-        console.error('❌ ERROR: Failed to get context from captured canvas');
-      }
-
-      // Restore overlay visibility immediately
-      overlayNodes.forEach((node: any, index: number) => node.visible(previousVisibility[index]));
 
       // Generate mask based on selection tool
       let maskExport;
@@ -814,36 +778,10 @@ function App(): React.ReactElement {
         const { mode, selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
 
         // Find the DrawingLayer and temporarily hide selection overlay nodes
-        // Find the DrawingLayer which contains both shapes AND SelectionOverlay
-        const drawingLayer = stage.findOne('.drawingLayer') as Konva.Layer;
-        let overlayNodes: any[] = [];
-        let previousVisibility: boolean[] = [];
-
-        if (drawingLayer) {
-          // Find all Shape nodes (Line, Rect) that have blue selection fill
-          overlayNodes = drawingLayer.find((node: any) => {
-            const fill = node.fill?.();
-            const stroke = node.stroke?.();
-            return (
-              (typeof fill === 'string' && fill.includes('74, 144, 226')) ||
-              (typeof stroke === 'string' && stroke.includes('74, 144, 226'))
-            );
-          });
-
-          // Hide overlay nodes temporarily
-          previousVisibility = overlayNodes.map((node: any) => node.visible());
-          overlayNodes.forEach((node: any) => node.visible(false));
-        }
-
-        // Get clean canvas WITHOUT the selection overlay
-        const canvas = stage.toCanvas();
+        // Capture clean canvas (without grid, selection UI, overlays, etc.)
+        const canvas = captureCleanCanvas(stage);
         const ctx = canvas.getContext('2d')!;
         const sourceImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-        // Restore overlay visibility immediately
-        if (overlayNodes.length > 0) {
-          overlayNodes.forEach((node: any, index: number) => node.visible(previousVisibility[index]));
-        }
 
         // Generate mask only if in inpainting mode
         let maskExport;
@@ -1088,7 +1026,8 @@ function App(): React.ReactElement {
       const stage = stageRef.current;
       if (!stage) return;
 
-      const canvas = stage.toCanvas();
+      // Capture clean canvas (without grid, selection UI, overlays, etc.)
+      const canvas = captureCleanCanvas(stage);
       const imageDataUrl = canvas.toDataURL('image/png');
 
       // Get API key
@@ -1318,8 +1257,8 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
     }
 
     try {
-      // Capture the canvas
-      const canvas = stage.toCanvas();
+      // Capture clean canvas (without grid, selection UI, overlays, etc.)
+      const canvas = captureCleanCanvas(stage);
       const imageDataUrl = canvas.toDataURL('image/png');
 
       // Create annotated preview with pins

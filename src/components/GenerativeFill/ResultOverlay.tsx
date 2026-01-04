@@ -26,6 +26,7 @@ export const ResultOverlay: React.FC<ResultOverlayProps> = ({ imageData, bounds 
 
   return (
     <KonvaImage
+      name="resultOverlay"
       image={image}
       x={bounds.x}
       y={bounds.y}

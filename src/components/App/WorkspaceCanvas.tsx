@@ -226,13 +226,13 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
 
     for (let x = 0; x <= canvasSize.width; x += gridSize) {
       lines.push(
-        <Line key={`v-${x}`} points={[x, 0, x, canvasSize.height]} stroke="#e0e0e0" strokeWidth={1} listening={false} />,
+        <Line key={`v-${x}`} name="gridLine" points={[x, 0, x, canvasSize.height]} stroke="#e0e0e0" strokeWidth={1} listening={false} />,
       );
     }
 
     for (let y = 0; y <= canvasSize.height; y += gridSize) {
       lines.push(
-        <Line key={`h-${y}`} points={[0, y, canvasSize.width, y]} stroke="#e0e0e0" strokeWidth={1} listening={false} />,
+        <Line key={`h-${y}`} name="gridLine" points={[0, y, canvasSize.width, y]} stroke="#e0e0e0" strokeWidth={1} listening={false} />,
       );
     }
 
@@ -305,8 +305,8 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
                   : (activeTool === DrawingTool.SELECT ? 'default' : 'crosshair'),
             }}
           >
-            <Layer scaleX={zoomLevel} scaleY={zoomLevel}>
-              <Rect x={0} y={0} width={canvasSize.width} height={canvasSize.height} fill={canvasBackground} />
+            <Layer name="backgroundLayer" scaleX={zoomLevel} scaleY={zoomLevel}>
+              <Rect name="canvasBackground" x={0} y={0} width={canvasSize.width} height={canvasSize.height} fill={canvasBackground} />
               {renderGridLines()}
             </Layer>
 
