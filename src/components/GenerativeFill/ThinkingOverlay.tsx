@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import type { ThinkingStatus } from '@/types/aiProgress';
 import './ThinkingOverlay.css';
 
@@ -17,16 +17,13 @@ interface ThinkingOverlayProps {
 /**
  * ThinkingOverlay Component
  *
- * Displays an Apple Intelligence-style animated gradient border around the canvas
- * when the AI is processing. The border:
- * - Shows a rotating rainbow/prismatic gradient (~3-4 second cycle)
- * - Frames the entire canvas area (not just a specific region)
- * - Uses CSS animations (conic-gradient with rotation)
- * - Appears when status is 'thinking', 'accepted', or 'rejected'
- * - Hides when status is 'idle' (fixes the visibility bug)
- *
- * This replaces the previous Konva-based implementation which couldn't
- * support CSS animations properly.
+ * Displays an animated gradient border around the canvas when the AI is processing.
+ * Features:
+ * - Rotating warm red/orange glow that zips around the border
+ * - Rough inner edge glow with pulsing animation
+ * - Initial flash wash when thinking starts
+ * - Shimmer particles floating across the canvas
+ * - Semi-transparent iteration images as they arrive
  */
 export const ThinkingOverlay: React.FC<ThinkingOverlayProps> = ({
   status,
@@ -35,8 +32,35 @@ export const ThinkingOverlay: React.FC<ThinkingOverlayProps> = ({
   zoomLevel = 1,
   image = null,
 }) => {
-  // DEBUG - Log props to verify component receives correct data
-  console.log('🎨 ThinkingOverlay:', { status, hasImage: !!image, canvasWidth, canvasHeight });
+  // Track flash animation state
+  const [showFlash, setShowFlash] = useState(false);
+  const prevStatusRef = useRef<ThinkingStatus>('idle');
+
+  // Trigger flash when transitioning to thinking
+  useEffect(() => {
+    if (status === 'thinking' && prevStatusRef.current !== 'thinking') {
+      setShowFlash(true);
+      // Remove flash class after animation completes
+      const timer = setTimeout(() => setShowFlash(false), 700);
+      return () => clearTimeout(timer);
+    }
+    prevStatusRef.current = status;
+  }, [status]);
+
+  // Generate shimmer particles with randomized positions (only when thinking)
+  // IMPORTANT: This must be called before any early returns (React hooks rule)
+  const particles = useMemo(() => {
+    if (status !== 'thinking') return [];
+
+    return Array.from({ length: 40 }, (_, i) => ({
+      id: i,
+      left: Math.random() * 100,
+      top: Math.random() * 100,
+      animationDelay: Math.random() * 2,
+      animationDuration: 1.5 + Math.random() * 1.5,
+      size: 4 + Math.random() * 6, // 4-10px instead of 2-4px
+    }));
+  }, [status]);
 
   // Don't render if status is idle
   if (status === 'idle') {
@@ -57,24 +81,12 @@ export const ThinkingOverlay: React.FC<ThinkingOverlayProps> = ({
     borderClass += ' rejected';
   }
 
-  // Generate shimmer particles with randomized positions (only when thinking)
-  // More particles, larger sizes for better visibility
-  const particles = useMemo(() => {
-    if (status !== 'thinking') return [];
-
-    return Array.from({ length: 40 }, (_, i) => ({
-      id: i,
-      left: Math.random() * 100,
-      top: Math.random() * 100,
-      animationDelay: Math.random() * 2,
-      animationDuration: 1.5 + Math.random() * 1.5,
-      size: 4 + Math.random() * 6, // 4-10px instead of 2-4px
-    }));
-  }, [status]);
+  // Wrapper class with flash state
+  const wrapperClass = `thinking-overlay-wrapper${showFlash ? ' flash-active' : ''}`;
 
   return (
     <div
-      className="thinking-overlay-wrapper"
+      className={wrapperClass}
       style={{
         position: 'absolute',
         top: 0,
@@ -85,7 +97,16 @@ export const ThinkingOverlay: React.FC<ThinkingOverlayProps> = ({
         zIndex: 1000,
       }}
     >
-      {/* Animated gradient border - inset on top of canvas */}
+      {/* Initial flash wash effect */}
+      <div
+        className="thinking-flash"
+        style={{
+          width: `${width}px`,
+          height: `${height}px`,
+        }}
+      />
+
+      {/* Animated gradient border with rotating glow */}
       <div
         className={borderClass}
         style={{
