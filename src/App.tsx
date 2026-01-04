@@ -322,7 +322,7 @@ function MainApp(): React.ReactElement {
       return;
     }
 
-    const executeMove = async () => {
+    const executeMove = async (): Promise<void> => {
       try {
         const stage = stageRef.current;
         if (!stage) {

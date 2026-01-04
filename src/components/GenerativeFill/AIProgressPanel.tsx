@@ -394,13 +394,13 @@ export const AIProgressPanel: React.FC = () => {
   useEffect(() => {
     if (!isResizing) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleMouseMove = (e: MouseEvent): void => {
       // Calculate new width based on mouse position from right edge of viewport
       const newWidth = window.innerWidth - e.clientX - 16; // 16px for padding
       setPanelWidth(Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, newWidth)));
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (): void => {
       setIsResizing(false);
     };
 
@@ -418,7 +418,7 @@ export const AIProgressPanel: React.FC = () => {
   }, [isResizing]);
 
   // Clear both logs
-  const handleClearLog = () => {
+  const handleClearLog = (): void => {
     clearContextLog();
     aiLogService.clearLog();
   };
@@ -519,7 +519,7 @@ export const AIProgressPanel: React.FC = () => {
     });
   }, [mergedLog]);
 
-  const handleResizeStart = (e: React.MouseEvent) => {
+  const handleResizeStart = (e: React.MouseEvent): void => {
     e.preventDefault();
     setIsResizing(true);
   };

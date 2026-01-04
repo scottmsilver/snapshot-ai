@@ -766,6 +766,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     drawingState.aiReferenceMode,
     drawingState.aiReferenceSubTool,
     addAiMarkupShape,
+    addReferencePoint,
   ]);
 
   // Render markup preview for AI Reference mode
@@ -3095,7 +3096,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   };
 
   // Generative fill mouse event handlers
-  const handleGenerativeFillMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+  const handleGenerativeFillMouseDown = (e: Konva.KonvaEventObject<MouseEvent>): void => {
     if (!drawingState.generativeFillMode?.isActive) return;
 
     setIsGenerativeFillDrawing(true);
@@ -3120,7 +3121,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     }
   };
 
-  const handleGenerativeFillMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
+  const handleGenerativeFillMouseMove = (e: Konva.KonvaEventObject<MouseEvent>): void => {
     if (!drawingState.generativeFillMode?.isActive || !isGenerativeFillDrawing) return;
     if (!e.target.getStage()) return;
 
@@ -3148,7 +3149,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     }
   };
 
-  const handleGenerativeFillMouseUp = () => {
+  const handleGenerativeFillMouseUp = (): void => {
     setIsGenerativeFillDrawing(false);
   };
 

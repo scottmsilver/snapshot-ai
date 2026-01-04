@@ -111,7 +111,7 @@ export const InlineTextEditor: React.FC<InlineTextEditorProps> = ({
             }
         }
 
-    }, [value, initialFontSize, fontFamily, mode, width, height]);
+    }, [value, initialFontSize, fontFamily, mode, width, height, currentFontSize, onFontSizeChange]);
 
     // Focus on mount
     useEffect(() => {

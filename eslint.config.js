@@ -35,4 +35,11 @@ export default tseslint.config(
       'no-case-declarations': 'off',
     },
   },
+  // Disable react-refresh for context files (they export contexts + hooks, not just components)
+  {
+    files: ['**/contexts/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 )

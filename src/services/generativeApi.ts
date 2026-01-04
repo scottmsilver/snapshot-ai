@@ -303,7 +303,7 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
 
     // Close handler
     const closeBtn = dialog.querySelector('#closeDebugDialog');
-    const close = () => {
+    const close = (): void => {
       document.body.removeChild(dialog);
       document.body.removeChild(backdrop);
     };

@@ -71,7 +71,7 @@ export class SettingsManager {
     }
 
     this.initPromise = new Promise((resolve, reject) => {
-      const initGapi = () => {
+      const initGapi = (): void => {
         gapi.load('client', async () => {
           try {
             await gapi.client.init({

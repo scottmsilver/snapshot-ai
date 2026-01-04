@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Save, Eye, EyeOff } from 'lucide-react';
 import { settingsManager } from '@/services/settingsManager';
@@ -23,43 +23,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
   const inputRef = useRef<HTMLInputElement>(null);
   const projectIdRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      loadSettings();
-    }
-  }, [isOpen]);
-
-  // Update input value when apiKey changes
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.value = apiKey;
-    }
-  }, [apiKey]);
-
-  // Handle paste manually since native paste event doesn't fire reliably
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && document.activeElement === inputRef.current) {
-        try {
-          const text = await navigator.clipboard.readText();
-          if (inputRef.current) {
-            inputRef.current.value = text;
-          }
-        } catch (err) {
-          console.error('Failed to read clipboard:', err);
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isOpen]);
-
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
@@ -84,9 +48,45 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [getAccessToken]);
 
-  const handleSave = async () => {
+  useEffect(() => {
+    if (isOpen) {
+      loadSettings();
+    }
+  }, [isOpen, loadSettings]);
+
+  // Update input value when apiKey changes
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.value = apiKey;
+    }
+  }, [apiKey]);
+
+  // Handle paste manually since native paste event doesn't fire reliably
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = async (e: KeyboardEvent): Promise<void> => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && document.activeElement === inputRef.current) {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (inputRef.current) {
+            inputRef.current.value = text;
+          }
+        } catch (err) {
+          console.error('Failed to read clipboard:', err);
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const handleSave = async (): Promise<void> => {
     setIsSaving(true);
     setError(null);
     setSuccessMessage(null);
@@ -122,7 +122,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
     }
   };
 
-  const handleClose = () => {
+  const handleClose = (): void => {
     setSuccessMessage(null);
     setError(null);
     onClose();

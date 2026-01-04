@@ -26,11 +26,11 @@ export const InlineTextPlayground: React.FC = () => {
     const [showDebugBorders, setShowDebugBorders] = useState(false);
     const stageRef = useRef<any>(null);
 
-    const handleTextChange = (newText: string) => {
+    const handleTextChange = (newText: string): void => {
         setTextState((prev) => ({ ...prev, text: newText }));
     };
 
-    const getEditorPosition = () => {
+    const getEditorPosition = (): { x: number; y: number } => {
         return {
             x: (textState.x + xOffset) * zoomLevel,
             y: (textState.y + yOffset) * zoomLevel,
