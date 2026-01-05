@@ -52,12 +52,12 @@ const formatDuration = (ms: number): string => {
  * Pre-process markdown to wrap coordinates and regions in spans with data attributes
  * This allows us to use event delegation to detect hovers
  */
-const wrapCoordinatesInHtml = (html: string): string => {
+export const wrapCoordinatesInHtml = (html: string): string => {
   // First, wrap region patterns: "Region from (x1, y1) to (x2, y2)"
   // Use HTML entities for parentheses in the display text to prevent the coordinate
   // regex from matching them again
   let processed = html.replace(
-    /Region from \((\d{1,5}),\s*(\d{1,5})\) to \((\d{1,5}),\s*(\d{1,5})\)/g,
+    /Region from \((\d{1,5}(?:\.\d+)?),\s*(\d{1,5}(?:\.\d+)?)\) to \((\d{1,5}(?:\.\d+)?),\s*(\d{1,5}(?:\.\d+)?)\)/g,
     (match, x1, y1, x2, y2) => {
       // Replace parentheses with HTML entities in the visible text to prevent double-wrapping
       const displayText = `Region from &#40;${x1}, ${y1}&#41; to &#40;${x2}, ${y2}&#41;`;
@@ -68,7 +68,7 @@ const wrapCoordinatesInHtml = (html: string): string => {
   // Then wrap remaining standalone coordinates: (123, 456) or (123,456)
   // but NOT inside base64 data or URLs
   processed = processed.replace(
-    /(?<![A-Za-z0-9+/="])(\((\d{1,5}),\s*(\d{1,5})\))(?![A-Za-z0-9+/=])/g,
+    /(?<![A-Za-z0-9+/="])(\((\d{1,5}(?:\.\d+)?),\s*(\d{1,5}(?:\.\d+)?)\))(?![A-Za-z0-9+/=])/g,
     (match, full, x, y) => {
       return `<span class="coord-highlight" data-x="${x}" data-y="${y}" style="cursor:pointer;background:rgba(33,150,243,0.15);border-radius:3px;padding:0 2px;font-family:monospace;color:#1976d2;border-bottom:1px dashed #1976d2;">${full}</span>`;
     }
@@ -96,18 +96,18 @@ const MarkdownContent: React.FC<{
 
     // Handle region highlights
     if (target.classList.contains('region-highlight')) {
-      const x1 = parseInt(target.dataset.x1 || '0', 10);
-      const y1 = parseInt(target.dataset.y1 || '0', 10);
-      const x2 = parseInt(target.dataset.x2 || '0', 10);
-      const y2 = parseInt(target.dataset.y2 || '0', 10);
+      const x1 = parseFloat(target.dataset.x1 || '0');
+      const y1 = parseFloat(target.dataset.y1 || '0');
+      const x2 = parseFloat(target.dataset.x2 || '0');
+      const y2 = parseFloat(target.dataset.y2 || '0');
       coordContext?.setHighlightedCoord({ type: 'region', x1, y1, x2, y2 });
       return;
     }
 
     // Handle point coordinates
     if (target.classList.contains('coord-highlight')) {
-      const x = parseInt(target.dataset.x || '0', 10);
-      const y = parseInt(target.dataset.y || '0', 10);
+      const x = parseFloat(target.dataset.x || '0');
+      const y = parseFloat(target.dataset.y || '0');
       coordContext?.setHighlightedCoord({ type: 'point', x, y });
     }
   }, [coordContext]);
