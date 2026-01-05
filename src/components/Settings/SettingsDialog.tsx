@@ -15,6 +15,8 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
   const [inpaintingModel, setInpaintingModel] = useState('imagen');
   const [textOnlyModel, setTextOnlyModel] = useState('gemini');
   const [googleCloudProjectId, setGoogleCloudProjectId] = useState('');
+  const [showRainbowBorder, setShowRainbowBorder] = useState(false);
+  const [recordAiManipulationCases, setRecordAiManipulationCases] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,10 +40,13 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
       const inpainting = await settingsManager.getInpaintingModel();
       const textOnly = await settingsManager.getTextOnlyModel();
       const projectId = await settingsManager.getGoogleCloudProjectId();
+      const rainbow = await settingsManager.getShowRainbowBorder();
       setApiKey(key || '');
       setInpaintingModel(inpainting || 'imagen');
       setTextOnlyModel(textOnly || 'gemini');
       setGoogleCloudProjectId(projectId || '');
+      setShowRainbowBorder(rainbow);
+      setRecordAiManipulationCases(localStorage.getItem('recordAiManipulationCases') === 'true');
     } catch (err) {
       console.error('Failed to load settings:', err);
       setError('Failed to load settings. Please try again.');
@@ -106,6 +111,8 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
       await settingsManager.setInpaintingModel(inpaintingModel);
       await settingsManager.setTextOnlyModel(textOnlyModel);
       await settingsManager.setGoogleCloudProjectId(currentProjectId);
+      await settingsManager.setShowRainbowBorder(showRainbowBorder);
+      localStorage.setItem('recordAiManipulationCases', recordAiManipulationCases ? 'true' : 'false');
 
       setApiKey(currentKey); // Update state to match
       setGoogleCloudProjectId(currentProjectId);
@@ -358,6 +365,146 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
                       >
                         Used for text-only prompts without a mask selection. Gemini is fast and conversational.
                       </p>
+                    </div>
+
+                    <div style={{ marginBottom: '16px' }}>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => setShowRainbowBorder(!showRainbowBorder)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setShowRainbowBorder(!showRainbowBorder);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <div
+                          style={{
+                            position: 'relative',
+                            width: '40px',
+                            height: '22px',
+                            backgroundColor: showRainbowBorder ? '#4a90e2' : '#e5e5e5',
+                            borderRadius: '11px',
+                            transition: 'background-color 0.2s',
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '2px',
+                              left: showRainbowBorder ? '20px' : '2px',
+                              width: '18px',
+                              height: '18px',
+                              backgroundColor: 'white',
+                              borderRadius: '50%',
+                              transition: 'left 0.2s',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                            }}
+                          />
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '14px',
+                            fontWeight: '500',
+                            color: '#333',
+                          }}
+                        >
+                          Show "Thinking" Rainbow Border
+                        </span>
+                      </label>
+                      <p
+                        style={{
+                          margin: '4px 0 0 52px',
+                          fontSize: '13px',
+                          color: '#666',
+                          lineHeight: '1.5',
+                        }}
+                      >
+                        When enabled, displays a colorful animated border while AI is processing. Sparkles are always shown.
+                      </p>
+                      <input
+                        type="checkbox"
+                        checked={showRainbowBorder}
+                        onChange={(e) => setShowRainbowBorder(e.target.checked)}
+                        style={{ display: 'none' }}
+                      />
+                    </div>
+
+                    <div style={{ marginBottom: '16px' }}>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => setRecordAiManipulationCases(!recordAiManipulationCases)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setRecordAiManipulationCases(!recordAiManipulationCases);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <div
+                          style={{
+                            position: 'relative',
+                            width: '40px',
+                            height: '22px',
+                            backgroundColor: recordAiManipulationCases ? '#4a90e2' : '#e5e5e5',
+                            borderRadius: '11px',
+                            transition: 'background-color 0.2s',
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '2px',
+                              left: recordAiManipulationCases ? '20px' : '2px',
+                              width: '18px',
+                              height: '18px',
+                              backgroundColor: 'white',
+                              borderRadius: '50%',
+                              transition: 'left 0.2s',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                            }}
+                          />
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '14px',
+                            fontWeight: '500',
+                            color: '#333',
+                          }}
+                        >
+                          Record AI Manipulation Cases
+                        </span>
+                      </label>
+                      <p
+                        style={{
+                          margin: '4px 0 0 52px',
+                          fontSize: '13px',
+                          color: '#666',
+                          lineHeight: '1.5',
+                        }}
+                      >
+                        Downloads a JSON case bundle after each AI Reference run for CLI replays.
+                      </p>
+                      <input
+                        type="checkbox"
+                        checked={recordAiManipulationCases}
+                        onChange={(e) => setRecordAiManipulationCases(e.target.checked)}
+                        style={{ display: 'none' }}
+                      />
                     </div>
                   </div>
 

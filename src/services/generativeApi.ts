@@ -867,11 +867,17 @@ export function createGenerativeService(
   model: AIModel = 'gemini',
   googleCloudProjectId?: string,
   inpaintingModel?: AIModel,
-  textOnlyModel?: AIModel
+  textOnlyModel?: AIModel,
+  apiEndpointOverride?: string
 ): GenerativeInpaintService {
+  const env =
+    typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env
+      ? (import.meta as { env?: Record<string, string> }).env
+      : {};
+
   // Priority: provided key > environment variables
-  const key = apiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
-  const apiEndpoint = import.meta.env.VITE_GENERATIVE_API_ENDPOINT || '';
+  const key = apiKey || env.VITE_GEMINI_API_KEY || env.VITE_GENERATIVE_API_KEY || '';
+  const apiEndpoint = apiEndpointOverride || env.VITE_GENERATIVE_API_ENDPOINT || '';
 
   return new GenerativeInpaintService(key, apiEndpoint, model, googleCloudProjectId, inpaintingModel, textOnlyModel);
 }

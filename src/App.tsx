@@ -16,6 +16,7 @@ import { useMeasurementEffects } from '@/hooks/useMeasurementEffects';
 import { useFileImports } from '@/hooks/useFileImports';
 import { useAIProgress } from '@/contexts/AIProgressContext';
 import { copyCanvasToClipboard, downloadCanvasAsImage, captureCleanCanvas } from '@/utils/exportUtils';
+import { applySmartTransparencyMask } from '@/utils/aiImageRemask';
 import {
   DrawingTool,
   GenerativeFillSelectionTool,
@@ -41,10 +42,11 @@ import { createGenerativeService } from '@/services/generativeApi';
 import { AgenticPainterService, type MovePlan } from '@/services/agenticService';
 import { settingsManager } from '@/services/settingsManager';
 // SAM service removed - AI Move not yet implemented
-import { generateBrushMask, generateRectangleMask, generateLassoMask } from '@/utils/maskRendering';
+import { generateBrushMask, generateRectangleMask, generateLassoMask, imageDataToBase64 } from '@/utils/maskRendering';
 import { annotateImage } from '@/utils/imageAnnotation';
 import { InlineTextPlayground } from '@/components/Test/InlineTextPlayground';
 import { ManipulationDialog, MoveConfirmationDialog } from '@/components/AIReference';
+import { downloadAiManipulationCase } from '@/utils/aiCaseRecorder';
 
 const CANVAS_PADDING = 100;
 
@@ -89,6 +91,17 @@ function MainApp(): React.ReactElement {
 
   const authContext = useOptionalAuth();
   const { updateProgress } = useAIProgress();
+  const captureAiSourceAndMask = useCallback((stage: Konva.Stage) => {
+    const sourceCanvas = captureCleanCanvas(stage);
+    const sourceCtx = sourceCanvas.getContext('2d')!;
+    const sourceImageData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+
+    const maskCanvas = captureCleanCanvas(stage, { hideBackground: true });
+    const maskCtx = maskCanvas.getContext('2d')!;
+    const alphaMaskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+
+    return { sourceCanvas, sourceImageData, alphaMaskImageData };
+  }, []);
   const {
     shapes,
     activeTool,
@@ -362,10 +375,8 @@ function MainApp(): React.ReactElement {
           return;
         }
 
-        // Capture clean canvas (without grid, selection UI, etc.)
-        const canvas = captureCleanCanvas(stage);
-        const ctx = canvas.getContext('2d')!;
-        const sourceImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Capture clean canvas plus alpha mask for smart transparency remask
+        const { sourceImageData, alphaMaskImageData } = captureAiSourceAndMask(stage);
 
         // Build the move prompt describing what to do
         const moveDirection = [];
@@ -393,13 +404,14 @@ function MainApp(): React.ReactElement {
           undefined, // no mask - let AI figure out what to move based on coordinates
           updateProgress
         );
+        const remaskedResult = applySmartTransparencyMask(result, sourceImageData, alphaMaskImageData);
 
         // Convert result to image and add to canvas
         const resultCanvas = document.createElement('canvas');
-        resultCanvas.width = result.width;
-        resultCanvas.height = result.height;
+        resultCanvas.width = remaskedResult.width;
+        resultCanvas.height = remaskedResult.height;
         const resultCtx = resultCanvas.getContext('2d')!;
-        resultCtx.putImageData(result, 0, 0);
+        resultCtx.putImageData(remaskedResult, 0, 0);
         const resultDataUrl = resultCanvas.toDataURL('image/png');
 
         // Create image element
@@ -416,8 +428,8 @@ function MainApp(): React.ReactElement {
           type: DrawingTool.IMAGE as typeof DrawingTool.IMAGE,
           x: 0,
           y: 0,
-          width: result.width,
-          height: result.height,
+          width: remaskedResult.width,
+          height: remaskedResult.height,
           src: resultDataUrl,
           image: img,
           style: {
@@ -779,21 +791,18 @@ function MainApp(): React.ReactElement {
         const stage = stageRef.current;
         const { mode, selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
 
-        // Find the DrawingLayer and temporarily hide selection overlay nodes
-        // Capture clean canvas (without grid, selection UI, overlays, etc.)
-        const canvas = captureCleanCanvas(stage);
-        const ctx = canvas.getContext('2d')!;
-        const sourceImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Capture clean canvas and alpha mask for smart transparency remask
+        const { sourceCanvas, sourceImageData, alphaMaskImageData } = captureAiSourceAndMask(stage);
 
         // Generate mask only if in inpainting mode
         let maskExport;
         if (mode === 'inpainting') {
           if (selectionTool === GenerativeFillSelectionTool.BRUSH) {
-            maskExport = generateBrushMask(canvas, selectionPoints, brushWidth);
+            maskExport = generateBrushMask(sourceCanvas, selectionPoints, brushWidth);
           } else if (selectionTool === GenerativeFillSelectionTool.RECTANGLE && selectionRectangle) {
-            maskExport = generateRectangleMask(canvas, selectionRectangle);
+            maskExport = generateRectangleMask(sourceCanvas, selectionRectangle);
           } else if (selectionTool === GenerativeFillSelectionTool.LASSO) {
-            maskExport = generateLassoMask(canvas, selectionPoints);
+            maskExport = generateLassoMask(sourceCanvas, selectionPoints);
           } else {
             throw new Error('Invalid selection tool or missing selection data');
           }
@@ -871,21 +880,26 @@ function MainApp(): React.ReactElement {
         const resultImageData = mode === 'inpainting' && maskExport
           ? await agenticService.edit(sourceImageData, prompt, maskExport.maskImageData, updateProgress)
           : await agenticService.edit(sourceImageData, prompt, undefined, updateProgress);
+        const remaskedResult = applySmartTransparencyMask(
+          resultImageData,
+          sourceImageData,
+          alphaMaskImageData
+        );
 
         // Convert result to base64
         const resultCanvas = document.createElement('canvas');
-        resultCanvas.width = resultImageData.width;
-        resultCanvas.height = resultImageData.height;
+        resultCanvas.width = remaskedResult.width;
+        resultCanvas.height = remaskedResult.height;
         const resultCtx = resultCanvas.getContext('2d')!;
-        resultCtx.putImageData(resultImageData, 0, 0);
+        resultCtx.putImageData(remaskedResult, 0, 0);
         const resultBase64 = resultCanvas.toDataURL('image/png');
 
         // Result is now full-size, so bounds should be full canvas
         const fullCanvasBounds = {
           x: 0,
           y: 0,
-          width: canvas.width,
-          height: canvas.height,
+          width: sourceCanvas.width,
+          height: sourceCanvas.height,
         };
 
         // Create the image shape immediately and add it to canvas
@@ -940,9 +954,12 @@ function MainApp(): React.ReactElement {
   // Store reference points and canvas data for the confirmation flow
   const pendingManipulationRef = useRef<{
     referencePoints: Array<{label: string, x: number, y: number}>;
+    markupShapes: Shape[];
+    command: string;
     imageDataUrl: string;
     canvasWidth: number;
     canvasHeight: number;
+    alphaMaskImageData: ImageData;
     geminiApiKey: string;
   } | null>(null);
 
@@ -962,6 +979,9 @@ function MainApp(): React.ReactElement {
       // Capture clean canvas (without grid, selection UI, overlays, etc.)
       const canvas = captureCleanCanvas(stage);
       const imageDataUrl = canvas.toDataURL('image/png');
+      const maskCanvas = captureCleanCanvas(stage, { hideBackground: true });
+      const maskCtx = maskCanvas.getContext('2d')!;
+      const alphaMaskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
 
       // Get API key
       let geminiApiKey: string | null = null;
@@ -989,9 +1009,12 @@ function MainApp(): React.ReactElement {
       // Store data for confirmation flow
       pendingManipulationRef.current = {
         referencePoints: referencePointsCopy,
+        markupShapes: markupShapesCopy,
+        command,
         imageDataUrl,
         canvasWidth: canvas.width,
         canvasHeight: canvas.height,
+        alphaMaskImageData,
         geminiApiKey: effectiveGeminiKey,
       };
 
@@ -1036,7 +1059,16 @@ function MainApp(): React.ReactElement {
   const handleMoveConfirm = useCallback(async () => {
     if (!movePlan || !pendingManipulationRef.current) return;
 
-    const { imageDataUrl, canvasWidth, canvasHeight, geminiApiKey } = pendingManipulationRef.current;
+    const {
+      imageDataUrl,
+      canvasWidth,
+      canvasHeight,
+      alphaMaskImageData,
+      geminiApiKey,
+      referencePoints,
+      markupShapes,
+      command,
+    } = pendingManipulationRef.current;
 
     // Close confirmation and clear reference mode
     setMoveConfirmationOpen(false);
@@ -1105,14 +1137,48 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
         undefined,
         updateProgress
       );
+      const remaskedResult = applySmartTransparencyMask(
+        resultImageData,
+        sourceImageData,
+        alphaMaskImageData
+      );
 
       // Convert result to base64
       const resultCanvas = document.createElement('canvas');
-      resultCanvas.width = resultImageData.width;
-      resultCanvas.height = resultImageData.height;
+      resultCanvas.width = remaskedResult.width;
+      resultCanvas.height = remaskedResult.height;
       const resultCtx = resultCanvas.getContext('2d')!;
-      resultCtx.putImageData(resultImageData, 0, 0);
+      resultCtx.putImageData(remaskedResult, 0, 0);
       const resultBase64 = resultCanvas.toDataURL('image/png');
+
+      if (localStorage.getItem('recordAiManipulationCases') === 'true') {
+        const alphaMaskBase64 = imageDataToBase64(alphaMaskImageData);
+        try {
+          await downloadAiManipulationCase({
+            id: `ai-manipulation-${new Date().toISOString()}`,
+            type: 'ai_reference_manipulation',
+            createdAt: new Date().toISOString(),
+            canvas: {
+              width: canvasWidth,
+              height: canvasHeight,
+            },
+            command,
+            enrichedPrompt,
+            movePlan,
+            referencePoints,
+            markupShapes,
+            sourceImageDataUrl: imageDataUrl,
+            alphaMaskDataUrl: alphaMaskBase64,
+            outputImageDataUrl: resultBase64,
+            models: {
+              planning: 'gemini',
+              generation: 'gemini',
+            },
+          });
+        } catch (error) {
+          console.warn('Failed to download AI manipulation bundle:', error);
+        }
+      }
 
       // Create image shape and add to canvas
       const imageShape: Shape = {
