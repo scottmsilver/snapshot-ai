@@ -29,8 +29,10 @@ export interface MovePlan {
 
 const MAX_ITERATIONS = 3;
 
-// Check if we should use server-side API instead of direct Gemini calls
-const USE_SERVER_AI = import.meta.env.VITE_USE_SERVER_AI === 'true';
+import { isServerAIEnabled } from '@/config/apiConfig';
+
+// Use centralized helper for consistency
+const USE_SERVER_AI = isServerAIEnabled();
 
 export class AgenticPainterService {
     private ai: AIClient;

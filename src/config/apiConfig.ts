@@ -8,6 +8,14 @@
 const DEFAULT_API_URL = 'http://localhost:3001';
 
 /**
+ * Check if server-side AI is enabled (default: true)
+ * Set VITE_USE_SERVER_AI=false to use direct client-side Gemini calls (legacy mode)
+ */
+export function isServerAIEnabled(): boolean {
+  return import.meta.env.VITE_USE_SERVER_AI !== 'false';
+}
+
+/**
  * Get the API base URL from environment or use default
  */
 export function getApiUrl(): string {

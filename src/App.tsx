@@ -29,6 +29,7 @@ import {
 } from '@/types/drawing';
 import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurementUtils';
 import type { MeasurementUnit } from '@/utils/measurementUtils';
+import { isServerAIEnabled } from '@/config/apiConfig';
 import { AuthGate } from '@/components/App/AuthGate';
 import { WorkspaceHeader } from '@/components/App/WorkspaceHeader';
 import { WorkspaceToolbar } from '@/components/App/WorkspaceToolbar';
@@ -373,12 +374,13 @@ function MainApp(): React.ReactElement {
           }
         }
 
-        const apiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY;
-        if (!apiKey) {
+        // In server mode, API key is handled server-side. In legacy mode, we need it client-side.
+        const apiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
+        if (!isServerAIEnabled() && !apiKey) {
           updateProgress({
             step: 'error',
             message: 'No API key configured',
-            error: { message: 'Please add your Gemini API key in Settings' }
+            error: { message: 'Please add your Gemini API key in Settings (or enable server mode)' }
           });
           clearAiMoveState();
           return;
@@ -850,10 +852,11 @@ function MainApp(): React.ReactElement {
         const modelToValidate = mode === 'inpainting' ? selectedInpaintingModel : selectedTextOnlyModel;
 
         // Check authentication and API key based on model
-        if (modelToValidate === 'gemini') {
+        // In server mode, Gemini API key is handled server-side
+        if (modelToValidate === 'gemini' && !isServerAIEnabled()) {
           if (!geminiApiKey && !import.meta.env.VITE_GEMINI_API_KEY && !import.meta.env.VITE_GENERATIVE_API_KEY) {
             dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-            alert('Please add your Gemini API key in Settings to use Generative Fill.');
+            alert('Please add your Gemini API key in Settings to use Generative Fill (or enable server mode).');
             setSettingsDialogOpen(true);
             return;
           }

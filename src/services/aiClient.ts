@@ -1,12 +1,16 @@
 /**
  * Centralized AI client wrapper that automatically logs all AI calls to the AI console.
  * Use this instead of directly calling genAI.models.generateContent.
+ * 
+ * In server mode (default), all calls are proxied through the Express backend.
+ * In legacy mode (VITE_USE_SERVER_AI=false), calls go directly to Gemini.
  */
 
 import { GoogleGenAI } from '@google/genai';
 import { aiLogService } from './aiLogService';
 import { THINKING_BUDGETS } from '@/config/aiModels';
 import { createAPIClient } from './apiClient';
+import { isServerAIEnabled } from '@/config/apiConfig';
 
 export interface AICallOptions {
   /** The model to use */
@@ -41,14 +45,18 @@ export interface AICallResult {
   };
 }
 
-// Check if we should use server-side API instead of direct Gemini calls
-const USE_SERVER_AI = import.meta.env.VITE_USE_SERVER_AI === 'true';
+// Use the centralized helper for consistency
+const USE_SERVER_AI = isServerAIEnabled();
 
 /**
  * Create an AI client with automatic logging
+ * 
+ * @param apiKey - Gemini API key (only required in legacy mode, can be empty string in server mode)
  */
 export function createAIClient(apiKey: string) {
-  const genAI = new GoogleGenAI({ apiKey });
+  // In server mode, we don't need GoogleGenAI - all calls go through the server
+  // In legacy mode, we need a valid API key
+  const genAI = USE_SERVER_AI ? null : new GoogleGenAI({ apiKey });
   
   // If server mode enabled, create API client for delegation
   const serverClient = USE_SERVER_AI ? createAPIClient() : null;
@@ -72,6 +80,11 @@ export function createAIClient(apiKey: string) {
     if (serverClient) {
       aiLogService.appendThinking(`### ${logLabel}\n\n*Using server API...*\n\n`);
       return await serverClient.call(options);
+    }
+
+    // Legacy mode: Direct Gemini calls (requires API key and genAI instance)
+    if (!genAI) {
+      throw new Error('Gemini API client not initialized. Provide a valid API key or enable server mode.');
     }
 
     // Extract prompt text and image info for logging
@@ -189,6 +202,11 @@ export function createAIClient(apiKey: string) {
       aiLogService.appendThinking(`### ${logLabel}\n\n*Using server API (streaming)...*\n\n`);
       yield* serverClient.callStream(options);
       return;
+    }
+
+    // Legacy mode: Direct Gemini calls (requires API key and genAI instance)
+    if (!genAI) {
+      throw new Error('Gemini API client not initialized. Provide a valid API key or enable server mode.');
     }
 
     // Extract prompt text and image info for logging
