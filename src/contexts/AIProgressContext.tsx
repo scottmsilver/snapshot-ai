@@ -92,7 +92,8 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
 
     // Determine if we need to start a new operation BEFORE entering setState
     // This prevents race conditions with multiple rapid calls
-    const needsNewOperation = isActiveStep && !currentLogIdRef.current;
+    // Create new entry if: (1) first active step, OR (2) server explicitly requests new entry
+    const needsNewOperation = (isActiveStep && !currentLogIdRef.current) || event.newLogEntry;
 
     if (needsNewOperation) {
       startTimeRef.current = Date.now();
@@ -128,6 +129,8 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
           step: event.step,
           message: event.message || '',
           thinkingText: event.thinkingText,
+          prompt: event.prompt,
+          rawOutput: event.rawOutput,
           iteration: event.iteration,
           error: event.error,
           iterationImage: event.iterationImage,
@@ -144,8 +147,16 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
             ...currentEntry,
             step: event.step,
             message: event.message || currentEntry.message,
-            // Replace thinking text (don't append - the caller sends full text)
-            thinkingText: event.thinkingText ?? currentEntry.thinkingText,
+            // If delta provided, append; otherwise replace with full text
+            thinkingText: event.thinkingTextDelta 
+              ? (currentEntry.thinkingText || '') + event.thinkingTextDelta
+              : (event.thinkingText ?? currentEntry.thinkingText),
+            // Handle prompt (replace if provided)
+            prompt: event.prompt ?? currentEntry.prompt,
+            // Handle rawOutput (append delta or replace)
+            rawOutput: event.rawOutputDelta
+              ? (currentEntry.rawOutput || '') + event.rawOutputDelta
+              : (event.rawOutput ?? currentEntry.rawOutput),
             iteration: event.iteration || currentEntry.iteration,
             error: event.error,
             durationMs: isCompletingOrError ? elapsedMs : undefined,
@@ -184,7 +195,10 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
       const newState: AIProgressState = {
         step: event.step,
         message: event.message ?? prev.message,
-        thinkingText: event.thinkingText ?? prev.thinkingText,
+        // If delta provided, append; otherwise replace with full text
+        thinkingText: event.thinkingTextDelta 
+          ? prev.thinkingText + event.thinkingTextDelta
+          : (event.thinkingText ?? prev.thinkingText),
         iteration: event.iteration ?? prev.iteration,
         elapsedMs,
         startTime: startTimeRef.current,

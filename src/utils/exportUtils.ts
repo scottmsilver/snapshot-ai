@@ -5,6 +5,8 @@ export interface CleanCanvasOptions {
   hideGrid?: boolean;
   /** Whether to hide selection UI like Transformer and selection box (default: true) */
   hideSelectionUI?: boolean;
+  /** Whether to hide the canvas background rect (default: false) */
+  hideBackground?: boolean;
   /** Pixel ratio for export quality (default: 1 for AI, 2 for user exports) */
   pixelRatio?: number;
 }
@@ -14,13 +16,18 @@ export interface CleanCanvasOptions {
  * Uses explicit naming conventions rather than color detection.
  */
 function shouldExcludeNode(node: Konva.Node, options: CleanCanvasOptions): boolean {
-  const { hideGrid = true, hideSelectionUI = true } = options;
+  const { hideGrid = true, hideSelectionUI = true, hideBackground = false } = options;
   
   const className = node.getClassName();
   const name = node.name() || '';
   
   // Exclude grid lines by name
   if (hideGrid && name === 'gridLine') {
+    return true;
+  }
+
+  // Optionally exclude the canvas background rect by name
+  if (hideBackground && name === 'canvasBackground') {
     return true;
   }
   
@@ -124,14 +131,9 @@ export function captureCleanCanvasAsImageData(
 }
 
 export async function copyCanvasToClipboard(stage: Konva.Stage): Promise<void> {
-  // Ensure stage is rendered before copying
-  stage.draw();
-  
-  // Get the data URL from the stage
-  const dataURL = stage.toDataURL({
-    pixelRatio: 2, // Higher quality export
-    mimeType: 'image/png'
-  });
+  // Capture clean canvas without grid lines and selection UI
+  const canvas = captureCleanCanvas(stage, { pixelRatio: 2 });
+  const dataURL = canvas.toDataURL('image/png');
 
   // Convert data URL to blob
   const response = await fetch(dataURL);
@@ -170,10 +172,9 @@ export async function copyCanvasToClipboard(stage: Konva.Stage): Promise<void> {
 }
 
 export function downloadCanvasAsImage(stage: Konva.Stage, filename: string = 'canvas-export.png'): void {
-  // Get the data URL from the stage
-  const dataURL = stage.toDataURL({
-    pixelRatio: 2, // Higher quality export
-  });
+  // Capture clean canvas without grid lines and selection UI
+  const canvas = captureCleanCanvas(stage, { pixelRatio: 2 });
+  const dataURL = canvas.toDataURL('image/png');
 
   // Create a temporary link element
   const link = document.createElement('a');
@@ -184,4 +185,68 @@ export function downloadCanvasAsImage(stage: Konva.Stage, filename: string = 'ca
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+/**
+ * Captures a clean canvas and downloads it as a PDF file.
+ * The canvas image is centered on an A4 page with margins and scaled to fit.
+ * 
+ * @param stage - The Konva stage to capture
+ * @param filename - The filename for the PDF download (default: 'canvas-export.pdf')
+ */
+export async function downloadCanvasAsPdf(stage: Konva.Stage, filename: string = 'canvas-export.pdf'): Promise<void> {
+  try {
+    // Dynamically import jsPDF to avoid bundling it unnecessarily
+    const { jsPDF } = await import('jspdf');
+    
+    // Capture canvas with high quality (pixelRatio: 2)
+    const canvas = captureCleanCanvas(stage, { pixelRatio: 2 });
+    const dataURL = canvas.toDataURL('image/png');
+
+    // Create PDF with A4 page size
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    // Get page dimensions
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+
+    // Define margins (10mm on each side)
+    const margin = 10;
+    const maxWidth = pageWidth - (2 * margin);
+    const maxHeight = pageHeight - (2 * margin);
+
+    // Calculate scaled dimensions to fit within margins while maintaining aspect ratio
+    const canvasAspectRatio = canvas.width / canvas.height;
+    const maxAspectRatio = maxWidth / maxHeight;
+
+    let imgWidth: number;
+    let imgHeight: number;
+
+    if (canvasAspectRatio > maxAspectRatio) {
+      // Canvas is wider - fit to width
+      imgWidth = maxWidth;
+      imgHeight = maxWidth / canvasAspectRatio;
+    } else {
+      // Canvas is taller - fit to height
+      imgHeight = maxHeight;
+      imgWidth = maxHeight * canvasAspectRatio;
+    }
+
+    // Center the image on the page
+    const x = (pageWidth - imgWidth) / 2;
+    const y = (pageHeight - imgHeight) / 2;
+
+    // Add image to PDF
+    pdf.addImage(dataURL, 'PNG', x, y, imgWidth, imgHeight);
+
+    // Trigger download
+    pdf.save(filename);
+  } catch (error) {
+    console.error('Failed to load jsPDF:', error);
+    throw new Error('PDF export requires jsPDF library to be installed');
+  }
 }

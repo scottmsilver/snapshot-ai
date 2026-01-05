@@ -396,6 +396,21 @@ export class SettingsManager {
   async setGoogleCloudProjectId(projectId: string): Promise<void> {
     return this.setSetting('google_cloud_project_id', projectId);
   }
+
+  /**
+   * Get the show rainbow border preference
+   */
+  async getShowRainbowBorder(): Promise<boolean> {
+    const value = await this.getSetting('show_rainbow_border');
+    return value === 'true';
+  }
+
+  /**
+   * Set the show rainbow border preference
+   */
+  async setShowRainbowBorder(show: boolean): Promise<void> {
+    return this.setSetting('show_rainbow_border', String(show));
+  }
 }
 
 // Singleton instance

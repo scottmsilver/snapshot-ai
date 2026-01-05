@@ -132,7 +132,10 @@ const LogEntryComponent: React.FC<{
   const [expanded, setExpanded] = useState(isLatest);
   const stepConfig = STEP_CONFIG[entry.step];
   const hasThinking = entry.thinkingText && entry.thinkingText.trim().length > 0;
+  const hasPrompt = entry.prompt && entry.prompt.trim().length > 0;
+  const hasRawOutput = entry.rawOutput && entry.rawOutput.trim().length > 0;
   const hasDebugData = !!entry.debugData;
+  const hasExpandableContent = hasThinking || hasPrompt || hasRawOutput;
 
   // Debug: log when we have debug data
   useEffect(() => {
@@ -143,10 +146,10 @@ const LogEntryComponent: React.FC<{
 
   // Auto-expand latest entry when it gets content
   useEffect(() => {
-    if (isLatest && hasThinking) {
+    if (isLatest && hasExpandableContent) {
       setExpanded(true);
     }
-  }, [isLatest, hasThinking]);
+  }, [isLatest, hasExpandableContent]);
 
   return (
     <div
@@ -161,9 +164,9 @@ const LogEntryComponent: React.FC<{
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
-          cursor: hasThinking ? 'pointer' : 'default',
+          cursor: hasExpandableContent ? 'pointer' : 'default',
         }}
-        onClick={() => hasThinking && setExpanded(!expanded)}
+        onClick={() => hasExpandableContent && setExpanded(!expanded)}
       >
         <span style={{ color: '#666', fontSize: '11px', fontFamily: 'monospace' }}>
           {formatTime(entry.timestamp)}
@@ -209,8 +212,8 @@ const LogEntryComponent: React.FC<{
             Debug
           </button>
         )}
-        {hasThinking && (
-          <span style={{ color: '#666', marginLeft: hasThinking && !entry.durationMs && !hasDebugData ? 'auto' : '8px' }}>
+        {hasExpandableContent && (
+          <span style={{ color: '#666', marginLeft: hasExpandableContent && !entry.durationMs && !hasDebugData ? 'auto' : '8px' }}>
             {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </span>
         )}
@@ -243,6 +246,23 @@ const LogEntryComponent: React.FC<{
         </div>
       )}
 
+      {/* Prompt (collapsible) */}
+      {hasPrompt && expanded && (
+        <div
+          style={{
+            marginTop: '8px',
+            paddingLeft: '20px',
+            borderLeft: '2px solid #9b59b6',
+            marginLeft: '6px',
+          }}
+        >
+          <div style={{ fontSize: '11px', fontWeight: 600, color: '#9b59b6', marginBottom: '4px' }}>
+            PROMPT SENT TO AI:
+          </div>
+          <MarkdownContent content={entry.prompt!} />
+        </div>
+      )}
+
       {/* Thinking text (collapsible) */}
       {hasThinking && expanded && (
         <div
@@ -254,6 +274,23 @@ const LogEntryComponent: React.FC<{
           }}
         >
           <MarkdownContent content={entry.thinkingText!} />
+        </div>
+      )}
+
+      {/* Raw Output (collapsible) */}
+      {hasRawOutput && expanded && (
+        <div
+          style={{
+            marginTop: '8px',
+            paddingLeft: '20px',
+            borderLeft: '2px solid #27ae60',
+            marginLeft: '6px',
+          }}
+        >
+          <div style={{ fontSize: '11px', fontWeight: 600, color: '#27ae60', marginBottom: '4px' }}>
+            RAW AI OUTPUT:
+          </div>
+          <MarkdownContent content={entry.rawOutput!} />
         </div>
       )}
 
@@ -418,6 +455,18 @@ export const AIProgressPanel: React.FC = () => {
         }
       }
 
+      // Prompt
+      if (entry.prompt) {
+        const stripped = entry.prompt
+          .replace(/!\[([^\]]*)\]\([^)]+\)/g, '[Image: $1]')
+          .trim();
+        if (stripped) {
+          lines.push('');
+          lines.push('--- PROMPT SENT TO AI ---');
+          lines.push(stripped);
+        }
+      }
+
       // Thinking text - strip markdown and excessive whitespace
       if (entry.thinkingText) {
         // Strip images (base64 data) but keep the alt text
@@ -427,6 +476,18 @@ export const AIProgressPanel: React.FC = () => {
           .trim();
         if (stripped) {
           lines.push('');
+          lines.push(stripped);
+        }
+      }
+
+      // Raw Output
+      if (entry.rawOutput) {
+        const stripped = entry.rawOutput
+          .replace(/!\[([^\]]*)\]\([^)]+\)/g, '[Image: $1]')
+          .trim();
+        if (stripped) {
+          lines.push('');
+          lines.push('--- RAW AI OUTPUT ---');
           lines.push(stripped);
         }
       }
@@ -465,11 +526,31 @@ export const AIProgressPanel: React.FC = () => {
         }
       }
 
+      // Prompt - include everything without stripping
+      if (entry.prompt) {
+        const rawText = entry.prompt.trim();
+        if (rawText) {
+          lines.push('');
+          lines.push('--- PROMPT SENT TO AI ---');
+          lines.push(rawText);
+        }
+      }
+
       // Thinking text - include everything without stripping
       if (entry.thinkingText) {
         const rawText = entry.thinkingText.trim();
         if (rawText) {
           lines.push('');
+          lines.push(rawText);
+        }
+      }
+
+      // Raw Output - include everything without stripping
+      if (entry.rawOutput) {
+        const rawText = entry.rawOutput.trim();
+        if (rawText) {
+          lines.push('');
+          lines.push('--- RAW AI OUTPUT ---');
           lines.push(rawText);
         }
       }

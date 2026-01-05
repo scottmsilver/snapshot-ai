@@ -1,6 +1,6 @@
 import React from 'react';
 import { GenerativeFillSelectionTool } from '@/types/drawing';
-import { Paintbrush, Square, Lasso } from 'lucide-react';
+import { Paintbrush, Square, Lasso, Hexagon } from 'lucide-react';
 
 interface GenerativeFillToolbarProps {
   selectedTool: GenerativeFillSelectionTool;
@@ -124,6 +124,24 @@ export const GenerativeFillToolbar: React.FC<GenerativeFillToolbarProps> = ({
         >
           <Lasso size={18} />
           Lasso
+        </button>
+
+        <button
+          onClick={() => onSelectTool(GenerativeFillSelectionTool.POLYGON)}
+          style={toolButtonStyle(selectedTool === GenerativeFillSelectionTool.POLYGON)}
+          onMouseEnter={(e) => {
+            if (selectedTool !== GenerativeFillSelectionTool.POLYGON) {
+              e.currentTarget.style.backgroundColor = '#f5f5f5';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (selectedTool !== GenerativeFillSelectionTool.POLYGON) {
+              e.currentTarget.style.backgroundColor = 'white';
+            }
+          }}
+        >
+          <Hexagon size={18} />
+          Polygon
         </button>
       </div>
 

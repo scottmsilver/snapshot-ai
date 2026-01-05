@@ -15,7 +15,7 @@ import { useClipboardPaste } from '@/hooks/useClipboardPaste';
 import { useMeasurementEffects } from '@/hooks/useMeasurementEffects';
 import { useFileImports } from '@/hooks/useFileImports';
 import { useAIProgress } from '@/contexts/AIProgressContext';
-import { copyCanvasToClipboard, downloadCanvasAsImage, captureCleanCanvas } from '@/utils/exportUtils';
+import { copyCanvasToClipboard, downloadCanvasAsImage, downloadCanvasAsPdf, captureCleanCanvas } from '@/utils/exportUtils';
 import { applySmartTransparencyMask } from '@/utils/aiImageRemask';
 import {
   DrawingTool,
@@ -252,6 +252,15 @@ function MainApp(): React.ReactElement {
 
     const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
     downloadCanvasAsImage(stageRef.current, `markup-${timestamp}.png`);
+  }, []);
+
+  const handleDownloadPdf = useCallback(() => {
+    if (!stageRef.current) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
+    void downloadCanvasAsPdf(stageRef.current, `markup-${timestamp}.pdf`);
   }, []);
 
   useKeyboardShortcuts({
@@ -569,6 +578,7 @@ function MainApp(): React.ReactElement {
       onProjectLoad: handleProjectLoad,
       onNew: handleNewProject,
       onExport: handleDownloadImage,
+      onExportPdf: handleDownloadPdf,
       showGrid,
       onToggleGrid: () => setShowGrid(prev => !prev),
       canvasBackground,
@@ -580,6 +590,7 @@ function MainApp(): React.ReactElement {
       handleProjectLoad,
       handleNewProject,
       handleDownloadImage,
+      handleDownloadPdf,
       showGrid,
       canvasBackground,
     ],
@@ -739,7 +750,7 @@ function MainApp(): React.ReactElement {
         maskExport = generateBrushMask(canvas, selectionPoints, brushWidth);
       } else if (selectionTool === GenerativeFillSelectionTool.RECTANGLE && selectionRectangle) {
         maskExport = generateRectangleMask(canvas, selectionRectangle);
-      } else if (selectionTool === GenerativeFillSelectionTool.LASSO) {
+      } else if (selectionTool === GenerativeFillSelectionTool.LASSO || selectionTool === GenerativeFillSelectionTool.POLYGON) {
         maskExport = generateLassoMask(canvas, selectionPoints);
       } else {
         console.error('Invalid selection tool or missing selection data');
@@ -1239,6 +1250,56 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
     setManipulationDialogOpen(true);
   }, []);
 
+  // Handler for replanning with edited command text
+  const handleReplan = useCallback(async (editedCommand: string) => {
+    if (!pendingManipulationRef.current) return;
+
+    try {
+      // Set loading state
+      setIsPlanningMove(true);
+
+      // Update the stored command with the edited version
+      pendingManipulationRef.current.command = editedCommand;
+
+      const {
+        imageDataUrl,
+        referencePoints,
+        canvasWidth,
+        canvasHeight,
+        markupShapes,
+        geminiApiKey,
+      } = pendingManipulationRef.current;
+
+      // Create service and regenerate plan with edited command
+      const nanoBananaService = createGenerativeService(
+        geminiApiKey,
+        'gemini',
+        undefined,
+        'gemini',
+        'gemini'
+      );
+      const agenticService = new AgenticPainterService(geminiApiKey, nanoBananaService);
+
+      // Get the new plan with the edited command
+      const plan = await agenticService.planMoveOperation(
+        imageDataUrl,
+        referencePoints,
+        editedCommand,
+        canvasWidth,
+        canvasHeight,
+        markupShapes
+      );
+
+      setMovePlan(plan);
+      setIsPlanningMove(false);
+
+    } catch (error) {
+      console.error('Replanning failed:', error);
+      setIsPlanningMove(false);
+      alert('Failed to replan operation: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  }, []);
+
   // Handler for closing the confirmation dialog
   const handleMoveConfirmationClose = useCallback(() => {
     setMoveConfirmationOpen(false);
@@ -1504,6 +1565,7 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
           onClose={handleMoveConfirmationClose}
           onConfirm={handleMoveConfirm}
           onEditCommand={handleMoveEditCommand}
+          onReplan={handleReplan}
           plan={movePlan}
           isLoading={isPlanningMove}
         />

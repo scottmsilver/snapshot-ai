@@ -17,6 +17,7 @@ interface FileMenuProps {
   onSaveStatusChange?: (status: 'saved' | 'saving' | 'unsaved' | 'error') => void;
   onNew?: () => void;
   onExport?: () => void;
+  onExportPdf?: () => void;
   showGrid?: boolean;
   onToggleGrid?: () => void;
   canvasBackground?: string;
@@ -24,7 +25,7 @@ interface FileMenuProps {
   documentName?: string;
 }
 
-export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId, onSaveStatusChange, onNew, onExport, showGrid, onToggleGrid, canvasBackground, onChangeBackground, documentName }) => {
+export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProjectLoad, initialFileId, onSaveStatusChange, onNew, onExport, onExportPdf, showGrid, onToggleGrid, canvasBackground, onChangeBackground, documentName }) => {
   const authContext = useOptionalAuth();
   const { state: drawingState, setShapes } = useDrawingContext();
   const { loadImageFromData } = useImage();
@@ -454,6 +455,39 @@ export const FileMenu: React.FC<FileMenuProps> = ({ stageRef, imageData, onProje
               >
                 <span>Export Image</span>
                 <span style={{ fontSize: '0.625rem', color: '#999' }}>Ctrl+E</span>
+              </button>
+            </>
+          )}
+
+          {onExportPdf && (
+            <>
+              <button
+                onClick={() => {
+                  onExportPdf();
+                  setShowDropdown(false);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 0.75rem',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  color: '#333',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f5f5f5';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                <span>Export PDF</span>
+                <span style={{ fontSize: '0.625rem', color: '#999' }}>Ctrl+Shift+E</span>
               </button>
             </>
           )}

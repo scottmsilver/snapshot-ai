@@ -33,6 +33,15 @@ export interface AILogEntry {
   step: AIProgressStep;
   message: string;
   thinkingText?: string;
+  
+  // NEW: Add these fields for full transparency
+  /** The prompt being sent to the AI (system prompt, user prompt, etc) */
+  prompt?: string;
+  /** Raw text output from the AI (non-thinking response) */
+  rawOutput?: string;
+  /** Incremental raw output delta (for streaming) */
+  rawOutputDelta?: string;
+  
   iteration?: {
     current: number;
     max: number;
@@ -113,6 +122,17 @@ export interface AIProgressEvent {
   step: AIProgressStep;
   message?: string;
   thinkingText?: string;
+  /** Incremental thinking text delta (for streaming - append to existing) */
+  thinkingTextDelta?: string;
+  
+  // NEW: Add these fields for full transparency
+  /** The prompt being sent to the AI (system prompt, user prompt, etc) */
+  prompt?: string;
+  /** Raw text output from the AI (non-thinking response) */
+  rawOutput?: string;
+  /** Incremental raw output delta (for streaming) */
+  rawOutputDelta?: string;
+  
   iteration?: {
     current: number;
     max: number;
@@ -123,6 +143,8 @@ export interface AIProgressEvent {
   };
   /** Generated image from this iteration (base64 data URL) */
   iterationImage?: string;
+  /** If true, forces creation of a new log entry instead of updating existing */
+  newLogEntry?: boolean;
 }
 
 /**

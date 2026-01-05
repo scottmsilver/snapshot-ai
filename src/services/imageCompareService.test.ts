@@ -61,7 +61,7 @@ function fillRect(img: ImageData, x: number, y: number, width: number, height: n
 
 describe('imageCompareService', () => {
   // Use pixel-based for legacy tests that need exact pixel-level precision
-  const pixelBased = { useBlockComparison: false };
+  const pixelBased = { useBlockComparison: false, diffMetric: 'maxChannel' as const };
 
   describe('detectEditRegions (pixel-based legacy)', () => {
     it('should return empty regions for identical images', () => {
@@ -234,7 +234,7 @@ describe('imageCompareService', () => {
     it('should ignore changes below colorThreshold', () => {
       const original = createSolidImage(100, 100, 100, 100, 100);
       const edited = copyImage(original);
-      // Small color change (only 10 difference, below default threshold of 30)
+      // Small color change (only 10 difference, below default threshold of 12)
       fillRect(edited, 40, 40, 20, 20, 110, 110, 110);
 
       const result = detectEditRegions(original, edited, pixelBased);
@@ -245,7 +245,7 @@ describe('imageCompareService', () => {
     it('should detect changes above colorThreshold', () => {
       const original = createSolidImage(100, 100, 100, 100, 100);
       const edited = copyImage(original);
-      // Larger color change (50 difference, above default threshold of 30)
+      // Larger color change (50 difference, above default threshold of 12)
       fillRect(edited, 40, 40, 20, 20, 150, 150, 150);
 
       const result = detectEditRegions(original, edited, pixelBased);
@@ -258,15 +258,15 @@ describe('imageCompareService', () => {
     it('should use custom colorThreshold', () => {
       const original = createSolidImage(100, 100, 100, 100, 100);
       const edited = copyImage(original);
-      // Change of 20 in color
-      fillRect(edited, 40, 40, 20, 20, 120, 120, 120);
+      // Change of 10 in color
+      fillRect(edited, 40, 40, 20, 20, 110, 110, 110);
 
-      // With default threshold (30), should not detect
+      // With default threshold (12), should not detect
       const result1 = detectEditRegions(original, edited, pixelBased);
       expect(result1.regions).toHaveLength(0);
 
-      // With lower threshold (10), should detect
-      const result2 = detectEditRegions(original, edited, { ...pixelBased, colorThreshold: 10 });
+      // With lower threshold (5), should detect
+      const result2 = detectEditRegions(original, edited, { ...pixelBased, colorThreshold: 5 });
       expect(result2.regions).toHaveLength(1);
     });
 
@@ -290,6 +290,31 @@ describe('imageCompareService', () => {
 
       expect(result.imageWidth).toBe(200);
       expect(result.imageHeight).toBe(150);
+    });
+  });
+
+  describe('detectEditRegions (deltaE default)', () => {
+    it('should ignore subtle perceptual changes by default', () => {
+      const original = createSolidImage(100, 100, 120, 120, 120);
+      const edited = copyImage(original);
+      // Small brightness tweak, likely below deltaE threshold
+      fillRect(edited, 10, 10, 20, 20, 125, 125, 125);
+
+      const result = detectEditRegions(original, edited, { useBlockComparison: false });
+
+      expect(result.regions).toHaveLength(0);
+    });
+
+    it('should detect large perceptual changes by default', () => {
+      const original = createSolidImage(100, 100, 10, 10, 10);
+      const edited = copyImage(original);
+      fillRect(edited, 10, 10, 20, 20, 240, 240, 240);
+
+      const result = detectEditRegions(original, edited, { useBlockComparison: false });
+
+      expect(result.regions).toHaveLength(1);
+      expect(result.regions[0].x).toBe(10);
+      expect(result.regions[0].y).toBe(10);
     });
   });
 

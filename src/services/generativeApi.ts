@@ -1,6 +1,7 @@
 import { base64ToImageData, imageDataToBase64 } from '@/utils/maskRendering';
 import { AI_MODELS, THINKING_BUDGETS } from '@/config/aiModels';
 import { createAIClient, type AIClient } from './aiClient';
+import { createAPIClient, type APIClient } from './apiClient';
 
 export interface InpaintRequest {
   sourceImage: string;  // Base64 PNG
@@ -13,6 +14,9 @@ export interface InpaintResponse {
   error?: string;
 }
 
+
+// Check if we should use server-side API instead of direct Gemini calls
+const USE_SERVER_AI = import.meta.env.VITE_USE_SERVER_AI === 'true';
 
 /**
  * Service for AI-powered inpainting using external APIs
@@ -27,6 +31,7 @@ export class GenerativeInpaintService {
   private inpaintingModel?: AIModel;
   private textOnlyModel?: AIModel;
   private ai: AIClient;
+  private apiClient: APIClient | null;
 
   constructor(
     apiKey: string,
@@ -43,6 +48,7 @@ export class GenerativeInpaintService {
     this.inpaintingModel = inpaintingModel;
     this.textOnlyModel = textOnlyModel;
     this.ai = createAIClient(apiKey);
+    this.apiClient = USE_SERVER_AI ? createAPIClient() : null;
   }
 
   /**
@@ -52,6 +58,20 @@ export class GenerativeInpaintService {
     sourceImage: ImageData,
     prompt: string
   ): Promise<ImageData> {
+    // Delegate to server API if enabled
+    if (this.apiClient) {
+      const sourceBase64 = imageDataToBase64(sourceImage);
+      const result = await this.apiClient.generateImage(
+        sourceBase64,
+        prompt,
+        {
+          model: AI_MODELS.IMAGE_GENERATION,
+          logLabel: 'Text-Only Image Edit',
+        }
+      );
+      return await base64ToImageData(result.imageData);
+    }
+
     // Convert ImageData to base64
     const sourceBase64 = imageDataToBase64(sourceImage);
 
@@ -452,6 +472,21 @@ Be extremely specific and detailed so this object can be unambiguously identifie
     maskImage: ImageData,
     prompt: string
   ): Promise<ImageData> {
+    // Delegate to server API if enabled
+    if (this.apiClient) {
+      const sourceBase64 = imageDataToBase64(sourceImage);
+      const maskBase64 = imageDataToBase64(maskImage);
+      const result = await this.apiClient.inpaint(
+        sourceBase64,
+        maskBase64,
+        prompt,
+        {
+          thinkingBudget: THINKING_BUDGETS.LOW,
+        }
+      );
+      return await base64ToImageData(result.imageData);
+    }
+
     // Convert ImageData to base64
     const sourceBase64 = imageDataToBase64(sourceImage);
 

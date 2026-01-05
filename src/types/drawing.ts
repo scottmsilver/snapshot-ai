@@ -43,7 +43,8 @@ export type LayerOperation = typeof LayerOperation[keyof typeof LayerOperation];
 export const GenerativeFillSelectionTool = {
   BRUSH: 'brush',
   RECTANGLE: 'rectangle',
-  LASSO: 'lasso'
+  LASSO: 'lasso',
+  POLYGON: 'polygon'
 } as const;
 
 export type GenerativeFillSelectionTool = typeof GenerativeFillSelectionTool[keyof typeof GenerativeFillSelectionTool];
@@ -54,7 +55,8 @@ export const AIReferenceSubTool = {
   PEN: 'pen',
   LINE: 'line',
   CIRCLE: 'circle',
-  RECTANGLE: 'rectangle'
+  RECTANGLE: 'rectangle',
+  POLYGON: 'polygon'
 } as const;
 
 export type AIReferenceSubTool = typeof AIReferenceSubTool[keyof typeof AIReferenceSubTool];

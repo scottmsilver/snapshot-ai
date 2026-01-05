@@ -8,6 +8,8 @@ import { detectEditRegions, formatEditRegionsForPrompt } from './imageCompareSer
 import type { AIProgressEvent } from '@/types/aiProgress';
 import type { Shape, PenShape, RectShape, CircleShape, ArrowShape } from '@/types/drawing';
 import { DrawingTool } from '@/types/drawing';
+import { createAPIClient, type APIClient } from './apiClient';
+import { base64ToImageData } from '@/utils/maskRendering';
 
 /**
  * Result of the planning phase for AI Move operations
@@ -27,13 +29,18 @@ export interface MovePlan {
 
 const MAX_ITERATIONS = 3;
 
+// Check if we should use server-side API instead of direct Gemini calls
+const USE_SERVER_AI = import.meta.env.VITE_USE_SERVER_AI === 'true';
+
 export class AgenticPainterService {
     private ai: AIClient;
     private underlyingService: GenerativeInpaintService;
+    private apiClient: APIClient | null;
 
     constructor(apiKey: string, underlyingService: GenerativeInpaintService) {
         this.ai = createAIClient(apiKey);
         this.underlyingService = underlyingService;
+        this.apiClient = USE_SERVER_AI ? createAPIClient() : null;
     }
 
     private buildSystemPrompt(userPrompt: string, hasMask: boolean): string {
@@ -166,6 +173,25 @@ You MUST call the gemini_image_painter tool.`;
         onProgress?: (event: AIProgressEvent) => void
     ): Promise<ImageData> {
         console.log('🤖 Agentic Service: Starting agentic edit with high thinking and self-check');
+
+        // Delegate to server API if enabled
+        if (this.apiClient) {
+            console.log('🤖 Agentic Service: Using server API for agentic edit');
+            const sourceBase64 = imageDataToBase64(sourceImage);
+            const maskBase64 = maskImage ? imageDataToBase64(maskImage) : undefined;
+            
+            const result = await this.apiClient.agenticEdit(
+                sourceBase64,
+                prompt,
+                {
+                    maskImage: maskBase64,
+                    maxIterations: MAX_ITERATIONS,
+                    onProgress,
+                }
+            );
+            
+            return await base64ToImageData(result.imageData);
+        }
 
         // Step 1: Agent plans the edit with high thinking budget
         const systemPrompt = this.buildSystemPrompt(prompt, !!maskImage);
@@ -593,7 +619,7 @@ ${error instanceof Error && error.stack ? `**Stack:**\n\`\`\`\n${error.stack}\n\
             blockSize: 8,
             minBlockDensity: 0.25, // Block needs 25% of pixels changed to count
             minBlockCount: 2,      // Need at least 2 connected blocks to form a region
-            colorThreshold: 30,
+            colorThreshold: 12, // DeltaE threshold to suppress subtle, imperceptible changes
         });
 
         // Filter to only significant regions to avoid overwhelming the AI

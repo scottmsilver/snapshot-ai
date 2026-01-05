@@ -6,6 +6,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { aiLogService } from './aiLogService';
 import { THINKING_BUDGETS } from '@/config/aiModels';
+import { createAPIClient } from './apiClient';
 
 export interface AICallOptions {
   /** The model to use */
@@ -40,11 +41,17 @@ export interface AICallResult {
   };
 }
 
+// Check if we should use server-side API instead of direct Gemini calls
+const USE_SERVER_AI = import.meta.env.VITE_USE_SERVER_AI === 'true';
+
 /**
  * Create an AI client with automatic logging
  */
 export function createAIClient(apiKey: string) {
   const genAI = new GoogleGenAI({ apiKey });
+  
+  // If server mode enabled, create API client for delegation
+  const serverClient = USE_SERVER_AI ? createAPIClient() : null;
 
   /**
    * Make an AI call with automatic logging
@@ -60,6 +67,12 @@ export function createAIClient(apiKey: string) {
       logLabel = 'AI Call',
       isImageGeneration = false,
     } = options;
+
+    // Delegate to server API if enabled
+    if (serverClient) {
+      aiLogService.appendThinking(`### ${logLabel}\n\n*Using server API...*\n\n`);
+      return await serverClient.call(options);
+    }
 
     // Extract prompt text and image info for logging
     const { text: promptText, imageInfos } = extractPromptParts(contents);
@@ -170,6 +183,13 @@ export function createAIClient(apiKey: string) {
       includeThoughts = true,
       logLabel = 'AI Call (Streaming)',
     } = options;
+
+    // Delegate to server API if enabled
+    if (serverClient) {
+      aiLogService.appendThinking(`### ${logLabel}\n\n*Using server API (streaming)...*\n\n`);
+      yield* serverClient.callStream(options);
+      return;
+    }
 
     // Extract prompt text and image info for logging
     const { text: promptText, imageInfos } = extractPromptParts(contents);

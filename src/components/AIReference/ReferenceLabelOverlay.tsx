@@ -126,6 +126,7 @@ export const ReferenceLabelOverlay: React.FC<ReferenceLabelOverlayProps> = ({
           { tool: AIReferenceSubTool.LINE, label: 'Line', icon: '╱' },
           { tool: AIReferenceSubTool.CIRCLE, label: 'Circle', icon: '⭕' },
           { tool: AIReferenceSubTool.RECTANGLE, label: 'Rect', icon: '▢' },
+          { tool: AIReferenceSubTool.POLYGON, label: 'Polygon', icon: '⬡' },
         ].map(({ tool, label, icon }) => (
           <button
             key={tool}

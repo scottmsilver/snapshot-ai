@@ -232,6 +232,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  position: relative;
 }
 
 .arrow-icon {
@@ -241,10 +242,56 @@
 }
 
 .interpretation-text {
+  flex: 1;
   font-size: 14px;
   color: #1976d2;
   font-weight: 500;
   line-height: 1.5;
+}
+
+.interpretation-textarea {
+  flex: 1;
+  font-size: 14px;
+  color: #1976d2;
+  font-weight: 500;
+  line-height: 1.5;
+  font-family: inherit;
+  background-color: white;
+  border: 1px solid #90caf9;
+  border-radius: 4px;
+  padding: 8px;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.interpretation-textarea:focus {
+  border-color: #1976d2;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+}
+
+.edit-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1976d2;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.edit-button:hover {
+  background-color: rgba(25, 118, 210, 0.1);
+}
+
+.edit-button:active {
+  background-color: rgba(25, 118, 210, 0.2);
 }
 
 /* Footer */
@@ -288,6 +335,23 @@
 
 .move-confirmation-dialog .btn-edit:hover {
   background-color: #e3f2fd;
+}
+
+.move-confirmation-dialog .btn-replan {
+  border: 1px solid #2196f3;
+  background-color: white;
+  color: #2196f3;
+}
+
+.move-confirmation-dialog .btn-replan:hover:not(:disabled) {
+  background-color: #e3f2fd;
+}
+
+.move-confirmation-dialog .btn-replan:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: #ccc;
+  color: #999;
 }
 
 .move-confirmation-dialog .btn-confirm {

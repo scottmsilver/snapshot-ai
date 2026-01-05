@@ -16,9 +16,9 @@ export interface EditRegion {
   centerX: number;     // Center X coordinate
   centerY: number;     // Center Y coordinate
   pixelCount: number;  // Number of changed pixels in this region
-  /** Average color difference (0-255) across changed pixels - measures edit intensity */
+  /** Average color difference across changed pixels (metric units) */
   avgColorDiff: number;
-  /** Maximum color difference found in this region */
+  /** Maximum color difference found in this region (metric units) */
   maxColorDiff: number;
   /** Perceptual significance score (0-100) combining size and intensity */
   significance: number;
@@ -40,8 +40,9 @@ export interface EditDetectionResult {
  */
 export interface EditDetectionOptions {
   /**
-   * How different RGB values must be to count as "changed" (0-255).
-   * Higher values ignore subtle changes. Default: 30
+   * How different colors must be to count as "changed".
+   * For diffMetric="deltaE", this is ΔE (0-100-ish). For "maxChannel", 0-255.
+   * Higher values ignore subtle changes. Default: 12 (deltaE).
    */
   colorThreshold?: number;
 
@@ -73,13 +74,101 @@ export interface EditDetectionOptions {
    * Helps filter isolated noisy blocks. Default: 2
    */
   minBlockCount?: number;
+
+  /**
+   * Color difference metric to use.
+   * "deltaE" approximates human perception; "maxChannel" is legacy RGB max-diff.
+   */
+  diffMetric?: 'deltaE' | 'maxChannel';
 }
 
-const DEFAULT_COLOR_THRESHOLD = 30;
+const DEFAULT_COLOR_THRESHOLD = 12;
 const DEFAULT_MIN_REGION_SIZE = 10;
 const DEFAULT_BLOCK_SIZE = 8;
 const DEFAULT_MIN_BLOCK_DENSITY = 0.25;
 const DEFAULT_MIN_BLOCK_COUNT = 2;
+const DEFAULT_DIFF_METRIC: NonNullable<EditDetectionOptions['diffMetric']> = 'deltaE';
+
+const SRGB_TO_LINEAR = new Float32Array(256);
+for (let i = 0; i < 256; i++) {
+  const c = i / 255;
+  SRGB_TO_LINEAR[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function labF(t: number): number {
+  return t > 0.008856 ? Math.cbrt(t) : (7.787 * t) + (16 / 116);
+}
+
+function deltaE76FromRgb(
+  r1: number,
+  g1: number,
+  b1: number,
+  r2: number,
+  g2: number,
+  b2: number
+): number {
+  const rl1 = SRGB_TO_LINEAR[r1];
+  const gl1 = SRGB_TO_LINEAR[g1];
+  const bl1 = SRGB_TO_LINEAR[b1];
+
+  const rl2 = SRGB_TO_LINEAR[r2];
+  const gl2 = SRGB_TO_LINEAR[g2];
+  const bl2 = SRGB_TO_LINEAR[b2];
+
+  // D65 reference white
+  const x1 = (rl1 * 0.4124 + gl1 * 0.3576 + bl1 * 0.1805) / 0.95047;
+  const y1 = (rl1 * 0.2126 + gl1 * 0.7152 + bl1 * 0.0722) / 1.0;
+  const z1 = (rl1 * 0.0193 + gl1 * 0.1192 + bl1 * 0.9505) / 1.08883;
+
+  const x2 = (rl2 * 0.4124 + gl2 * 0.3576 + bl2 * 0.1805) / 0.95047;
+  const y2 = (rl2 * 0.2126 + gl2 * 0.7152 + bl2 * 0.0722) / 1.0;
+  const z2 = (rl2 * 0.0193 + gl2 * 0.1192 + bl2 * 0.9505) / 1.08883;
+
+  const fx1 = labF(x1);
+  const fy1 = labF(y1);
+  const fz1 = labF(z1);
+
+  const fx2 = labF(x2);
+  const fy2 = labF(y2);
+  const fz2 = labF(z2);
+
+  const L1 = (116 * fy1) - 16;
+  const a1 = 500 * (fx1 - fy1);
+  const b1Lab = 200 * (fy1 - fz1);
+
+  const L2 = (116 * fy2) - 16;
+  const a2 = 500 * (fx2 - fy2);
+  const b2Lab = 200 * (fy2 - fz2);
+
+  const dL = L1 - L2;
+  const da = a1 - a2;
+  const db = b1Lab - b2Lab;
+
+  return Math.sqrt(dL * dL + da * da + db * db);
+}
+
+function getPixelDiff(
+  original: ImageData,
+  edited: ImageData,
+  idx: number,
+  diffMetric: NonNullable<EditDetectionOptions['diffMetric']>
+): number {
+  const r1 = original.data[idx];
+  const g1 = original.data[idx + 1];
+  const b1 = original.data[idx + 2];
+  const r2 = edited.data[idx];
+  const g2 = edited.data[idx + 1];
+  const b2 = edited.data[idx + 2];
+
+  if (diffMetric === 'maxChannel') {
+    const rDiff = Math.abs(r1 - r2);
+    const gDiff = Math.abs(g1 - g2);
+    const bDiff = Math.abs(b1 - b2);
+    return Math.max(rDiff, gDiff, bDiff);
+  }
+
+  return deltaE76FromRgb(r1, g1, b1, r2, g2, b2);
+}
 
 /**
  * Compare two images and detect regions where edits occurred.
@@ -102,6 +191,7 @@ export function detectEditRegions(
     blockSize = DEFAULT_BLOCK_SIZE,
     minBlockDensity = DEFAULT_MIN_BLOCK_DENSITY,
     minBlockCount = DEFAULT_MIN_BLOCK_COUNT,
+    diffMetric = DEFAULT_DIFF_METRIC,
   } = options;
 
   // Validate dimensions match
@@ -119,7 +209,8 @@ export function detectEditRegions(
       colorThreshold,
       blockSize,
       minBlockDensity,
-      minBlockCount
+      minBlockCount,
+      diffMetric
     );
   }
 
@@ -127,7 +218,8 @@ export function detectEditRegions(
     original,
     edited,
     colorThreshold,
-    minRegionSize
+    minRegionSize,
+    diffMetric
   );
 }
 
@@ -149,7 +241,8 @@ function detectEditRegionsBlockBased(
   colorThreshold: number,
   blockSize: number,
   minBlockDensity: number,
-  minBlockCount: number
+  minBlockCount: number,
+  diffMetric: NonNullable<EditDetectionOptions['diffMetric']>
 ): EditDetectionResult {
   const width = original.width;
   const height = original.height;
@@ -184,11 +277,7 @@ function detectEditRegionsBlockBased(
       for (let y = startY; y < endY; y++) {
         for (let x = startX; x < endX; x++) {
           const idx = (y * width + x) * 4;
-
-          const rDiff = Math.abs(original.data[idx] - edited.data[idx]);
-          const gDiff = Math.abs(original.data[idx + 1] - edited.data[idx + 1]);
-          const bDiff = Math.abs(original.data[idx + 2] - edited.data[idx + 2]);
-          const pixelDiff = Math.max(rDiff, gDiff, bDiff);
+          const pixelDiff = getPixelDiff(original, edited, idx, diffMetric);
 
           if (pixelDiff > colorThreshold) {
             changedInBlock++;
@@ -271,7 +360,8 @@ function detectEditRegionsPixelBased(
   original: ImageData,
   edited: ImageData,
   colorThreshold: number,
-  minRegionSize: number
+  minRegionSize: number,
+  diffMetric: NonNullable<EditDetectionOptions['diffMetric']>
 ): EditDetectionResult {
   const width = original.width;
   const height = original.height;
@@ -288,10 +378,7 @@ function detectEditRegionsPixelBased(
       const maskIdx = y * width + x;
 
       // Compare RGB values (ignore alpha)
-      const rDiff = Math.abs(original.data[idx] - edited.data[idx]);
-      const gDiff = Math.abs(original.data[idx + 1] - edited.data[idx + 1]);
-      const bDiff = Math.abs(original.data[idx + 2] - edited.data[idx + 2]);
-      const pixelDiff = Math.max(rDiff, gDiff, bDiff);
+      const pixelDiff = getPixelDiff(original, edited, idx, diffMetric);
 
       // Consider changed if any channel differs beyond threshold
       if (pixelDiff > colorThreshold) {

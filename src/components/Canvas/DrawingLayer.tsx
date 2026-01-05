@@ -114,11 +114,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
   // Track if mouse is down for generative fill
   const [isGenerativeFillDrawing, setIsGenerativeFillDrawing] = useState(false);
+  const [polygonPreviewPoint, setPolygonPreviewPoint] = useState<Point | null>(null);
 
   // Track markup drawing state for AI Reference mode
   const [isMarkupDrawing, setIsMarkupDrawing] = useState(false);
   const [markupStartPoint, setMarkupStartPoint] = useState<Point | null>(null);
   const [markupTempPoints, setMarkupTempPoints] = useState<Point[]>([]);
+  const [isPolygonMarkupDrawing, setIsPolygonMarkupDrawing] = useState(false);
+  const [polygonMarkupPreviewPoint, setPolygonMarkupPreviewPoint] = useState<Point | null>(null);
 
   const {
     context: selectionContext,
@@ -385,6 +388,47 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         if (drawingState.aiReferenceSubTool === AIReferenceSubTool.PIN) {
           // Drop a pin at the click location
           addReferencePoint(adjustedPos);
+        } else if (drawingState.aiReferenceSubTool === AIReferenceSubTool.POLYGON) {
+          // Handle polygon click-based drawing
+          if (!isPolygonMarkupDrawing) {
+            // First click: start polygon
+            setIsPolygonMarkupDrawing(true);
+            setMarkupTempPoints([adjustedPos]);
+          } else {
+            // Subsequent clicks: add point or close polygon
+            const firstPoint = markupTempPoints[0];
+            const dx = adjustedPos.x - firstPoint.x;
+            const dy = adjustedPos.y - firstPoint.y;
+            const distanceToFirst = Math.sqrt(dx * dx + dy * dy);
+            
+            // If clicked near first point (within 10px) and have at least 3 points, close polygon
+            if (distanceToFirst < 10 && markupTempPoints.length >= 3) {
+              // Close the polygon
+              const flatPoints = markupTempPoints.flatMap(p => [p.x, p.y]);
+              const timestamp = Date.now();
+              const newShape: PenShape = {
+                id: `markup-polygon-${timestamp}`,
+                type: DrawingTool.PEN,
+                points: flatPoints,
+                style: { stroke: '#FF6B00', strokeWidth: 3, opacity: 1, lineCap: 'round', lineJoin: 'round' },
+                visible: true,
+                locked: true,
+                zIndex: 0,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                isMarkup: true,
+              };
+              addAiMarkupShape(newShape);
+              
+              // Reset polygon drawing state
+              setIsPolygonMarkupDrawing(false);
+              setMarkupTempPoints([]);
+              setPolygonMarkupPreviewPoint(null);
+            } else {
+              // Add point to polygon
+              setMarkupTempPoints(prev => [...prev, adjustedPos]);
+            }
+          }
         } else {
           // Start markup drawing for pen/circle/rectangle sub-tools
           setIsMarkupDrawing(true);
@@ -466,16 +510,26 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       };
 
       // Handle markup drawing for AI Reference mode
-      if (isMarkupDrawing && drawingState.aiReferenceMode) {
+      if (drawingState.aiReferenceMode) {
         const subTool = drawingState.aiReferenceSubTool;
-        if (subTool === AIReferenceSubTool.PEN) {
-          // For pen, accumulate points
-          setMarkupTempPoints(prev => [...prev, adjustedPos]);
-        } else {
-          // For line/circle/rectangle, just update the end point
-          setMarkupTempPoints(prev => prev.length > 0 ? [prev[0], adjustedPos] : [adjustedPos]);
+        
+        // Handle polygon preview
+        if (subTool === AIReferenceSubTool.POLYGON && isPolygonMarkupDrawing) {
+          setPolygonMarkupPreviewPoint(adjustedPos);
+          return;
         }
-        return;
+        
+        // Handle other markup tools
+        if (isMarkupDrawing) {
+          if (subTool === AIReferenceSubTool.PEN) {
+            // For pen, accumulate points
+            setMarkupTempPoints(prev => [...prev, adjustedPos]);
+          } else {
+            // For line/circle/rectangle, just update the end point
+            setMarkupTempPoints(prev => prev.length > 0 ? [prev[0], adjustedPos] : [adjustedPos]);
+          }
+          return;
+        }
       }
 
       if (activeTool === DrawingTool.SELECT) {
@@ -696,10 +750,41 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       // Control point dragging is handled by state machine
     };
 
+    // Double-click handler to close polygon
+    const handleDoubleClick = (_e: Konva.KonvaEventObject<MouseEvent>): void => {
+      if (drawingState.aiReferenceMode && 
+          drawingState.aiReferenceSubTool === AIReferenceSubTool.POLYGON && 
+          isPolygonMarkupDrawing && 
+          markupTempPoints.length >= 3) {
+        // Close the polygon
+        const flatPoints = markupTempPoints.flatMap(p => [p.x, p.y]);
+        const timestamp = Date.now();
+        const newShape: PenShape = {
+          id: `markup-polygon-${timestamp}`,
+          type: DrawingTool.PEN,
+          points: flatPoints,
+          style: { stroke: '#FF6B00', strokeWidth: 3, opacity: 1, lineCap: 'round', lineJoin: 'round' },
+          visible: true,
+          locked: true,
+          zIndex: 0,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          isMarkup: true,
+        };
+        addAiMarkupShape(newShape);
+        
+        // Reset polygon drawing state
+        setIsPolygonMarkupDrawing(false);
+        setMarkupTempPoints([]);
+        setPolygonMarkupPreviewPoint(null);
+      }
+    };
+
     // Add event listeners
     stage.on('mousedown touchstart', handleMouseDown);
     stage.on('mousemove touchmove', handleMouseMove);
     stage.on('mouseup touchend', handleMouseUp);
+    stage.on('dblclick', handleDoubleClick);
 
     // Keyboard handler for escape and delete
     const handleKeyDown = (e: KeyboardEvent): void => {
@@ -725,6 +810,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       stage.off('mousedown touchstart', handleMouseDown);
       stage.off('mousemove touchmove', handleMouseMove);
       stage.off('mouseup touchend', handleMouseUp);
+      stage.off('dblclick', handleDoubleClick);
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [
@@ -771,6 +857,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     isMarkupDrawing,
     markupStartPoint,
     markupTempPoints,
+    isPolygonMarkupDrawing,
+    polygonMarkupPreviewPoint,
     drawingState.aiReferenceMode,
     drawingState.aiReferenceSubTool,
     addAiMarkupShape,
@@ -779,6 +867,25 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
   // Render markup preview for AI Reference mode
   const renderMarkupPreview = (): React.ReactNode => {
+    // Check for polygon drawing separately since it doesn't use isMarkupDrawing
+    if (drawingState.aiReferenceMode && drawingState.aiReferenceSubTool === AIReferenceSubTool.POLYGON && isPolygonMarkupDrawing && markupTempPoints.length > 0) {
+      const flatPoints = markupTempPoints.flatMap(p => [p.x, p.y]);
+      return (
+        <>
+          <Line points={flatPoints} stroke="#FF6B00" strokeWidth={3} listening={false} />
+          {markupTempPoints.map((p, i) => (
+            <Circle key={i} x={p.x} y={p.y} radius={4} fill="#FF6B00" listening={false} />
+          ))}
+          {polygonMarkupPreviewPoint && markupTempPoints.length > 0 && (
+            <Line 
+              points={[markupTempPoints[markupTempPoints.length-1].x, markupTempPoints[markupTempPoints.length-1].y, polygonMarkupPreviewPoint.x, polygonMarkupPreviewPoint.y]}
+              stroke="#FF6B00" strokeWidth={2} dash={[5,5]} listening={false}
+            />
+          )}
+        </>
+      );
+    }
+    
     if (!isMarkupDrawing || !drawingState.aiReferenceMode || markupTempPoints.length === 0) {
       return null;
     }
@@ -1792,6 +1899,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     switch (shape.type) {
       case DrawingTool.PEN:
         const penShape = shape as PenShape;
+        // Check if this is a polygon markup (closed shape with straight edges)
+        const isPolygonMarkup = penShape.isMarkup && penShape.id.includes('polygon');
         return (
           <Line
             key={shape.id}
@@ -1801,7 +1910,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
             strokeWidth={penShape.style.strokeWidth * (isHovered && !isSelected ? 1.2 : 1)}
             lineCap={penShape.style.lineCap}
             lineJoin={penShape.style.lineJoin}
-            tension={penShape.tension || 0.5}
+            tension={isPolygonMarkup ? 0 : (penShape.tension || 0.5)}
+            closed={isPolygonMarkup}
             globalCompositeOperation="source-over"
             hitStrokeWidth={Math.max(penShape.style.strokeWidth, 10)}
             perfectDrawEnabled={false}
@@ -3103,16 +3213,43 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     );
   };
 
+  // Helper function to check if a point is near the first point of the polygon
+  const isNearFirstPoint = (currentPos: Point, firstPoint: Point, threshold: number = 10): boolean => {
+    const dx = currentPos.x - firstPoint.x;
+    const dy = currentPos.y - firstPoint.y;
+    return Math.sqrt(dx * dx + dy * dy) <= threshold;
+  };
+
   // Generative fill mouse event handlers
   const handleGenerativeFillMouseDown = (e: Konva.KonvaEventObject<MouseEvent>): void => {
     if (!drawingState.generativeFillMode?.isActive) return;
 
-    setIsGenerativeFillDrawing(true);
-
     const pos = e.target.getStage()?.getPointerPosition();
     if (!pos) return;
 
-    const { selectionTool } = drawingState.generativeFillMode;
+    const { selectionTool, selectionPoints } = drawingState.generativeFillMode;
+
+    if (selectionTool === 'polygon') {
+      // Polygon is click-based, not drag-based
+      const newPoint = { x: pos.x / zoomLevel, y: pos.y / zoomLevel };
+      
+      // Check if we should close the polygon
+      if (selectionPoints.length >= 3 && isNearFirstPoint(newPoint, selectionPoints[0], 10 / zoomLevel)) {
+        // Close polygon - trigger completion
+        // TODO: This will be handled by the completion logic
+        setPolygonPreviewPoint(null);
+        return;
+      }
+      
+      // Add point to polygon
+      dispatch({
+        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
+        points: [...selectionPoints, newPoint],
+      });
+      return;
+    }
+
+    setIsGenerativeFillDrawing(true);
 
     if (selectionTool === 'brush' || selectionTool === 'lasso') {
       // Start collecting points
@@ -3130,13 +3267,22 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   };
 
   const handleGenerativeFillMouseMove = (e: Konva.KonvaEventObject<MouseEvent>): void => {
-    if (!drawingState.generativeFillMode?.isActive || !isGenerativeFillDrawing) return;
+    if (!drawingState.generativeFillMode?.isActive) return;
     if (!e.target.getStage()) return;
 
     const pos = e.target.getStage()!.getPointerPosition();
     if (!pos) return;
 
     const { selectionTool, selectionPoints, selectionRectangle } = drawingState.generativeFillMode;
+
+    // Handle polygon preview point
+    if (selectionTool === 'polygon') {
+      setPolygonPreviewPoint({ x: pos.x / zoomLevel, y: pos.y / zoomLevel });
+      return;
+    }
+
+    // Other tools require mouse to be down
+    if (!isGenerativeFillDrawing) return;
 
     if ((selectionTool === 'brush' || selectionTool === 'lasso') && selectionPoints.length > 0) {
       // Add point to path
@@ -3161,6 +3307,18 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     setIsGenerativeFillDrawing(false);
   };
 
+  const handleGenerativeFillDoubleClick = (): void => {
+    if (!drawingState.generativeFillMode?.isActive) return;
+    
+    const { selectionTool, selectionPoints } = drawingState.generativeFillMode;
+    
+    // Close polygon on double-click if we have at least 3 points
+    if (selectionTool === 'polygon' && selectionPoints.length >= 3) {
+      // TODO: Trigger polygon completion
+      setPolygonPreviewPoint(null);
+    }
+  };
+
   return (
     <Layer
       name="drawingLayer"
@@ -3179,6 +3337,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           onMouseDown={handleGenerativeFillMouseDown}
           onMouseMove={handleGenerativeFillMouseMove}
           onMouseUp={handleGenerativeFillMouseUp}
+          onDblClick={handleGenerativeFillDoubleClick}
         />
       )}
 
@@ -3205,6 +3364,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           selectionPoints={drawingState.generativeFillMode.selectionPoints}
           selectionRectangle={drawingState.generativeFillMode.selectionRectangle}
           brushWidth={drawingState.generativeFillMode.brushWidth}
+          polygonPreviewPoint={polygonPreviewPoint ?? undefined}
         />
       )}
 
