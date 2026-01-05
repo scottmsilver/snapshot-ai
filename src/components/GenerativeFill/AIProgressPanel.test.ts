@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wrapCoordinatesInHtml } from './AIProgressPanel';
+import { wrapCoordinatesInHtml } from './aiProgressMarkup';
 
 describe('wrapCoordinatesInHtml', () => {
   it('wraps decimal region coordinates', () => {
