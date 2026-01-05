@@ -870,10 +870,8 @@ export function createGenerativeService(
   textOnlyModel?: AIModel,
   apiEndpointOverride?: string
 ): GenerativeInpaintService {
-  const env =
-    typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env
-      ? (import.meta as { env?: Record<string, string> }).env
-      : {};
+  const meta = typeof import.meta !== 'undefined' ? (import.meta as { env?: Record<string, string> }) : undefined;
+  const env = meta?.env ?? {};
 
   // Priority: provided key > environment variables
   const key = apiKey || env.VITE_GEMINI_API_KEY || env.VITE_GENERATIVE_API_KEY || '';
