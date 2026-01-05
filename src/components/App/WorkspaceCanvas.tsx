@@ -68,6 +68,36 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
 }) => {
   const { state: drawingState, setAiMoveState } = useDrawingContext();
   const { state: aiProgressState } = useAIProgress();
+  const [showRainbowBorder, setShowRainbowBorder] = React.useState(false);
+  const lastCanvasSizeRef = React.useRef<CanvasSize | null>(null);
+
+  // Load visual settings
+  const loadRainbowSetting = React.useCallback(() => {
+    try {
+      const cached = localStorage.getItem('screenmark_settings_show_rainbow_border');
+      setShowRainbowBorder(cached === 'true');
+    } catch (e) {
+      console.warn('Failed to load rainbow border setting:', e);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadRainbowSetting();
+    window.addEventListener('storage', loadRainbowSetting);
+    // Also check when status changes to 'thinking' in case it was just updated
+    if (aiProgressState.thinkingStatus === 'thinking') {
+      loadRainbowSetting();
+    }
+    return () => window.removeEventListener('storage', loadRainbowSetting);
+  }, [loadRainbowSetting, aiProgressState.thinkingStatus]);
+
+  React.useEffect(() => {
+    if (canvasSize) {
+      lastCanvasSizeRef.current = canvasSize;
+    }
+  }, [canvasSize]);
+
+  const effectiveCanvasSize = canvasSize ?? lastCanvasSizeRef.current;
 
   // Handle mouse move during AI Move drag phase
   const handleMouseMove = React.useCallback(() => {
@@ -212,7 +242,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
     );
   }
 
-  if (!canvasSize) {
+  if (!effectiveCanvasSize) {
     return null;
   }
 
@@ -224,15 +254,29 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
     const gridSize = 20;
     const lines: React.ReactNode[] = [];
 
-    for (let x = 0; x <= canvasSize.width; x += gridSize) {
+    for (let x = 0; x <= effectiveCanvasSize.width; x += gridSize) {
       lines.push(
-        <Line key={`v-${x}`} name="gridLine" points={[x, 0, x, canvasSize.height]} stroke="#e0e0e0" strokeWidth={1} listening={false} />,
+        <Line
+          key={`v-${x}`}
+          name="gridLine"
+          points={[x, 0, x, effectiveCanvasSize.height]}
+          stroke="#e0e0e0"
+          strokeWidth={1}
+          listening={false}
+        />,
       );
     }
 
-    for (let y = 0; y <= canvasSize.height; y += gridSize) {
+    for (let y = 0; y <= effectiveCanvasSize.height; y += gridSize) {
       lines.push(
-        <Line key={`h-${y}`} name="gridLine" points={[0, y, canvasSize.width, y]} stroke="#e0e0e0" strokeWidth={1} listening={false} />,
+        <Line
+          key={`h-${y}`}
+          name="gridLine"
+          points={[0, y, effectiveCanvasSize.width, y]}
+          stroke="#e0e0e0"
+          strokeWidth={1}
+          listening={false}
+        />,
       );
     }
 
@@ -283,16 +327,16 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
         <div
           style={{
             position: 'relative',
-            width: canvasSize.width * zoomLevel,
-            height: canvasSize.height * zoomLevel,
+            width: effectiveCanvasSize.width * zoomLevel,
+            height: effectiveCanvasSize.height * zoomLevel,
             overflow: 'visible',
           }}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
         >
           <Stage
-            width={canvasSize.width * zoomLevel}
-            height={canvasSize.height * zoomLevel}
+            width={effectiveCanvasSize.width * zoomLevel}
+            height={effectiveCanvasSize.height * zoomLevel}
             ref={stageRef}
             scaleX={1}
             scaleY={1}
@@ -306,7 +350,14 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
             }}
           >
             <Layer name="backgroundLayer" scaleX={zoomLevel} scaleY={zoomLevel}>
-              <Rect name="canvasBackground" x={0} y={0} width={canvasSize.width} height={canvasSize.height} fill={canvasBackground} />
+              <Rect
+                name="canvasBackground"
+                x={0}
+                y={0}
+                width={effectiveCanvasSize.width}
+                height={effectiveCanvasSize.height}
+                fill={canvasBackground}
+              />
               {renderGridLines()}
             </Layer>
 
@@ -332,16 +383,17 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
           {/* Coordinate highlight marker (from AI console hover) */}
           <CoordinateMarker
             zoomLevel={zoomLevel}
-            canvasWidth={canvasSize.width}
-            canvasHeight={canvasSize.height}
+            canvasWidth={effectiveCanvasSize.width}
+            canvasHeight={effectiveCanvasSize.height}
           />
           {/* Apple Intelligence-style gradient border when AI is thinking */}
           <ThinkingOverlay
             status={aiProgressState.thinkingStatus}
-            canvasWidth={canvasSize.width}
-            canvasHeight={canvasSize.height}
+            canvasWidth={effectiveCanvasSize.width}
+            canvasHeight={effectiveCanvasSize.height}
             zoomLevel={zoomLevel}
             image={aiProgressState.thinkingImage}
+            showRainbowBorder={showRainbowBorder}
           />
         </div>
       </div>

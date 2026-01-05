@@ -44,6 +44,8 @@ type ShapeCommonProps = {
   onMouseLeave: (e: Konva.KonvaEventObject<MouseEvent>) => void;
 };
 
+const imageCache = new Map<string, HTMLImageElement>();
+
 // Component for rendering image shapes
 const ImageShapeComponent: React.FC<{
   shape: ImageShape;
@@ -55,8 +57,14 @@ const ImageShapeComponent: React.FC<{
   // Load image from base64 data
   useEffect(() => {
     if (shape.imageData) {
+      const cachedImage = imageCache.get(shape.imageData);
+      if (cachedImage) {
+        setLoadedImage(cachedImage);
+        return;
+      }
       const img = new window.Image();
       img.onload = () => {
+        imageCache.set(shape.imageData, img);
         setLoadedImage(img);
       };
       img.src = shape.imageData;
@@ -3180,13 +3188,13 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       {/* Render AI markup shapes (separate from main shapes, not in undo history) */}
       {drawingState.aiMarkupShapes.map(renderShape)}
 
-      {/* Render temporary drawing preview - with high z-index */}
-      <Group listening={false} zIndex={999999}>
+      {/* Render temporary drawing preview above other shapes */}
+      <Group listening={false}>
         {renderTempDrawing()}
       </Group>
 
       {/* Render markup preview for AI Reference mode */}
-      <Group listening={false} zIndex={999998}>
+      <Group listening={false}>
         {renderMarkupPreview()}
       </Group>
 
