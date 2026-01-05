@@ -15,6 +15,14 @@ export const wrapCoordinatesInHtml = (html: string): string => {
     }
   );
 
+  // Wrap bracket region patterns: [x1, y1, x2, y2]
+  processed = processed.replace(
+    /(?<![A-Za-z0-9+/="])\[(\d{1,5}(?:\.\d+)?),\s*(\d{1,5}(?:\.\d+)?),\s*(\d{1,5}(?:\.\d+)?),\s*(\d{1,5}(?:\.\d+)?)\](?![A-Za-z0-9+/=])/g,
+    (match, x1, y1, x2, y2) => {
+      return `<span class="region-highlight" data-x1="${x1}" data-y1="${y1}" data-x2="${x2}" data-y2="${y2}" style="cursor:pointer;background:rgba(255,107,0,0.15);border-radius:3px;padding:0 2px;font-family:monospace;color:#e65100;border-bottom:1px dashed #e65100;">${match}</span>`;
+    }
+  );
+
   // Then wrap remaining standalone coordinates: (123, 456) or (123,456)
   // but NOT inside base64 data or URLs
   processed = processed.replace(

@@ -32,4 +32,15 @@ describe('wrapCoordinatesInHtml', () => {
     expect(output).toContain('data-x="50"');
     expect(output).toContain('data-y="300"');
   });
+
+  it('wraps bracket region coordinates', () => {
+    const input = 'Bounding box: [150, 340, 200, 390]';
+    const output = wrapCoordinatesInHtml(input);
+
+    expect(output).toContain('class="region-highlight"');
+    expect(output).toContain('data-x1="150"');
+    expect(output).toContain('data-y1="340"');
+    expect(output).toContain('data-x2="200"');
+    expect(output).toContain('data-y2="390"');
+  });
 });
