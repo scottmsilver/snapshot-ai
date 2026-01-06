@@ -22,6 +22,8 @@ export function getApiUrl(): string {
   return import.meta.env.VITE_API_URL || DEFAULT_API_URL;
 }
 
+
+
 /**
  * API endpoint paths
  * Note: No leading slashes - ky uses these with prefixUrl
@@ -36,8 +38,11 @@ export const API_ENDPOINTS = {
   /** POST /api/ai/inpaint - Two-step inpainting process */
   INPAINT: 'api/ai/inpaint',
   
-  /** POST /api/ai/agentic/edit - SSE streaming agentic edit with iterations */
+  /** POST /api/ai/agentic/edit - SSE streaming agentic edit with iterations (Express) */
   AGENTIC_EDIT: 'api/ai/agentic/edit',
+  
+  /** POST /api/python/agentic/edit - SSE streaming agentic edit with LangGraph (proxied to Python) */
+  AGENTIC_EDIT_LANGGRAPH: 'api/python/agentic/edit',
 } as const;
 
 /**

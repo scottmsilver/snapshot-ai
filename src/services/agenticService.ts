@@ -172,13 +172,15 @@ You MUST call the gemini_image_painter tool.`;
         sourceImage: ImageData,
         prompt: string,
         maskImage?: ImageData,
-        onProgress?: (event: AIProgressEvent) => void
+        onProgress?: (event: AIProgressEvent) => void,
+        options?: { useLangGraph?: boolean }
     ): Promise<ImageData> {
         console.log('🤖 Agentic Service: Starting agentic edit with high thinking and self-check');
 
         // Delegate to server API if enabled
         if (this.apiClient) {
-            console.log('🤖 Agentic Service: Using server API for agentic edit');
+            const useLangGraph = options?.useLangGraph ?? false;
+            console.log(`🤖 Agentic Service: Using server API for agentic edit (LangGraph: ${useLangGraph})`);
             const sourceBase64 = imageDataToBase64(sourceImage);
             const maskBase64 = maskImage ? imageDataToBase64(maskImage) : undefined;
             
@@ -189,6 +191,7 @@ You MUST call the gemini_image_painter tool.`;
                     maskImage: maskBase64,
                     maxIterations: MAX_ITERATIONS,
                     onProgress,
+                    useLangGraph,
                 }
             );
             

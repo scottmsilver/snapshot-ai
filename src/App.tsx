@@ -360,14 +360,16 @@ function MainApp(): React.ReactElement {
           iteration: { current: 0, max: 3 }
         });
 
-        // Get settings for API key
+        // Get settings for API key and LangGraph preference
         let geminiApiKey: string | null = null;
+        let useLangGraph = false;
         if (authContext?.isAuthenticated && authContext?.getAccessToken) {
           try {
             const accessToken = authContext.getAccessToken();
             if (accessToken) {
               await settingsManager.initialize(accessToken);
               geminiApiKey = await settingsManager.getGeminiApiKey();
+              useLangGraph = await settingsManager.getUseLangGraph();
             }
           } catch (error) {
             console.error('Failed to get settings:', error);
@@ -413,7 +415,8 @@ function MainApp(): React.ReactElement {
           sourceImageData,
           movePrompt,
           undefined, // no mask - let AI figure out what to move based on coordinates
-          updateProgress
+          updateProgress,
+          { useLangGraph }
         );
         const remaskedResult = applySmartTransparencyMask(result, sourceImageData, alphaMaskImageData);
 
@@ -827,6 +830,7 @@ function MainApp(): React.ReactElement {
         let textOnlyModel: string | null = null;
         let googleCloudProjectId: string | null = null;
         let oauthAccessToken: string | null = null;
+        let useLangGraph = false;
 
         if (authContext?.isAuthenticated && authContext?.getAccessToken) {
           try {
@@ -838,6 +842,7 @@ function MainApp(): React.ReactElement {
               inpaintingModel = await settingsManager.getInpaintingModel();
               textOnlyModel = await settingsManager.getTextOnlyModel();
               googleCloudProjectId = await settingsManager.getGoogleCloudProjectId();
+              useLangGraph = await settingsManager.getUseLangGraph();
             }
           } catch (error) {
             console.error('Failed to get settings:', error);
@@ -892,8 +897,8 @@ function MainApp(): React.ReactElement {
 
         // Call edit() method which handles both inpainting and text-only modes
         const resultImageData = mode === 'inpainting' && maskExport
-          ? await agenticService.edit(sourceImageData, prompt, maskExport.maskImageData, updateProgress)
-          : await agenticService.edit(sourceImageData, prompt, undefined, updateProgress);
+          ? await agenticService.edit(sourceImageData, prompt, maskExport.maskImageData, updateProgress, { useLangGraph })
+          : await agenticService.edit(sourceImageData, prompt, undefined, updateProgress, { useLangGraph });
         const remaskedResult = applySmartTransparencyMask(
           resultImageData,
           sourceImageData,
@@ -975,6 +980,7 @@ function MainApp(): React.ReactElement {
     canvasHeight: number;
     alphaMaskImageData: ImageData;
     geminiApiKey: string;
+    useLangGraph: boolean;
   } | null>(null);
 
   // AI Reference Mode - Manipulation Handler (now with confirmation)
@@ -997,14 +1003,16 @@ function MainApp(): React.ReactElement {
       const maskCtx = maskCanvas.getContext('2d')!;
       const alphaMaskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
 
-      // Get API key
+      // Get API key and LangGraph preference
       let geminiApiKey: string | null = null;
+      let useLangGraph = false;
       if (authContext?.isAuthenticated && authContext?.getAccessToken) {
         try {
           const accessToken = authContext.getAccessToken();
           if (accessToken) {
             await settingsManager.initialize(accessToken);
             geminiApiKey = await settingsManager.getGeminiApiKey();
+            useLangGraph = await settingsManager.getUseLangGraph();
           }
         } catch (error) {
           console.error('Failed to get settings:', error);
@@ -1030,6 +1038,7 @@ function MainApp(): React.ReactElement {
         canvasHeight: canvas.height,
         alphaMaskImageData,
         geminiApiKey: effectiveGeminiKey,
+        useLangGraph,
       };
 
       // Open confirmation dialog and start planning
@@ -1082,6 +1091,7 @@ function MainApp(): React.ReactElement {
       referencePoints,
       markupShapes,
       command,
+      useLangGraph,
     } = pendingManipulationRef.current;
 
     // Close confirmation and clear reference mode
@@ -1149,7 +1159,8 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
         sourceImageData,
         enrichedPrompt,
         undefined,
-        updateProgress
+        updateProgress,
+        { useLangGraph }
       );
       const remaskedResult = applySmartTransparencyMask(
         resultImageData,

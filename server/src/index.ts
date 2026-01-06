@@ -11,6 +11,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import aiRoutes from './routes/ai.js';
 import imageRoutes from './routes/images.js';
 import agenticRoutes from './routes/agentic.js';
@@ -31,12 +32,16 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ============================================================================
-// Middleware
+// Python proxy config - defined early so we can reference in middleware
 // ============================================================================
 
-// CORS configuration
-// In production, set ALLOWED_ORIGINS to your frontend domain(s)
-// Example: ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
+const PYTHON_SERVER_URL = process.env.PYTHON_SERVER_URL || 'http://localhost:8001';
+const ENABLE_PYTHON_PROXY = process.env.ENABLE_PYTHON_PROXY === 'true';
+
+// ============================================================================
+// CORS Configuration (applies to all routes including proxy)
+// ============================================================================
+
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : [process.env.CLIENT_URL || 'http://localhost:5173'];
@@ -62,6 +67,77 @@ app.use(cors({
 
 // Security headers (helmet)
 app.use(securityHeaders);
+
+// ============================================================================
+// Python Server Proxy (Phase 4)
+// IMPORTANT: Must be BEFORE express.json() to preserve raw request body
+// ============================================================================
+
+if (ENABLE_PYTHON_PROXY) {
+  console.log(`🐍 Python proxy enabled: ${PYTHON_SERVER_URL}`);
+  
+  /**
+   * Proxy /api/python/* to Python server /api/*
+   * Express mounted at /api/python strips that prefix, so req.url is just /echo
+   * We need to prepend /api to get /api/echo on the Python server
+   */
+  app.use('/api/python', (req, res, next) => {
+    console.log(`🐍 Python proxy intercepted: ${req.method} ${req.url}`);
+    next();
+  }, createProxyMiddleware({
+    target: PYTHON_SERVER_URL,
+    changeOrigin: true,
+    pathRewrite: (path) => {
+      const newPath = `/api${path}`;
+      console.log(`🔀 pathRewrite: "${path}" → "${newPath}"`);
+      return newPath;
+    },
+    on: {
+      proxyReq: (proxyReq, req) => {
+        console.log(`🔀 proxyReq: method=${req.method}, url=${req.url}, path=${proxyReq.path}`);
+      },
+      proxyRes: (proxyRes, req) => {
+        console.log(`🔀 proxyRes: ${proxyRes.statusCode} for ${req.url}`);
+      },
+      error: (err, req, res) => {
+        console.error(`❌ Proxy error for ${req.url}:`, err.message);
+        if (res && 'writeHead' in res) {
+          (res as Response).status(502).json({
+            error: 'Python server unavailable',
+            details: err.message,
+          });
+        }
+      },
+    },
+  }));
+
+  /**
+   * Proxy /python-health to Python server /health
+   */
+  app.use('/python-health', createProxyMiddleware({
+    target: PYTHON_SERVER_URL,
+    changeOrigin: true,
+    pathRewrite: () => '/health',
+    on: {
+      proxyReq: (proxyReq, req) => {
+        console.log(`🔀 Proxying ${req.method} /python-health → Python /health`);
+      },
+      error: (err, req, res) => {
+        console.error(`❌ Proxy error for ${req.url}:`, err.message);
+        if (res && 'writeHead' in res) {
+          (res as Response).status(502).json({
+            error: 'Python server unavailable',
+            details: err.message,
+          });
+        }
+      },
+    },
+  }));
+}
+
+// ============================================================================
+// Body parsing middleware (AFTER proxy routes)
+// ============================================================================
 
 // JSON body parsing with increased limit for base64 images
 app.use(express.json({ limit: '50mb' }));
@@ -108,18 +184,28 @@ app.get('/health', (req: Request, res: Response) => {
  * GET /
  */
 app.get('/', (req: Request, res: Response) => {
+  const endpoints = [
+    'GET /health - Health check',
+    'POST /api/ai/generate - Text generation',
+    'POST /api/images/generate - Image generation/editing',
+    'POST /api/images/inpaint - Two-step inpainting',
+    'POST /api/ai/agentic/edit - Agentic edit with SSE streaming',
+  ];
+  
+  if (ENABLE_PYTHON_PROXY) {
+    endpoints.push(
+      'GET /python-health - Python server health (proxied)',
+      'POST /api/python/echo - Echo test (proxied to Python)',
+    );
+  }
+  
   res.json({
     name: 'Image Markup AI Server',
     version: '1.0.0',
-    endpoints: [
-      'GET /health - Health check',
-      'POST /api/ai/generate - Text generation',
-      'POST /api/images/generate - Image generation/editing',
-      'POST /api/images/inpaint - Two-step inpainting',
-      'POST /api/ai/agentic/edit - Agentic edit with SSE streaming',
-    ],
+    pythonProxy: ENABLE_PYTHON_PROXY ? PYTHON_SERVER_URL : 'disabled',
+    endpoints,
   });
-});
+})
 
 // ============================================================================
 // AI Endpoints
@@ -178,6 +264,7 @@ app.listen(PORT, () => {
   console.log(`🔐 API Key Auth: ${process.env.SERVER_API_KEY ? '✓ enabled' : '✗ disabled (open access)'}`);
   console.log(`🌐 CORS origins: ${allowedOrigins.join(', ')}`);
   console.log(`⚡ Rate limits: General=100/min, AI=20/min, Agentic=5/min`);
+  console.log(`🐍 Python proxy: ${ENABLE_PYTHON_PROXY ? `✓ enabled (${PYTHON_SERVER_URL})` : '✗ disabled'}`);
 });
 
 export default app;

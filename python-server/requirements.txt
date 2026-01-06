@@ -1,0 +1,23 @@
+# FastAPI and ASGI server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Google AI SDK
+google-genai==0.3.0
+
+# LangGraph and LangChain (for Phase 4.3+)
+langgraph==0.2.60
+langchain==0.3.14
+langchain-google-genai==2.0.8
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.10.4
+httpx==0.28.1
+
+# SSE support
+sse-starlette==2.2.1
+
+# Development
+pytest==8.3.4
+pytest-asyncio==0.25.2

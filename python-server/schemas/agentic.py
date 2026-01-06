@@ -1,0 +1,162 @@
+"""
+Pydantic schemas for the agentic edit workflow.
+
+These schemas match the TypeScript interfaces in server/src/types/api.ts
+to ensure API compatibility between Express and Python backends.
+"""
+
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+# =============================================================================
+# Progress Step Enum (matches TypeScript AIProgressStep)
+# =============================================================================
+
+AIProgressStep = Literal[
+    "idle",
+    "planning",
+    "calling_api",
+    "processing",
+    "self_checking",
+    "iterating",
+    "complete",
+    "error",
+]
+
+
+# =============================================================================
+# SSE Event Schemas (matches TypeScript AIProgressEvent)
+# =============================================================================
+
+
+class IterationInfo(BaseModel):
+    """Iteration tracking for multi-step workflows."""
+
+    current: int
+    max: int
+
+
+class ErrorInfo(BaseModel):
+    """Error details for failed operations."""
+
+    message: str
+    details: Optional[str] = None
+
+
+class AIProgressEvent(BaseModel):
+    """
+    SSE progress event for streaming operations.
+
+    Matches the TypeScript AIProgressEvent interface exactly.
+    """
+
+    step: AIProgressStep
+    message: Optional[str] = None
+
+    # Thinking text (full or delta for streaming)
+    thinkingText: Optional[str] = None
+    thinkingTextDelta: Optional[str] = None
+
+    # Prompt and raw output for transparency
+    prompt: Optional[str] = None
+    rawOutput: Optional[str] = None
+    rawOutputDelta: Optional[str] = None
+
+    # Iteration tracking
+    iteration: Optional[IterationInfo] = None
+
+    # Error info
+    error: Optional[ErrorInfo] = None
+
+    # Generated image from this iteration (base64 data URL)
+    iterationImage: Optional[str] = None
+
+    # Force new log entry in UI
+    newLogEntry: Optional[bool] = None
+
+
+# =============================================================================
+# Request/Response Schemas (matches TypeScript AgenticEditRequest/Response)
+# =============================================================================
+
+
+class AgenticEditRequest(BaseModel):
+    """
+    Request body for POST /api/agentic/edit endpoint.
+
+    Matches the TypeScript AgenticEditRequest interface.
+    """
+
+    # Source image (base64 data URL)
+    sourceImage: str = Field(..., description="Source image as base64 data URL")
+
+    # Edit prompt from user
+    prompt: str = Field(..., description="User's edit prompt")
+
+    # Optional mask image for inpainting (base64 data URL)
+    maskImage: Optional[str] = Field(
+        None, description="Mask image as base64 data URL (white = edit area)"
+    )
+
+    # Maximum iterations for self-check loop
+    maxIterations: Optional[int] = Field(
+        3, ge=1, le=5, description="Maximum iterations (1-5, default 3)"
+    )
+
+
+class AgenticEditResponse(BaseModel):
+    """
+    Final response for agentic edit (sent as SSE 'complete' event).
+
+    Matches the TypeScript AgenticEditResponse interface.
+    """
+
+    # Final generated image (base64 data URL)
+    imageData: str = Field(..., description="Final image as base64 data URL")
+
+    # Number of iterations performed
+    iterations: int = Field(..., description="Number of iterations performed")
+
+    # Final prompt that produced the result
+    finalPrompt: str = Field(..., description="Final prompt used for generation")
+
+
+# =============================================================================
+# Internal State Schema (for LangGraph)
+# =============================================================================
+
+
+class AgenticEditState(BaseModel):
+    """
+    Internal state for the LangGraph agentic edit workflow.
+
+    This is NOT part of the API contract - it's for internal use only.
+    """
+
+    # Inputs (from request)
+    source_image: str
+    mask_image: Optional[str] = None
+    user_prompt: str
+    max_iterations: int = 3
+
+    # Planning phase outputs
+    refined_prompt: str = ""
+    planning_thinking: str = ""
+
+    # Iteration state
+    current_iteration: int = 0
+    current_result: Optional[str] = None  # base64 image
+
+    # Self-check state
+    satisfied: bool = False
+    check_reasoning: str = ""
+    revision_suggestion: str = ""
+
+    # Tracking
+    steps: list[str] = Field(default_factory=list)
+
+    # Final output
+    final_image: Optional[str] = None
+    final_prompt: str = ""

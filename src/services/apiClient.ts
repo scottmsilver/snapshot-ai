@@ -228,6 +228,13 @@ export function createAPIClient() {
 
   /**
    * Perform agentic edit with SSE streaming
+   * 
+   * @param sourceImage - Base64 encoded source image
+   * @param prompt - User's edit prompt
+   * @param options.maskImage - Optional mask for inpainting
+   * @param options.maxIterations - Max self-check iterations (default: 3)
+   * @param options.onProgress - Callback for SSE progress events
+   * @param options.useLangGraph - If true, routes to Python/LangGraph backend
    */
   async function agenticEdit(
     sourceImage: string,
@@ -236,6 +243,7 @@ export function createAPIClient() {
       maskImage?: string;
       maxIterations?: number;
       onProgress?: (event: AIProgressEvent) => void;
+      useLangGraph?: boolean;
     } = {}
   ): Promise<AgenticEditResponse> {
     const request: AgenticEditRequest = {
@@ -245,7 +253,13 @@ export function createAPIClient() {
       maxIterations: options.maxIterations,
     };
 
-    const url = buildApiUrl(API_ENDPOINTS.AGENTIC_EDIT);
+    // Choose endpoint based on useLangGraph setting
+    // Both routes go through Express - the LangGraph route is proxied to Python
+    const endpoint = options.useLangGraph 
+      ? API_ENDPOINTS.AGENTIC_EDIT_LANGGRAPH  // Express proxies to Python
+      : API_ENDPOINTS.AGENTIC_EDIT;           // Express handles directly
+    const url = buildApiUrl(endpoint);
+    console.log(`${options.useLangGraph ? '🐍 LangGraph' : '📦 Express'} backend:`, url);
 
     try {
       return await ssePostRequest<AgenticEditResponse, AIProgressEvent>(

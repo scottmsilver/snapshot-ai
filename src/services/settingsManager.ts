@@ -411,6 +411,23 @@ export class SettingsManager {
   async setShowRainbowBorder(show: boolean): Promise<void> {
     return this.setSetting('show_rainbow_border', String(show));
   }
+
+  /**
+   * Get the use LangGraph backend preference
+   * When true, agentic edit operations use the Python/LangGraph backend
+   * When false (default), uses the Express/TypeScript backend
+   */
+  async getUseLangGraph(): Promise<boolean> {
+    const value = await this.getSetting('use_langgraph');
+    return value === 'true';
+  }
+
+  /**
+   * Set the use LangGraph backend preference
+   */
+  async setUseLangGraph(use: boolean): Promise<void> {
+    return this.setSetting('use_langgraph', String(use));
+  }
 }
 
 // Singleton instance

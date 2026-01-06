@@ -17,6 +17,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
   const [googleCloudProjectId, setGoogleCloudProjectId] = useState('');
   const [showRainbowBorder, setShowRainbowBorder] = useState(false);
   const [recordAiManipulationCases, setRecordAiManipulationCases] = useState(false);
+  const [useLangGraph, setUseLangGraph] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,11 +42,13 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
       const textOnly = await settingsManager.getTextOnlyModel();
       const projectId = await settingsManager.getGoogleCloudProjectId();
       const rainbow = await settingsManager.getShowRainbowBorder();
+      const langGraph = await settingsManager.getUseLangGraph();
       setApiKey(key || '');
       setInpaintingModel(inpainting || 'imagen');
       setTextOnlyModel(textOnly || 'gemini');
       setGoogleCloudProjectId(projectId || '');
       setShowRainbowBorder(rainbow);
+      setUseLangGraph(langGraph);
       setRecordAiManipulationCases(localStorage.getItem('recordAiManipulationCases') === 'true');
     } catch (err) {
       console.error('Failed to load settings:', err);
@@ -112,6 +115,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
       await settingsManager.setTextOnlyModel(textOnlyModel);
       await settingsManager.setGoogleCloudProjectId(currentProjectId);
       await settingsManager.setShowRainbowBorder(showRainbowBorder);
+      await settingsManager.setUseLangGraph(useLangGraph);
       localStorage.setItem('recordAiManipulationCases', recordAiManipulationCases ? 'true' : 'false');
 
       setApiKey(currentKey); // Update state to match
@@ -503,6 +507,77 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
                         type="checkbox"
                         checked={recordAiManipulationCases}
                         onChange={(e) => setRecordAiManipulationCases(e.target.checked)}
+                        style={{ display: 'none' }}
+                      />
+                    </div>
+
+                    <div style={{ marginBottom: '16px' }}>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => setUseLangGraph(!useLangGraph)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setUseLangGraph(!useLangGraph);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <div
+                          style={{
+                            position: 'relative',
+                            width: '40px',
+                            height: '22px',
+                            backgroundColor: useLangGraph ? '#10b981' : '#e5e5e5',
+                            borderRadius: '11px',
+                            transition: 'background-color 0.2s',
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '2px',
+                              left: useLangGraph ? '20px' : '2px',
+                              width: '18px',
+                              height: '18px',
+                              backgroundColor: 'white',
+                              borderRadius: '50%',
+                              transition: 'left 0.2s',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                            }}
+                          />
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '14px',
+                            fontWeight: '500',
+                            color: '#333',
+                          }}
+                        >
+                          Use LangGraph Backend (Experimental)
+                        </span>
+                      </label>
+                      <p
+                        style={{
+                          margin: '4px 0 0 52px',
+                          fontSize: '13px',
+                          color: '#666',
+                          lineHeight: '1.5',
+                        }}
+                      >
+                        Routes agentic edit operations through the Python/LangGraph backend instead of Express/TypeScript.
+                        This enables more sophisticated AI workflows but is experimental.
+                      </p>
+                      <input
+                        type="checkbox"
+                        checked={useLangGraph}
+                        onChange={(e) => setUseLangGraph(e.target.checked)}
                         style={{ display: 'none' }}
                       />
                     </div>
