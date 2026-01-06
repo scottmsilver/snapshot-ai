@@ -197,7 +197,7 @@ class TestPromptBuilders:
         prompt = build_planning_prompt("Add a button", has_mask=False)
         assert "Add a button" in prompt
         assert "entire image" in prompt
-        assert "image_editor" in prompt
+        assert "gemini_image_painter" in prompt
 
     def test_build_planning_prompt_with_mask(self):
         """Test planning prompt with mask context."""
