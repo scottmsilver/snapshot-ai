@@ -17,18 +17,20 @@ Design Principles:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from langgraph.config import get_stream_writer
+
+logger = logging.getLogger(__name__)
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 
 from schemas import AI_MODELS, MAX_ITERATIONS, THINKING_BUDGETS
 from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo
-from services.image_utils import decode_data_url, encode_data_url, get_mime_type
+from services.image_utils import encode_data_url, parse_data_url
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -114,15 +116,17 @@ def build_planning_prompt(user_prompt: str, has_mask: bool) -> str:
 
     The planning phase uses extended reasoning to transform the user's
     simple request into a detailed, actionable edit description.
+
+    Note: This prompt is harmonized with the Express implementation
+    to ensure consistent behavior during migration.
     """
     mask_context = (
-        "The user has selected a specific area (shown as a white mask). "
-        "Focus edits on this masked region."
+        "The user has selected a specific area of the image (shown as a white mask). Your edits should focus on this masked region."
         if has_mask
         else "The user wants to edit the entire image."
     )
 
-    return f"""You are an expert image editing assistant.
+    return f"""You are an expert image editing assistant working on a SCREENSHOT MODIFICATION task.
 
 USER'S REQUEST: "{user_prompt}"
 
@@ -130,16 +134,21 @@ USER'S REQUEST: "{user_prompt}"
 
 Your goal is to create an edit that:
 1. Accomplishes exactly what the user wants
-2. Fits naturally into the existing image
-3. Matches the style, lighting, and aesthetic of the original
-4. Produces seamless, coherent results
+2. FITS NATURALLY into the existing image - the modification should look like it belongs there
+3. Matches the style, lighting, perspective, and aesthetic of the original screenshot
+4. Unless the user explicitly asks for something that stands out, edits should be SEAMLESS and COHERENT
 
-Think deeply about what visual details would make this edit look natural.
+Think deeply about:
+- What is the user really trying to achieve?
+- What visual details would make this edit look natural and integrated?
+- How should lighting, shadows, and style match the surroundings?
+- What would make someone looking at the final image NOT notice it was edited?
 
-You have one tool: image_editor. Call it with a detailed prompt that achieves 
-the goal while ensuring visual coherence.
+You have one powerful tool: gemini_image_painter, which uses Gemini 3 Pro to edit images.
 
-You MUST call the image_editor tool."""
+Call gemini_image_painter with a detailed prompt that achieves the goal while ensuring visual coherence.
+
+You MUST call the gemini_image_painter tool."""
 
 
 def build_evaluation_prompt(user_prompt: str, edit_prompt: str) -> str:
@@ -217,17 +226,18 @@ async def _call_planning_model_streaming(
         parts.append(types.Part.from_bytes(data=mask_data, mime_type=mask_mime))
 
     # Tool for structured output
+    # Note: Tool name harmonized with Express implementation
     tool = types.Tool(
         function_declarations=[
             types.FunctionDeclaration(
-                name="image_editor",
-                description="Edit the image with a detailed prompt.",
+                name="gemini_image_painter",
+                description="Edits the image. Provide a detailed prompt describing what to create/modify, including style and coherence details.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     properties={
                         "prompt": types.Schema(
                             type=types.Type.STRING,
-                            description="Detailed edit description.",
+                            description="Detailed description of the edit, including how it should fit naturally into the image.",
                         ),
                     },
                     required=["prompt"],
@@ -375,7 +385,7 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
 
     Streams thinking updates in real-time for UI feedback.
     """
-    print("🤖 Planning: Starting...")
+    logger.info("Planning: Starting...")
 
     prompt = build_planning_prompt(state.user_prompt, bool(state.mask_image))
     iteration_info = IterationInfo(current=0, max=state.max_iterations)
@@ -393,10 +403,13 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
     )
 
     # Decode images
-    source_data = decode_data_url(state.source_image)
-    source_mime = get_mime_type(state.source_image)
-    mask_data = decode_data_url(state.mask_image) if state.mask_image else None
-    mask_mime = get_mime_type(state.mask_image) if state.mask_image else None
+    source = parse_data_url(state.source_image)
+    source_data, source_mime = source.data, source.mime_type
+    if state.mask_image:
+        mask = parse_data_url(state.mask_image)
+        mask_data, mask_mime = mask.data, mask.mime_type
+    else:
+        mask_data, mask_mime = None, None
 
     try:
         thinking_text = ""
@@ -427,12 +440,12 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
         # Fallback: try to extract from text if no function call
         if refined_prompt == state.user_prompt and response_text:
             match = re.search(
-                r'image_editor\s*\(\s*prompt\s*=\s*"([^"]+)"', response_text
+                r'gemini_image_painter\s*\(\s*prompt\s*=\s*"([^"]+)"', response_text
             )
             if match:
                 refined_prompt = match.group(1)
 
-        print(f"🤖 Planning: Refined prompt: {refined_prompt[:80]}...")
+        logger.info("Planning: Refined prompt: %s...", refined_prompt[:80])
 
         emit_progress(
             state,
@@ -459,7 +472,7 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
         }
 
     except Exception as e:
-        print(f"🤖 Planning: Error - {e}")
+        logger.error("Planning: Error - %s", e)
         emit_progress(
             state,
             AIProgressEvent(
@@ -477,7 +490,7 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
 async def generate_node(state: GraphState) -> dict[str, Any]:
     """Generate/edit the image based on the refined prompt."""
     iteration = state.current_iteration + 1
-    print(f"🤖 Generate: Iteration {iteration}/{state.max_iterations}...")
+    logger.info("Generate: Iteration %d/%d...", iteration, state.max_iterations)
 
     iteration_info = IterationInfo(current=iteration, max=state.max_iterations)
 
@@ -490,10 +503,13 @@ async def generate_node(state: GraphState) -> dict[str, Any]:
         ),
     )
 
-    source_data = decode_data_url(state.source_image)
-    source_mime = get_mime_type(state.source_image)
-    mask_data = decode_data_url(state.mask_image) if state.mask_image else None
-    mask_mime = get_mime_type(state.mask_image) if state.mask_image else None
+    source = parse_data_url(state.source_image)
+    source_data, source_mime = source.data, source.mime_type
+    if state.mask_image:
+        mask = parse_data_url(state.mask_image)
+        mask_data, mask_mime = mask.data, mask.mime_type
+    else:
+        mask_data, mask_mime = None, None
 
     try:
         image_bytes = await _generate_image(
@@ -502,7 +518,7 @@ async def generate_node(state: GraphState) -> dict[str, Any]:
 
         if image_bytes:
             result_url = encode_data_url(image_bytes, "image/png")
-            print("🤖 Generate: Success")
+            logger.info("Generate: Success")
 
             emit_progress(
                 state,
@@ -523,7 +539,7 @@ async def generate_node(state: GraphState) -> dict[str, Any]:
             raise ValueError("No image in response")
 
     except Exception as e:
-        print(f"🤖 Generate: Error - {e}")
+        logger.error("Generate: Error - %s", e)
         emit_progress(
             state,
             AIProgressEvent(
@@ -542,13 +558,13 @@ async def generate_node(state: GraphState) -> dict[str, Any]:
 async def self_check_node(state: GraphState) -> dict[str, Any]:
     """Evaluate if the generated image meets the user's request."""
     iteration = state.current_iteration
-    print(f"🤖 Self-check: Evaluating iteration {iteration}...")
+    logger.info("Self-check: Evaluating iteration %d...", iteration)
 
     iteration_info = IterationInfo(current=iteration, max=state.max_iterations)
 
     # Skip on last iteration
     if iteration >= state.max_iterations:
-        print("🤖 Self-check: Max iterations reached")
+        logger.info("Self-check: Max iterations reached")
         emit_progress(
             state,
             AIProgressEvent(
@@ -581,20 +597,18 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
 
     try:
         prompt = build_evaluation_prompt(state.user_prompt, state.refined_prompt)
-        source_data = decode_data_url(state.source_image)
-        source_mime = get_mime_type(state.source_image)
-        result_data = decode_data_url(state.current_result)
-        result_mime = get_mime_type(state.current_result)
+        source = parse_data_url(state.source_image)
+        result = parse_data_url(state.current_result)
 
         evaluation = await _evaluate_result(
-            prompt, source_data, source_mime, result_data, result_mime
+            prompt, source.data, source.mime_type, result.data, result.mime_type
         )
 
         satisfied = evaluation["satisfied"]
         reasoning = evaluation["reasoning"]
         revised = evaluation.get("revised_prompt", "")
 
-        print(f"🤖 Self-check: satisfied={satisfied}")
+        logger.info("Self-check: satisfied=%s", satisfied)
 
         if satisfied:
             emit_progress(
@@ -627,7 +641,7 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
         }
 
     except Exception as e:
-        print(f"🤖 Self-check: Error - {e}")
+        logger.error("Self-check: Error - %s", e)
         # Accept on error to avoid blocking
         return {
             "satisfied": True,

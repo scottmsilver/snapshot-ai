@@ -13,12 +13,20 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import time
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -52,12 +60,12 @@ _start_time = time.time()
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown."""
     # Startup
-    print("🐍 Python AI Server starting...")
+    logger.info("Python AI Server starting...")
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    print(f"🔑 API Key: {'configured' if api_key else 'MISSING'}")
+    logger.info("API Key: %s", "configured" if api_key else "MISSING")
     yield
     # Shutdown
-    print("🐍 Python AI Server shutting down...")
+    logger.info("Python AI Server shutting down...")
 
 
 app = FastAPI(
@@ -96,6 +104,15 @@ class HealthResponse(BaseModel):
     python_version: str
 
 
+class RootResponse(BaseModel):
+    """Root endpoint response."""
+
+    name: str
+    version: str
+    status: str
+    endpoints: dict[str, str]
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """Return server health status."""
@@ -108,19 +125,19 @@ async def health_check() -> HealthResponse:
     )
 
 
-@app.get("/")
-async def root() -> dict:
+@app.get("/", response_model=RootResponse)
+async def root() -> RootResponse:
     """Return API information."""
-    return {
-        "name": "Image Markup AI Server",
-        "version": "0.4.0",
-        "status": "running",
-        "endpoints": {
+    return RootResponse(
+        name="Image Markup AI Server",
+        version="0.4.0",
+        status="running",
+        endpoints={
             "health": "GET /health",
             "echo": "POST /api/echo",
             "agentic_edit": "POST /api/agentic/edit",
         },
-    }
+    )
 
 
 # =============================================================================
@@ -185,11 +202,22 @@ async def agentic_edit(request: AgenticEditRequest) -> StreamingResponse:
                 max_iterations=request.maxIterations or 3,
             )
 
-            # Initial progress event
+            # Initial progress event - harmonized with Express
+            # Express sends "Sending planning request to AI..." before calling the API
+            from graphs.agentic_edit import build_planning_prompt
+
+            planning_prompt = build_planning_prompt(
+                request.prompt, bool(request.maskImage)
+            )
             yield format_progress_event(
                 AIProgressEvent(
                     step="planning",
-                    message="Starting agentic edit workflow...",
+                    message="Sending planning request to AI...",
+                    prompt=planning_prompt,
+                    iteration=IterationInfo(
+                        current=0,
+                        max=request.maxIterations or 3,
+                    ),
                 )
             )
 
@@ -247,8 +275,7 @@ async def agentic_edit(request: AgenticEditRequest) -> StreamingResponse:
                 )
 
         except Exception as e:
-            print(f"Agentic edit error: {e}")
-            traceback.print_exc()
+            logger.exception("Agentic edit error: %s", e)
             yield format_error_event(str(e), traceback.format_exc())
 
     return StreamingResponse(
@@ -272,7 +299,7 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "0.0.0.0")
 
-    print(f"Starting server on {host}:{port}")
+    logger.info("Starting server on %s:%d", host, port)
     uvicorn.run(
         "main:app",
         host=host,
