@@ -9,6 +9,11 @@ from .agentic import (
     AgenticEditRequest,
     AgenticEditResponse,
     AgenticEditState,
+    Base64ImageUrl,
+    validate_data_url,
+    GenerateTextRequest,
+    GenerateTextResponse,
+    FunctionCall,
 )
 
 __all__ = [
@@ -16,7 +21,10 @@ __all__ = [
     "AI_MODELS",
     "THINKING_BUDGETS",
     "MAX_ITERATIONS",
-    # Types
+    # Custom Types
+    "Base64ImageUrl",
+    "validate_data_url",
+    # Agentic Types
     "AIProgressStep",
     "AIProgressEvent",
     "IterationInfo",
@@ -24,4 +32,8 @@ __all__ = [
     "AgenticEditRequest",
     "AgenticEditResponse",
     "AgenticEditState",
+    # Text Generation Types
+    "GenerateTextRequest",
+    "GenerateTextResponse",
+    "FunctionCall",
 ]

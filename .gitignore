@@ -17,6 +17,22 @@ dist-ssr
 .env.local
 .env.production
 
+# Lock files (use npm/pnpm lock instead)
+bun.lock
+
+# Python
+python-server/.venv
+python-server/__pycache__
+__pycache__
+*.pyc
+uv.lock
+
+# AI manipulation replays (local test data)
+manipulations/
+
+# OpenCode
+.opencode/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -24,6 +24,15 @@ import {
   apiKeyValidator,
   requestSizeCheck,
 } from './middleware/security.js';
+import { 
+  createShadowTestMiddleware, 
+  createMetricsCollector,
+  type ShadowEndpointConfig,
+} from './middleware/shadowTest.js';
+import { 
+  createSSEShadowMiddleware,
+  logSSEComparisonResult,
+} from './middleware/sseComparator.js';
 
 // Load environment variables
 dotenv.config();
@@ -37,6 +46,65 @@ const PORT = process.env.PORT || 3001;
 
 const PYTHON_SERVER_URL = process.env.PYTHON_SERVER_URL || 'http://localhost:8001';
 const ENABLE_PYTHON_PROXY = process.env.ENABLE_PYTHON_PROXY === 'true';
+
+// ============================================================================
+// Shadow Testing Configuration
+// ============================================================================
+
+const SHADOW_TEST_ENABLED = process.env.SHADOW_TEST_ENABLED === 'true';
+const SHADOW_TEST_SAMPLE_RATE = parseFloat(process.env.SHADOW_TEST_SAMPLE_RATE || '0.1');
+const SHADOW_TEST_TIMEOUT = parseInt(process.env.SHADOW_TEST_TIMEOUT || '30000', 10);
+
+// Create metrics collector for shadow testing
+const shadowMetrics = createMetricsCollector();
+
+// Configure shadow test endpoints
+const shadowEndpoints: ShadowEndpointConfig[] = [
+  {
+    path: '/api/ai/generate',
+    method: 'POST',
+    pythonPath: '/api/ai/generate',
+    ignorePaths: ['timestamp', 'timing'],
+  },
+  {
+    path: '/api/images/generate',
+    method: 'POST',
+    pythonPath: '/api/images/generate',
+    ignorePaths: ['timestamp', 'timing', 'image'], // Images may differ slightly
+  },
+  {
+    path: '/api/images/inpaint',
+    method: 'POST',
+    pythonPath: '/api/images/inpaint',
+    ignorePaths: ['timestamp', 'timing', 'image'],
+  },
+];
+
+// Shadow test middleware for regular endpoints
+const shadowTestMiddleware = createShadowTestMiddleware({
+  enabled: SHADOW_TEST_ENABLED,
+  sampleRate: SHADOW_TEST_SAMPLE_RATE,
+  pythonServerUrl: PYTHON_SERVER_URL,
+  timeout: SHADOW_TEST_TIMEOUT,
+  endpoints: shadowEndpoints,
+  onComparisonResult: (result) => {
+    shadowMetrics.record(result);
+  },
+});
+
+// SSE shadow middleware for agentic endpoint
+const sseShadowMiddleware = createSSEShadowMiddleware({
+  enabled: SHADOW_TEST_ENABLED,
+  sampleRate: SHADOW_TEST_SAMPLE_RATE,
+  pythonServerUrl: PYTHON_SERVER_URL,
+  timeout: SHADOW_TEST_TIMEOUT * 2, // Longer timeout for streaming
+  pythonPath: '/api/agentic/edit', // Note: Python uses /api/agentic/edit, Express uses /api/ai/agentic/edit
+  ignorePaths: ['timestamp', 'thinking.timestamp'],
+  onComparisonResult: (result) => {
+    logSSEComparisonResult(result);
+    // Could also track SSE-specific metrics here
+  },
+});
 
 // ============================================================================
 // CORS Configuration (applies to all routes including proxy)
@@ -199,13 +267,61 @@ app.get('/', (req: Request, res: Response) => {
     );
   }
   
+  if (SHADOW_TEST_ENABLED) {
+    endpoints.push('GET /shadow/metrics - Shadow testing metrics');
+  }
+  
   res.json({
     name: 'Image Markup AI Server',
     version: '1.0.0',
     pythonProxy: ENABLE_PYTHON_PROXY ? PYTHON_SERVER_URL : 'disabled',
+    shadowTesting: SHADOW_TEST_ENABLED ? {
+      sampleRate: SHADOW_TEST_SAMPLE_RATE,
+      timeout: SHADOW_TEST_TIMEOUT,
+    } : 'disabled',
     endpoints,
   });
-})
+});
+
+/**
+ * Shadow testing metrics endpoint
+ * GET /shadow/metrics
+ */
+if (SHADOW_TEST_ENABLED) {
+  app.get('/shadow/metrics', (req: Request, res: Response) => {
+    const metrics = shadowMetrics.getMetrics();
+    const matchRate = metrics.totalRequests > 0
+      ? (metrics.matchCount / metrics.totalRequests * 100).toFixed(2)
+      : '0.00';
+    
+    res.json({
+      status: 'active',
+      sampleRate: SHADOW_TEST_SAMPLE_RATE,
+      summary: {
+        totalRequests: metrics.totalRequests,
+        matchRate: `${matchRate}%`,
+        matches: metrics.matchCount,
+        mismatches: metrics.mismatchCount,
+        pythonErrors: metrics.pythonErrorCount,
+      },
+      latency: {
+        avgExpressMs: Math.round(metrics.avgExpressLatencyMs),
+        avgPythonMs: Math.round(metrics.avgPythonLatencyMs),
+        pythonOverheadMs: Math.round(metrics.avgPythonLatencyMs - metrics.avgExpressLatencyMs),
+      },
+      byEndpoint: metrics.byEndpoint,
+    });
+  });
+
+  /**
+   * Reset shadow testing metrics
+   * POST /shadow/metrics/reset
+   */
+  app.post('/shadow/metrics/reset', (req: Request, res: Response) => {
+    shadowMetrics.reset();
+    res.json({ status: 'reset', message: 'Shadow testing metrics cleared' });
+  });
+}
 
 // ============================================================================
 // AI Endpoints
@@ -214,30 +330,33 @@ app.get('/', (req: Request, res: Response) => {
 /**
  * Mount AI routes under /api/ai
  * Rate limited to 20 requests/minute per IP
+ * Shadow testing enabled for comparison with Python backend
  * 
  * Available endpoints:
  * - POST /api/ai/generate - Text generation (implemented)
  */
-app.use('/api/ai', aiRateLimiter, aiRoutes);
+app.use('/api/ai', aiRateLimiter, shadowTestMiddleware, aiRoutes);
 
 /**
  * Mount agentic routes under /api/ai/agentic
  * Stricter rate limit: 5 requests/minute per IP (long-running operations)
+ * SSE shadow testing for streaming comparison with Python backend
  * 
  * Available endpoints:
  * - POST /api/ai/agentic/edit - Agentic edit with SSE streaming (implemented)
  */
-app.use('/api/ai/agentic', agenticRateLimiter, agenticRoutes);
+app.use('/api/ai/agentic', agenticRateLimiter, sseShadowMiddleware, agenticRoutes);
 
 /**
  * Mount image routes under /api/images
  * Rate limited to 20 requests/minute per IP
+ * Shadow testing enabled for comparison with Python backend
  * 
  * Available endpoints:
  * - POST /api/images/generate - Image generation/editing (implemented)
  * - POST /api/images/inpaint - Two-step inpainting (implemented)
  */
-app.use('/api/images', aiRateLimiter, imageRoutes);
+app.use('/api/images', aiRateLimiter, shadowTestMiddleware, imageRoutes);
 
 // ============================================================================
 // Error handling
@@ -265,6 +384,7 @@ app.listen(PORT, () => {
   console.log(`🌐 CORS origins: ${allowedOrigins.join(', ')}`);
   console.log(`⚡ Rate limits: General=100/min, AI=20/min, Agentic=5/min`);
   console.log(`🐍 Python proxy: ${ENABLE_PYTHON_PROXY ? `✓ enabled (${PYTHON_SERVER_URL})` : '✗ disabled'}`);
+  console.log(`🔬 Shadow testing: ${SHADOW_TEST_ENABLED ? `✓ enabled (${(SHADOW_TEST_SAMPLE_RATE * 100).toFixed(0)}% sample rate)` : '✗ disabled'}`);
 });
 
 export default app;

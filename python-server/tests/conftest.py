@@ -11,6 +11,8 @@ from typing import Any
 import pytest
 from dotenv import load_dotenv
 
+from services.image_utils import encode_data_url
+
 # Configure pytest-asyncio
 pytest_plugins = ["pytest_asyncio"]
 
@@ -55,8 +57,6 @@ def load_manipulation_case(zip_path: Path) -> dict[str, Any]:
         - reference_points: list
         - markup_shapes: list
     """
-    import base64
-
     result = {}
 
     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -101,8 +101,7 @@ def load_manipulation_case(zip_path: Path) -> dict[str, Any]:
             try:
                 with zf.open(img_name) as f:
                     img_data = f.read()
-                    b64 = base64.b64encode(img_data).decode("utf-8")
-                    result[key] = f"data:image/png;base64,{b64}"
+                    result[key] = encode_data_url(img_data, "image/png")
             except KeyError:
                 result[key] = None
 
@@ -128,8 +127,6 @@ def all_manipulation_cases(manipulations_dir: Path) -> list[dict[str, Any]]:
 @pytest.fixture
 def small_test_image() -> str:
     """Return a small test image as base64 data URL (1x1 red pixel)."""
-    import base64
-
     # 1x1 red PNG
     png_data = bytes(
         [
@@ -205,5 +202,4 @@ def small_test_image() -> str:
             0x82,
         ]
     )
-    b64 = base64.b64encode(png_data).decode("utf-8")
-    return f"data:image/png;base64,{b64}"
+    return encode_data_url(png_data, "image/png")

@@ -29,14 +29,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from graphs.agentic_edit import GraphState, agentic_edit_graph
 from schemas import AgenticEditRequest, AgenticEditResponse, AIProgressEvent
+from schemas import GenerateTextRequest, GenerateTextResponse, FunctionCall
 from schemas.agentic import IterationInfo
+from schemas.config import THINKING_BUDGETS
 from utils.sse import (
     format_complete_event,
     format_error_event,
@@ -135,6 +137,7 @@ async def root() -> RootResponse:
         endpoints={
             "health": "GET /health",
             "echo": "POST /api/echo",
+            "generate": "POST /api/ai/generate",
             "agentic_edit": "POST /api/agentic/edit",
         },
     )
@@ -170,6 +173,111 @@ async def echo(request: EchoRequest) -> EchoResponse:
         server="python-fastapi",
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
+
+
+# =============================================================================
+# Text Generation Endpoint (POST /api/ai/generate)
+# =============================================================================
+
+
+@app.post(
+    "/api/ai/generate",
+    response_model=GenerateTextResponse,
+    response_model_exclude_none=True,
+)
+async def generate_text(request: GenerateTextRequest) -> GenerateTextResponse:
+    """
+    Text generation endpoint using Gemini.
+
+    Matches the Express endpoint at POST /api/ai/generate.
+    """
+    from google import genai
+    from google.genai import types
+
+    # Get API key
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: GEMINI_API_KEY not set",
+        )
+
+    client = genai.Client(api_key=api_key)
+
+    try:
+        # Build config
+        config_kwargs: dict = {}
+
+        if request.generationConfig:
+            config_kwargs.update(request.generationConfig)
+
+        # Add thinking config if requested
+        if request.includeThoughts:
+            thinking_budget = request.thinkingBudget or THINKING_BUDGETS["MEDIUM"]
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_budget=thinking_budget,
+                include_thoughts=True,
+            )
+
+        # Add tools if provided
+        if request.tools:
+            config_kwargs["tools"] = request.tools
+
+        config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
+
+        # Make the API call
+        response = await client.aio.models.generate_content(
+            model=request.model,
+            contents=request.contents,
+            config=config,
+        )
+
+        # Extract response parts
+        text = ""
+        thinking = ""
+        function_call = None
+
+        if response.candidates and response.candidates[0].content:
+            parts = response.candidates[0].content.parts or []
+            for part in parts:
+                if hasattr(part, "thought") and part.thought and hasattr(part, "text"):
+                    thinking += part.text or ""
+                elif hasattr(part, "text") and part.text:
+                    text += part.text
+                elif hasattr(part, "function_call") and part.function_call:
+                    fc = part.function_call
+                    if fc.name:
+                        function_call = FunctionCall(
+                            name=fc.name,
+                            args=dict(fc.args) if fc.args else {},
+                        )
+
+        # Build raw response (simplified - full response is not JSON serializable)
+        raw = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": text}] if text else [],
+                    }
+                }
+            ]
+            if response.candidates
+            else [],
+        }
+
+        return GenerateTextResponse(
+            raw=raw,
+            text=text,
+            thinking=thinking,
+            functionCall=function_call,
+        )
+
+    except Exception as e:
+        logger.exception("Gemini API call failed: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gemini API call failed: {str(e)}",
+        )
 
 
 # =============================================================================
