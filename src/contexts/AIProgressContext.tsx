@@ -7,6 +7,32 @@ import {
   initialAIProgressState,
 } from '@/types/aiProgress';
 
+// Only log in development
+const DEBUG = import.meta.env.DEV;
+function debugLog(message: string, data?: Record<string, unknown>): void {
+  if (DEBUG) {
+    console.log(`[AIProgressContext] ${message}`, data ?? '');
+  }
+}
+
+/**
+ * Data needed for exporting an AI interaction as a zip file
+ */
+export interface AIExportData {
+  /** Source image before AI processing (base64 data URL) */
+  sourceImage: string;
+  /** Result image after AI processing (base64 data URL) */
+  resultImage: string;
+  /** User's prompt */
+  prompt: string;
+  /** Optional mask image for inpainting (base64 data URL) */
+  maskImage?: string;
+  /** Type of AI operation */
+  type: 'ai_fill' | 'ai_manipulation' | 'ai_reference' | string;
+  /** Canvas dimensions */
+  canvas?: { width: number; height: number };
+}
+
 /**
  * Context type for AI Progress tracking
  */
@@ -28,6 +54,12 @@ export interface AIProgressContextType {
 
   /** Set the thinking status for overlay animation */
   setThinkingStatus: (status: ThinkingStatus) => void;
+
+  /** Set data for exporting the AI interaction */
+  setExportData: (data: AIExportData | null) => void;
+
+  /** Current export data (null if no interaction to export) */
+  exportData: AIExportData | null;
 }
 
 /**
@@ -45,13 +77,14 @@ interface AIProgressProviderProps {
 /**
  * Generate unique ID for log entries
  */
-const generateLogId = (): string => `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+const generateLogId = (): string => `log-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
 /**
  * AIProgressProvider component that manages AI progress state
  */
 export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children }) => {
   const [state, setState] = useState<AIProgressState>(initialAIProgressState);
+  const [exportData, setExportDataState] = useState<AIExportData | null>(null);
   const timerRef = useRef<number | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const currentLogIdRef = useRef<string | null>(null);
@@ -89,16 +122,16 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
   const updateProgress = useCallback((event: AIProgressEvent) => {
     const isCompletingOrError = event.step === 'complete' || event.step === 'error';
     const isActiveStep = event.step !== 'idle' && event.step !== 'complete' && event.step !== 'error';
+    const isThinkingDelta = !!event.thinkingTextDelta || !!event.rawOutputDelta;
 
-    // Determine if we need to start a new operation BEFORE entering setState
-    // This prevents race conditions with multiple rapid calls
-    // Create new entry if: (1) first active step, OR (2) server explicitly requests new entry
-    const needsNewOperation = (isActiveStep && !currentLogIdRef.current) || event.newLogEntry;
+    // For thinking deltas, we append to the last entry instead of creating new
+    // For everything else, we create a new entry (append-only log)
+    const shouldAppendToLast = isThinkingDelta && !event.newLogEntry;
 
-    if (needsNewOperation) {
+    // Track operation start time for the first event
+    if (isActiveStep && !currentLogIdRef.current) {
       startTimeRef.current = Date.now();
       currentLogIdRef.current = generateLogId();
-      // Debug: console.log('📊 Created new log ID:', currentLogIdRef.current);
     }
 
     // Stop timer on complete or error
@@ -107,9 +140,7 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
       timerRef.current = null;
     }
 
-    const currentLogId = currentLogIdRef.current;
-
-    // Reset refs on complete/error AFTER capturing the current ID
+    // Reset refs on complete/error
     if (isCompletingOrError) {
       currentLogIdRef.current = null;
       startTimeRef.current = null;
@@ -117,56 +148,54 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
 
     setState(prev => {
       const elapsedMs = startTimeRef.current ? Date.now() - startTimeRef.current : prev.elapsedMs;
-
-      // Build new log entry or update existing one
       const newLog = [...prev.log];
 
-      if (needsNewOperation && currentLogId) {
-        // Create new log entry for this operation
+      // Get source/mask from previous entry if not provided (inherit within operation)
+      const lastEntry = newLog[newLog.length - 1];
+      const inheritedSourceImage = event.sourceImage ?? lastEntry?.sourceImage;
+      const inheritedMaskImage = event.maskImage ?? lastEntry?.maskImage;
+
+      if (shouldAppendToLast && lastEntry) {
+        // Append thinking/raw output deltas to the last entry
+        newLog[newLog.length - 1] = {
+          ...lastEntry,
+          thinkingText: event.thinkingTextDelta 
+            ? (lastEntry.thinkingText || '') + event.thinkingTextDelta
+            : lastEntry.thinkingText,
+          rawOutput: event.rawOutputDelta
+            ? (lastEntry.rawOutput || '') + event.rawOutputDelta
+            : lastEntry.rawOutput,
+        };
+        debugLog('Appended delta to last entry', {
+          id: lastEntry.id,
+          thinkingLength: newLog[newLog.length - 1].thinkingText?.length || 0,
+        });
+      } else {
+        // Append-only: create a new log entry for each event
         const newEntry: AILogEntry = {
-          id: currentLogId,
+          id: generateLogId(),
           timestamp: Date.now(),
           step: event.step,
           message: event.message || '',
           thinkingText: event.thinkingText,
           prompt: event.prompt,
           rawOutput: event.rawOutput,
+          inputImages: event.inputImages,  // Include all input images for transparency
           iteration: event.iteration,
           error: event.error,
           iterationImage: event.iterationImage,
+          sourceImage: inheritedSourceImage,
+          maskImage: inheritedMaskImage,
+          durationMs: isCompletingOrError ? elapsedMs : undefined,
         };
         newLog.push(newEntry);
-        // Debug: console.log('📊 Created new log entry, total entries:', newLog.length);
-      } else if (currentLogId) {
-        // Update the current log entry
-        const currentIndex = newLog.findIndex(e => e.id === currentLogId);
-        // Debug: console.log('📊 Updating log entry at index:', currentIndex, 'for ID:', currentLogId);
-        if (currentIndex >= 0) {
-          const currentEntry = newLog[currentIndex];
-          newLog[currentIndex] = {
-            ...currentEntry,
-            step: event.step,
-            message: event.message || currentEntry.message,
-            // If delta provided, append; otherwise replace with full text
-            thinkingText: event.thinkingTextDelta 
-              ? (currentEntry.thinkingText || '') + event.thinkingTextDelta
-              : (event.thinkingText ?? currentEntry.thinkingText),
-            // Handle prompt (replace if provided)
-            prompt: event.prompt ?? currentEntry.prompt,
-            // Handle rawOutput (append delta or replace)
-            rawOutput: event.rawOutputDelta
-              ? (currentEntry.rawOutput || '') + event.rawOutputDelta
-              : (event.rawOutput ?? currentEntry.rawOutput),
-            iteration: event.iteration || currentEntry.iteration,
-            error: event.error,
-            durationMs: isCompletingOrError ? elapsedMs : undefined,
-            // Keep latest iteration image if provided
-            iterationImage: event.iterationImage ?? currentEntry.iterationImage,
-          };
-          // Debug: console.log('📊 Updated entry thinkingText length:', newLog[currentIndex].thinkingText?.length || 0);
-        }
+        debugLog('Appended new log entry', {
+          id: newEntry.id,
+          step: newEntry.step,
+          message: newEntry.message?.substring(0, 40),
+          hasInputImages: newEntry.inputImages?.length ?? 0,
+        });
       }
-      // No else needed - it's normal to have no currentLogId after operation ends
 
       // Handle thinking image based on step changes
       let thinkingImage = prev.thinkingImage;
@@ -176,13 +205,13 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
       // This ensures the overlay shows for EVERY new operation, not just the first one
       const isFromInactiveState = prev.step === 'idle' || prev.step === 'complete' || prev.step === 'error';
       if (isFromInactiveState && isActiveStep) {
-        console.log('🎨 Setting thinkingStatus to thinking');
+        debugLog('Setting thinkingStatus to thinking');
         thinkingStatus = 'thinking';
       }
 
       // When iteration image arrives, set it as the thinking image
       if (event.iterationImage) {
-        console.log('🎨 Setting thinkingImage, length:', event.iterationImage.length);
+        debugLog('Setting thinkingImage', { length: event.iterationImage.length });
         thinkingImage = event.iterationImage;
       }
 
@@ -255,6 +284,10 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
     }));
   }, []);
 
+  const setExportData = useCallback((data: AIExportData | null) => {
+    setExportDataState(data);
+  }, []);
+
   const value: AIProgressContextType = {
     state,
     updateProgress,
@@ -262,6 +295,8 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
     clearLog,
     setThinkingImage,
     setThinkingStatus,
+    setExportData,
+    exportData,
   };
 
   return <AIProgressContext.Provider value={value}>{children}</AIProgressContext.Provider>;

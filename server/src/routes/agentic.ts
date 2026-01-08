@@ -10,8 +10,8 @@ import { createGeminiService } from '../services/geminiService.js';
 import { createImageGenerationService } from '../services/imageGenerationService.js';
 import { createAgenticService } from '../services/agenticService.js';
 import { asyncHandler, APIError } from '../middleware/errorHandler.js';
-import { initSSE, sendComplete, handleSSEError } from '../utils/sseHelpers.js';
-import type { AgenticEditResponse } from '../types/api.js';
+import { startAIStream, completeAIStream, errorAIStream } from '../utils/aiStreamHelper.js';
+import type { AgenticEditResponse as _AgenticEditResponse } from '../types/api.js';
 import { agenticEditRequestSchema } from '../schemas/index.js';
 
 const router = Router();
@@ -44,8 +44,12 @@ router.post('/edit', asyncHandler(async (req: Request, res: Response) => {
     throw new APIError(500, 'Server configuration error: GEMINI_API_KEY not set');
   }
 
-  // Initialize SSE stream
-  initSSE(res);
+  // Initialize SSE stream with first event containing images
+  // This creates the log entry that agenticService will update
+  startAIStream({ res, sourceImage, maskImage, prompt });
+
+  // Small delay to ensure first SSE event is flushed
+  await new Promise(resolve => setImmediate(resolve));
 
   try {
     // Create services
@@ -62,21 +66,16 @@ router.post('/edit', asyncHandler(async (req: Request, res: Response) => {
       sseResponse: res,
     });
 
-    // Send completion event
-    const completeData: AgenticEditResponse = {
+    // Use shared completeAIStream for consistent protocol
+    completeAIStream(res, {
       imageData: result.imageData,
       iterations: result.iterations,
       finalPrompt: result.finalPrompt,
-    };
-
-    sendComplete(res, completeData);
-
-    // End the stream
-    res.end();
+    });
 
   } catch (error) {
     // Handle errors in SSE stream
-    handleSSEError(res, error instanceof Error ? error : String(error));
+    errorAIStream(res, error instanceof Error ? error : String(error));
   }
 }));
 

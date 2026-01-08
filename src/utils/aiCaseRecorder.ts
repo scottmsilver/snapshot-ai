@@ -1,5 +1,21 @@
-import JSZip from 'jszip';
+/**
+ * Legacy AI manipulation case recorder.
+ * 
+ * @deprecated Use the shared aiInteractionExportService instead:
+ *   import { downloadInteractionZip, createBundleFromLogEntries } from '@/services/aiInteractionExportService';
+ * 
+ * This module is kept for backward compatibility with existing code.
+ */
 
+import {
+  downloadInteractionZip,
+  type AIInteractionBundle,
+  type AIInteractionMetadata,
+} from '@/services/aiInteractionExportService';
+
+/**
+ * @deprecated Use AIInteractionBundle from aiInteractionExportService instead
+ */
 export interface AiManipulationCase {
   id: string;
   type: 'ai_reference_manipulation';
@@ -22,57 +38,38 @@ export interface AiManipulationCase {
   };
 }
 
-function sanitizeFilename(value: string): string {
-  return value.replace(/[:.]/g, '-');
-}
-
-async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  const response = await fetch(dataUrl);
-  return response.blob();
-}
-
-export async function downloadAiManipulationCase(caseData: AiManipulationCase): Promise<void> {
-  const zip = new JSZip();
-  const assets = zip.folder('assets');
-
-  if (!assets) {
-    throw new Error('Failed to create assets folder');
-  }
-
-  const sourceBlob = await dataUrlToBlob(caseData.sourceImageDataUrl);
-  const alphaMaskBlob = await dataUrlToBlob(caseData.alphaMaskDataUrl);
-  const outputBlob = await dataUrlToBlob(caseData.outputImageDataUrl);
-
-  assets.file('source.png', sourceBlob);
-  assets.file('alpha-mask.png', alphaMaskBlob);
-  assets.file('output.png', outputBlob);
-
-  const caseJson = {
-    ...caseData,
-    sourceImagePath: 'assets/source.png',
-    alphaMaskPath: 'assets/alpha-mask.png',
-    outputImagePath: 'assets/output.png',
+/**
+ * Converts legacy AiManipulationCase to the new AIInteractionBundle format
+ */
+function convertToBundle(caseData: AiManipulationCase): AIInteractionBundle {
+  const metadata: AIInteractionMetadata = {
+    id: caseData.id,
+    type: caseData.type,
+    createdAt: caseData.createdAt,
+    canvas: caseData.canvas,
+    models: caseData.models,
+    enrichedPrompt: caseData.enrichedPrompt,
+    movePlan: caseData.movePlan,
+    referencePoints: caseData.referencePoints,
+    markupShapes: caseData.markupShapes,
   };
-  delete (caseJson as Partial<AiManipulationCase>).sourceImageDataUrl;
-  delete (caseJson as Partial<AiManipulationCase>).alphaMaskDataUrl;
-  delete (caseJson as Partial<AiManipulationCase>).outputImageDataUrl;
 
-  zip.file('case.json', JSON.stringify(caseJson, null, 2));
-  zip.file('command.txt', caseData.command);
-  zip.file('enriched-prompt.txt', caseData.enrichedPrompt);
-  zip.file('reference-points.json', JSON.stringify(caseData.referencePoints, null, 2));
-  zip.file('markup-shapes.json', JSON.stringify(caseData.markupShapes, null, 2));
-  zip.file('move-plan.json', JSON.stringify(caseData.movePlan, null, 2));
+  return {
+    sourceImage: caseData.sourceImageDataUrl,
+    maskImage: caseData.alphaMaskDataUrl,
+    resultImage: caseData.outputImageDataUrl,
+    prompt: caseData.command,
+    events: [], // Legacy format didn't have events
+    metadata,
+  };
+}
 
-  const bundle = await zip.generateAsync({ type: 'blob' });
-  const url = URL.createObjectURL(bundle);
-  const link = document.createElement('a');
-  const filename = sanitizeFilename(caseData.id || 'ai-manipulation-case');
-
-  link.href = url;
-  link.download = `${filename}.zip`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+/**
+ * Downloads an AI manipulation case as a zip file.
+ * 
+ * @deprecated Use downloadInteractionZip from aiInteractionExportService instead
+ */
+export async function downloadAiManipulationCase(caseData: AiManipulationCase): Promise<void> {
+  const bundle = convertToBundle(caseData);
+  await downloadInteractionZip(bundle);
 }

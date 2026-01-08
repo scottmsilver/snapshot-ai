@@ -14,7 +14,6 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { IncomingMessage } from 'http';
 
 // ============================================================================
 // Types

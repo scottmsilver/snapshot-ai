@@ -8,32 +8,28 @@ This workflow implements an iterative image editing process:
 4. Loop - Retry with revised prompt if not satisfied (up to max iterations)
 
 Design Principles:
-- Use LangChain abstractions where possible for provider flexibility
-- Use native SDK only where LangChain lacks support (image generation)
-- Keep Gemini-specific code isolated and well-documented
-- Follow Python idioms and best practices
+- Use TransparentGeminiClient for ALL AI calls (automatic progress streaming)
+- Transparency is mandatory - callers cannot skip emitting events
+- Keep workflow logic clean and focused
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
+from google.genai import types
 from langgraph.config import get_stream_writer
-
-logger = logging.getLogger(__name__)
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
 
 from schemas import AI_MODELS, MAX_ITERATIONS, THINKING_BUDGETS
 from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo
+from services.gemini_client import get_gemini_client
 from services.image_utils import encode_data_url, parse_data_url
 
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -82,26 +78,20 @@ class GraphState(BaseModel):
 
 
 # =============================================================================
-# Progress Reporting
+# Progress Reporting (for non-AI events only)
 # =============================================================================
 
 
-def emit_progress(state: GraphState, event: AIProgressEvent) -> None:
+def emit_progress(event: AIProgressEvent) -> None:
     """
-    Emit a progress event via LangGraph's streaming infrastructure.
+    Emit a non-AI progress event (e.g., workflow transitions).
 
-    Events are sent through get_stream_writer() when running in streaming mode
-    (astream with stream_mode="custom"). Falls back silently if not streaming.
-
-    Args:
-        state: Current graph state (unused but kept for API consistency).
-        event: Progress event to emit.
+    For AI calls, use TransparentGeminiClient which handles progress automatically.
     """
     try:
         writer = get_stream_writer()
         writer(event.model_dump(exclude_none=True))
     except RuntimeError:
-        # Not in streaming context - this is fine, events are optional
         pass
 
 
@@ -111,20 +101,40 @@ def emit_progress(state: GraphState, event: AIProgressEvent) -> None:
 
 
 def build_planning_prompt(user_prompt: str, has_mask: bool) -> str:
-    """
-    Build the system prompt for the planning phase.
+    """Build the system prompt for the planning phase."""
+    if has_mask:
+        mask_context = """The user has selected a specific area of the image using a mask (white = edit area, black = preserve).
+This is an INPAINTING task - you must fill/modify ONLY the masked region.
 
-    The planning phase uses extended reasoning to transform the user's
-    simple request into a detailed, actionable edit description.
+CRITICAL INPAINTING GUIDELINES:
 
-    Note: This prompt is harmonized with the Express implementation
-    to ensure consistent behavior during migration.
-    """
-    mask_context = (
-        "The user has selected a specific area of the image (shown as a white mask). Your edits should focus on this masked region."
-        if has_mask
-        else "The user wants to edit the entire image."
-    )
+1. ANALYZE THE MASKED AREA AND SURROUNDINGS:
+   - Study what content exists in and around the masked region
+   - Identify the visual context: What objects, textures, colors surround the mask?
+   - Note any patterns, gradients, or repeating elements that extend into the mask area
+   - Consider what was likely there before (if removing) or what would naturally fit (if adding)
+
+2. SEAMLESS EDGE BLENDING:
+   - The boundary between edited and original pixels must be INVISIBLE
+   - Match the exact color temperature, saturation, and brightness at mask edges
+   - Continue any textures, patterns, or gradients smoothly across the boundary
+   - Pay special attention to anti-aliasing and soft transitions at mask borders
+   - Avoid hard edges, color shifts, or visible seams where the mask meets original content
+
+3. MATCH LIGHTING, PERSPECTIVE, AND STYLE:
+   - Analyze the light source direction and intensity in the surrounding image
+   - Apply consistent shadows and highlights that match the scene's lighting
+   - Maintain the exact perspective and vanishing points of the original image
+   - Match the visual style: Is it a screenshot? Photo? UI element? Illustration?
+   - Preserve the image's noise/grain level, compression artifacts, and overall quality
+
+4. VISUAL COHERENCE AT MASK BOUNDARIES:
+   - The new content must look like it was always part of the original image
+   - Any added objects must interact naturally with adjacent elements (shadows, reflections)
+   - Removed content must be filled with contextually appropriate background
+   - Ensure depth-of-field and focus match the surrounding region"""
+    else:
+        mask_context = "The user wants to edit the entire image."
 
     return f"""You are an expert image editing assistant working on a SCREENSHOT MODIFICATION task.
 
@@ -178,56 +188,13 @@ Respond with JSON in this exact format:
 
 
 # =============================================================================
-# Provider-Specific Code (Isolated)
+# Tool Definition for Planning
 # =============================================================================
-# This section contains Gemini-specific code. If switching providers,
-# only this section needs modification.
 
 
-def _get_genai_client():
-    """Get the Google GenAI client. Gemini-specific."""
-    from google import genai
-
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY must be set")
-    return genai.Client(api_key=api_key)
-
-
-async def _call_planning_model_streaming(
-    prompt: str,
-    image_data: bytes,
-    image_mime: str,
-    mask_data: bytes | None = None,
-    mask_mime: str | None = None,
-) -> AsyncIterator[dict[str, Any]]:
-    """
-    Call the planning model with streaming for real-time thinking updates.
-
-    Gemini-specific implementation using native SDK for:
-    - Streaming responses (thinking deltas)
-    - Function calling (structured output)
-    - Extended thinking budget
-
-    Yields:
-        Dicts with keys: "thinking_delta", "function_call", "text", "done"
-    """
-    from google.genai import types
-
-    client = _get_genai_client()
-
-    # Build content parts
-    parts = [
-        types.Part.from_text(text=prompt),
-        types.Part.from_bytes(data=image_data, mime_type=image_mime),
-    ]
-    if mask_data and mask_mime:
-        parts.append(types.Part.from_text(text="Mask (white = selected area):"))
-        parts.append(types.Part.from_bytes(data=mask_data, mime_type=mask_mime))
-
-    # Tool for structured output
-    # Note: Tool name harmonized with Express implementation
-    tool = types.Tool(
+def get_planning_tool() -> types.Tool:
+    """Get the tool definition for the planning phase."""
+    return types.Tool(
         function_declarations=[
             types.FunctionDeclaration(
                 name="gemini_image_painter",
@@ -246,133 +213,6 @@ async def _call_planning_model_streaming(
         ]
     )
 
-    stream = await client.aio.models.generate_content_stream(
-        model=AI_MODELS["PLANNING"],
-        contents=types.Content(role="user", parts=parts),
-        config=types.GenerateContentConfig(
-            tools=[tool],
-            thinking_config=types.ThinkingConfig(
-                thinking_budget=THINKING_BUDGETS["HIGH"],
-                include_thoughts=True,
-            ),
-        ),
-    )
-
-    async for chunk in stream:
-        if not chunk.candidates:
-            continue
-
-        for part in chunk.candidates[0].content.parts:
-            if hasattr(part, "thought") and part.thought and part.text:
-                yield {"thinking_delta": part.text}
-            elif hasattr(part, "function_call") and part.function_call:
-                yield {"function_call": part.function_call}
-            elif hasattr(part, "text") and part.text:
-                yield {"text": part.text}
-
-    yield {"done": True}
-
-
-async def _generate_image(
-    prompt: str,
-    source_data: bytes,
-    source_mime: str,
-    mask_data: bytes | None = None,
-    mask_mime: str | None = None,
-) -> bytes | None:
-    """
-    Generate/edit an image using the image generation model.
-
-    Gemini-specific implementation - image generation is not yet
-    well-abstracted in LangChain for multimodal editing.
-
-    Returns:
-        Generated image bytes, or None if generation failed.
-    """
-    from google.genai import types
-
-    client = _get_genai_client()
-
-    parts = [
-        types.Part.from_bytes(data=source_data, mime_type=source_mime),
-        types.Part.from_text(text=prompt),
-    ]
-    if mask_data and mask_mime:
-        parts.insert(1, types.Part.from_bytes(data=mask_data, mime_type=mask_mime))
-
-    response = await client.aio.models.generate_content(
-        model=AI_MODELS["IMAGE_GENERATION"],
-        contents=types.Content(role="user", parts=parts),
-        config=types.GenerateContentConfig(response_modalities=["image", "text"]),
-    )
-
-    if response.candidates:
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, "inline_data") and part.inline_data:
-                return part.inline_data.data
-
-    return None
-
-
-async def _evaluate_result(
-    prompt: str,
-    source_data: bytes,
-    source_mime: str,
-    result_data: bytes,
-    result_mime: str,
-) -> dict[str, Any]:
-    """
-    Evaluate an edit result against the original request.
-
-    Returns:
-        Dict with "satisfied", "reasoning", and optionally "revised_prompt".
-    """
-    from google.genai import types
-
-    client = _get_genai_client()
-
-    parts = [
-        types.Part.from_text(text="ORIGINAL IMAGE:"),
-        types.Part.from_bytes(data=source_data, mime_type=source_mime),
-        types.Part.from_text(text="EDITED IMAGE:"),
-        types.Part.from_bytes(data=result_data, mime_type=result_mime),
-        types.Part.from_text(text=prompt),
-    ]
-
-    response = await client.aio.models.generate_content(
-        model=AI_MODELS["PLANNING"],
-        contents=types.Content(role="user", parts=parts),
-        config=types.GenerateContentConfig(
-            thinking_config=types.ThinkingConfig(
-                thinking_budget=THINKING_BUDGETS["MEDIUM"],
-                include_thoughts=True,
-            ),
-        ),
-    )
-
-    # Parse response
-    result = {"satisfied": True, "reasoning": "", "revised_prompt": ""}
-
-    if response.candidates:
-        full_text = "".join(
-            part.text
-            for part in response.candidates[0].content.parts
-            if hasattr(part, "text") and part.text
-        )
-
-        # Try to extract JSON from markdown code fence
-        json_match = re.search(r"```(?:json)?\s*\n?([\s\S]*?)\n?```", full_text)
-        if json_match:
-            try:
-                parsed = json.loads(json_match.group(1).strip())
-                result["satisfied"] = parsed.get("satisfied", True)
-                result["reasoning"] = parsed.get("reasoning", "")
-                result["revised_prompt"] = parsed.get("revised_prompt", "")
-            except json.JSONDecodeError:
-                pass
-
-    return result
-
 
 # =============================================================================
 # Graph Nodes
@@ -383,87 +223,60 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
     """
     Planning phase: AI refines the user's prompt with extended reasoning.
 
-    Streams thinking updates in real-time for UI feedback.
+    Uses TransparentGeminiClient which automatically streams:
+    - The prompt being sent
+    - Thinking deltas as they arrive
+    - The final response
     """
     logger.info("Planning: Starting...")
 
     prompt = build_planning_prompt(state.user_prompt, bool(state.mask_image))
     iteration_info = IterationInfo(current=0, max=state.max_iterations)
 
-    # Emit initial progress
-    emit_progress(
-        state,
-        AIProgressEvent(
-            step="planning",
-            message="Sending request to AI...",
-            prompt=prompt,
-            iteration=iteration_info,
-            newLogEntry=True,
-        ),
-    )
-
-    # Decode images
+    # Decode images with labels for transparency logging
     source = parse_data_url(state.source_image)
-    source_data, source_mime = source.data, source.mime_type
+    images = [(source.data, source.mime_type, "Source Image")]
     if state.mask_image:
         mask = parse_data_url(state.mask_image)
-        mask_data, mask_mime = mask.data, mask.mime_type
-    else:
-        mask_data, mask_mime = None, None
+        images.append((mask.data, mask.mime_type, "Mask (white = edit area)"))
 
     try:
-        thinking_text = ""
+        client = get_gemini_client()
+
+        # This call automatically emits: prompt, input images, thinking deltas, raw output
+        result = await client.generate_with_thinking(
+            prompt=prompt,
+            images=images,
+            step="planning",
+            iteration=iteration_info,
+            model=AI_MODELS["PLANNING"],
+            thinking_budget=THINKING_BUDGETS["HIGH"],
+            tools=[get_planning_tool()],
+            new_log_entry=True,
+        )
+
+        # Extract refined prompt from function call or text
         refined_prompt = state.user_prompt
-        response_text = ""
-
-        async for chunk in _call_planning_model_streaming(
-            prompt, source_data, source_mime, mask_data, mask_mime
-        ):
-            if "thinking_delta" in chunk:
-                thinking_text += chunk["thinking_delta"]
-                emit_progress(
-                    state,
-                    AIProgressEvent(
-                        step="planning",
-                        message=f"AI is thinking... ({len(thinking_text)} chars)",
-                        thinkingTextDelta=chunk["thinking_delta"],
-                        iteration=iteration_info,
-                    ),
-                )
-            elif "function_call" in chunk:
-                fc = chunk["function_call"]
-                if fc.args and "prompt" in fc.args:
-                    refined_prompt = fc.args["prompt"]
-            elif "text" in chunk:
-                response_text += chunk["text"]
-
-        # Fallback: try to extract from text if no function call
-        if refined_prompt == state.user_prompt and response_text:
+        if result.function_call and result.function_call.get("args", {}).get("prompt"):
+            refined_prompt = result.function_call["args"]["prompt"]
+        elif result.text:
+            # Fallback: try to extract from text
             match = re.search(
-                r'gemini_image_painter\s*\(\s*prompt\s*=\s*"([^"]+)"', response_text
+                r'gemini_image_painter\s*\(\s*prompt\s*=\s*"([^"]+)"', result.text
             )
             if match:
                 refined_prompt = match.group(1)
 
         logger.info("Planning: Refined prompt: %s...", refined_prompt[:80])
 
+        # Emit transition to processing
         emit_progress(
-            state,
-            AIProgressEvent(
-                step="planning",
-                message="AI response received",
-                rawOutput=response_text or refined_prompt,
-                iteration=iteration_info,
-            ),
-        )
-        emit_progress(
-            state,
             AIProgressEvent(
                 step="processing",
                 message="AI planned the edit",
                 rawOutput=refined_prompt,
                 iteration=iteration_info,
-            ),
+            )
         )
 
         return {
@@ -474,12 +287,11 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
     except Exception as e:
         logger.error("Planning: Error - %s", e)
         emit_progress(
-            state,
             AIProgressEvent(
                 step="error",
                 message=f"Planning failed: {e}",
                 error=ErrorInfo(message=str(e)),
-            ),
+            )
         )
         return {
             "refined_prompt": state.user_prompt,
@@ -488,46 +300,43 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
 
 
 async def generate_node(state: GraphState) -> dict[str, Any]:
-    """Generate/edit the image based on the refined prompt."""
+    """
+    Generate/edit the image based on the refined prompt.
+
+    Uses TransparentGeminiClient which automatically streams progress.
+    """
     iteration = state.current_iteration + 1
     logger.info("Generate: Iteration %d/%d...", iteration, state.max_iterations)
 
     iteration_info = IterationInfo(current=iteration, max=state.max_iterations)
 
-    emit_progress(
-        state,
-        AIProgressEvent(
-            step="calling_api",
-            message=f"Generating image (attempt {iteration}/{state.max_iterations})...",
-            iteration=iteration_info,
-        ),
-    )
-
+    # Decode images
     source = parse_data_url(state.source_image)
-    source_data, source_mime = source.data, source.mime_type
-    if state.mask_image:
-        mask = parse_data_url(state.mask_image)
-        mask_data, mask_mime = mask.data, mask.mime_type
-    else:
-        mask_data, mask_mime = None, None
+    mask = parse_data_url(state.mask_image) if state.mask_image else None
 
     try:
-        image_bytes = await _generate_image(
-            state.refined_prompt, source_data, source_mime, mask_data, mask_mime
+        client = get_gemini_client()
+
+        # This call automatically emits progress
+        result = await client.generate_image(
+            prompt=state.refined_prompt,
+            source_image=(source.data, source.mime_type),
+            mask_image=(mask.data, mask.mime_type) if mask else None,
+            step="calling_api",
+            iteration=iteration_info,
         )
 
-        if image_bytes:
-            result_url = encode_data_url(image_bytes, "image/png")
+        if result.image_bytes:
+            result_url = encode_data_url(result.image_bytes, "image/png")
             logger.info("Generate: Success")
 
             emit_progress(
-                state,
                 AIProgressEvent(
                     step="processing",
                     message=f"Image generated (attempt {iteration}/{state.max_iterations})",
                     iteration=iteration_info,
                     iterationImage=result_url,
-                ),
+                )
             )
 
             return {
@@ -541,13 +350,12 @@ async def generate_node(state: GraphState) -> dict[str, Any]:
     except Exception as e:
         logger.error("Generate: Error - %s", e)
         emit_progress(
-            state,
             AIProgressEvent(
                 step="error",
                 message=f"Generation failed: {e}",
                 error=ErrorInfo(message=str(e)),
                 iteration=iteration_info,
-            ),
+            )
         )
         return {
             "current_iteration": iteration,
@@ -556,7 +364,14 @@ async def generate_node(state: GraphState) -> dict[str, Any]:
 
 
 async def self_check_node(state: GraphState) -> dict[str, Any]:
-    """Evaluate if the generated image meets the user's request."""
+    """
+    Evaluate if the generated image meets the user's request.
+
+    Uses TransparentGeminiClient which automatically streams:
+    - The evaluation prompt
+    - Thinking deltas as the AI reasons
+    - The final evaluation response
+    """
     iteration = state.current_iteration
     logger.info("Self-check: Evaluating iteration %d...", iteration)
 
@@ -566,12 +381,11 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
     if iteration >= state.max_iterations:
         logger.info("Self-check: Max iterations reached")
         emit_progress(
-            state,
             AIProgressEvent(
                 step="processing",
                 message="Max iterations reached, using final result",
                 iteration=iteration_info,
-            ),
+            )
         )
         return {
             "satisfied": True,
@@ -586,22 +400,21 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
             "steps": state.steps + ["no_result"],
         }
 
-    emit_progress(
-        state,
-        AIProgressEvent(
-            step="self_checking",
-            message="AI is evaluating the result...",
-            iteration=iteration_info,
-        ),
-    )
-
     try:
         prompt = build_evaluation_prompt(state.user_prompt, state.refined_prompt)
         source = parse_data_url(state.source_image)
         result = parse_data_url(state.current_result)
 
-        evaluation = await _evaluate_result(
-            prompt, source.data, source.mime_type, result.data, result.mime_type
+        client = get_gemini_client()
+
+        # This call automatically emits: prompt, thinking deltas, raw output
+        evaluation = await client.evaluate(
+            prompt=prompt,
+            original_image=(source.data, source.mime_type),
+            edited_image=(result.data, result.mime_type),
+            step="self_checking",
+            iteration=iteration_info,
+            thinking_budget=THINKING_BUDGETS["MEDIUM"],
         )
 
         satisfied = evaluation["satisfied"]
@@ -612,22 +425,19 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
 
         if satisfied:
             emit_progress(
-                state,
                 AIProgressEvent(
-                    step="processing",
+                    step="self_checking",
                     message=f"AI approved: {reasoning}",
                     iteration=iteration_info,
-                ),
+                )
             )
         else:
             emit_progress(
-                state,
                 AIProgressEvent(
                     step="iterating",
                     message=f"AI requested revision: {reasoning}",
-                    rawOutput=revised,
                     iteration=iteration_info,
-                ),
+                )
             )
 
         return {
@@ -642,7 +452,6 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
 
     except Exception as e:
         logger.error("Self-check: Error - %s", e)
-        # Accept on error to avoid blocking
         return {
             "satisfied": True,
             "check_reasoning": f"Check failed: {e}",

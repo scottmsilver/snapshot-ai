@@ -8,12 +8,39 @@
 import type { Response } from 'express';
 import type { GeminiService, GeminiProgressEvent } from './geminiService.js';
 import type { ImageGenerationService } from './imageGenerationService.js';
-import type { AIProgressStep } from '../types/api.js';
+import type { AIProgressStep, AIInputImage } from '../types/api.js';
 import { AI_MODELS, THINKING_BUDGETS } from '../types/api.js';
 import { sendProgress } from '../utils/sseHelpers.js';
 import { extractBase64Data, extractMimeType } from '../utils/imageHelpers.js';
 
 const MAX_ITERATIONS = 3;
+
+// Only log in development
+const DEBUG = process.env.NODE_ENV !== 'production';
+function debugLog(message: string, data?: Record<string, unknown>): void {
+  if (DEBUG) {
+    console.log(`[agenticService] ${message}`, data ? JSON.stringify(data) : '');
+  }
+}
+
+/**
+ * Type for function call results from Gemini API
+ */
+interface FunctionCallResult {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+/**
+ * Type for content parts sent to Gemini API
+ */
+interface GeminiContentPart {
+  text?: string;
+  inlineData?: {
+    mimeType: string;
+    data: string;
+  };
+}
 
 /**
  * Create a progress handler that converts Gemini progress events to SSE events
@@ -21,19 +48,21 @@ const MAX_ITERATIONS = 3;
 function createGeminiProgressHandler(
   res: Response,
   step: AIProgressStep,
-  iteration: { current: number; max: number }
+  iteration: { current: number; max: number },
+  inputImages?: AIInputImage[]
 ): (event: GeminiProgressEvent) => void {
   let previousThinkingLength = 0;
   
   return (event) => {
     if (event.type === 'request') {
-      // Send the prompt being sent to AI - this starts a new log entry
+      // Send the prompt being sent to AI with all input images
+      // Note: newLogEntry is NOT set here - the log entry is created by startAIStream in the route
       sendProgress(res, {
         step,
         message: `Sending request to AI...`,
         prompt: event.prompt,
+        inputImages,  // Include all input images for full transparency
         iteration,
-        newLogEntry: true,  // Force new log entry for each API call
       });
     } else if (event.type === 'streaming') {
       // Send thinking deltas
@@ -133,11 +162,11 @@ You MUST call the gemini_image_painter tool.`;
   function extractRefinedPrompt(
     thinking: string,
     text: string,
-    functionCall: any,
+    functionCall: FunctionCallResult | undefined,
     fallback: string
   ): string {
     // Priority 1: Function call args
-    if (functionCall && functionCall.args && functionCall.args.prompt) {
+    if (functionCall?.args?.prompt && typeof functionCall.args.prompt === 'string') {
       return functionCall.args.prompt;
     }
 
@@ -192,6 +221,26 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
   }
 
   /**
+   * Parse evaluation JSON string into structured result
+   */
+  function parseEvaluationJson(jsonStr: string): {
+    satisfied: boolean;
+    reasoning: string;
+    suggestion: string;
+  } | null {
+    try {
+      const parsed = JSON.parse(jsonStr);
+      return {
+        satisfied: parsed.satisfied === true,
+        reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
+        suggestion: typeof parsed.revised_prompt === 'string' ? parsed.revised_prompt : '',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Extract evaluation from self-check response
    */
   function extractEvaluation(text: string, thinking: string): {
@@ -199,40 +248,27 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
     reasoning: string;
     suggestion: string;
   } {
-    const evaluation = { satisfied: true, reasoning: '', suggestion: '' };
     const allText = thinking + '\n' + text;
 
     // Try to extract JSON from code fence
     const jsonMatch = allText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[1].trim());
-        evaluation.satisfied = parsed.satisfied === true;
-        evaluation.reasoning = parsed.reasoning || '';
-        evaluation.suggestion = parsed.revised_prompt || '';
-        return evaluation;
-      } catch (e) {
-        console.error('Failed to parse JSON from code fence:', e);
-      }
+      const result = parseEvaluationJson(jsonMatch[1].trim());
+      if (result) return result;
+      debugLog('Failed to parse JSON from code fence');
     }
 
     // Fallback: try to find raw JSON
     const rawJsonMatch = allText.match(/\{[\s\S]*"satisfied"[\s\S]*\}/);
     if (rawJsonMatch) {
-      try {
-        const parsed = JSON.parse(rawJsonMatch[0]);
-        evaluation.satisfied = parsed.satisfied === true;
-        evaluation.reasoning = parsed.reasoning || '';
-        evaluation.suggestion = parsed.revised_prompt || '';
-        return evaluation;
-      } catch (e) {
-        console.error('Failed to parse raw JSON:', e);
-      }
+      const result = parseEvaluationJson(rawJsonMatch[0]);
+      if (result) return result;
+      debugLog('Failed to parse raw JSON');
     }
 
-    // Default to satisfied if we can't parse
-    evaluation.reasoning = 'Could not parse evaluation response';
-    return evaluation;
+    // Default to satisfied if we can't parse - log warning
+    debugLog('Could not extract evaluation JSON, defaulting to satisfied');
+    return { satisfied: true, reasoning: 'Parse failure - defaulting to satisfied', suggestion: '' };
   }
 
   /**
@@ -246,7 +282,7 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
     res: Response,
     iteration: { current: number; max: number }
   ): Promise<{ satisfied: boolean; reasoning: string; suggestion: string }> {
-    console.log('🤖 Self-checking result...');
+    debugLog('Self-checking result');
 
     const sourceBase64 = extractBase64Data(sourceImage);
     const sourceMimeType = extractMimeType(sourceImage);
@@ -254,6 +290,12 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
     const resultMimeType = extractMimeType(resultImage);
 
     const checkPrompt = buildSelfCheckPrompt(userPrompt, editPrompt);
+
+    // Build input images for full transparency logging
+    const inputImages: AIInputImage[] = [
+      { label: 'Original Image (BEFORE)', dataUrl: sourceImage },
+      { label: 'Edited Image (AFTER)', dataUrl: resultImage },
+    ];
 
     try {
       // Use streaming for self-check phase with onProgress callback
@@ -286,7 +328,7 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
         ],
         thinkingBudget: THINKING_BUDGETS.MEDIUM,
         includeThoughts: true,
-        onProgress: createGeminiProgressHandler(res, 'self_checking', iteration),
+        onProgress: createGeminiProgressHandler(res, 'self_checking', iteration, inputImages),
       });
 
       // Simplified loop - onProgress handles SSE events
@@ -297,12 +339,13 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
 
       const evaluation = extractEvaluation(streamedText, streamedThinking);
 
-      console.log(`🤖 Self-check result: satisfied=${evaluation.satisfied}, reasoning="${evaluation.reasoning}"`);
+      debugLog('Self-check result', { satisfied: evaluation.satisfied, reasoning: evaluation.reasoning });
 
       return evaluation;
 
     } catch (error) {
-      console.error('Self-check failed:', error);
+      // Always log errors, even in production
+      console.error('[agenticService] Self-check failed:', error);
       // On error, assume satisfied to avoid blocking progress
       return {
         satisfied: true,
@@ -324,22 +367,31 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
       sseResponse: res,
     } = options;
 
-    console.log('🤖 Starting agentic edit with streaming updates');
+    debugLog('Starting agentic edit with streaming updates');
 
     // Step 1: Plan the edit
     const systemPrompt = buildSystemPrompt(prompt, !!maskImage);
+    
+    // Build input images for full transparency logging
+    const planningInputImages: AIInputImage[] = [
+      { label: 'Source Image', dataUrl: sourceImage },
+    ];
+    if (maskImage) {
+      planningInputImages.push({ label: 'Mask (white = edit area)', dataUrl: maskImage });
+    }
     
     sendProgress(res, {
       step: 'planning',
       message: 'Sending planning request to AI...',
       prompt: systemPrompt,  // Send the full planning prompt
+      inputImages: planningInputImages,  // Include input images!
       iteration: { current: 0, max: maxIterations },
     });
     const sourceBase64 = extractBase64Data(sourceImage);
     const sourceMimeType = extractMimeType(sourceImage);
 
     // Build content parts
-    const contentParts: any[] = [
+    const contentParts: GeminiContentPart[] = [
       { text: systemPrompt },
       {
         inlineData: {
@@ -379,7 +431,7 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
       },
     ];
 
-    console.log('🤖 Planning edit with high thinking budget (streaming)...');
+    debugLog('Planning edit with high thinking budget (streaming)');
 
     // Use streaming for planning phase with onProgress callback
     const stream = gemini.callStream({
@@ -388,29 +440,29 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
       tools: [{ functionDeclarations: toolDeclarations }],
       thinkingBudget: THINKING_BUDGETS.HIGH,
       includeThoughts: true,
-      onProgress: createGeminiProgressHandler(res, 'planning', { current: 0, max: maxIterations }),
+      onProgress: createGeminiProgressHandler(res, 'planning', { current: 0, max: maxIterations }, planningInputImages),
     });
 
     let streamedThinking = '';
     let streamedText = '';
     let refinedPrompt = prompt;
-    let lastFunctionCall: any = undefined;
+    let lastFunctionCall: FunctionCallResult | undefined = undefined;
 
     // Simplified loop - onProgress handles SSE events
     for await (const chunk of stream) {
       streamedThinking = chunk.thinking;
       streamedText = chunk.text;
       if (chunk.functionCall) {
-        lastFunctionCall = chunk.functionCall;
+        lastFunctionCall = chunk.functionCall as FunctionCallResult;
       }
     }
 
-    console.log(`🤖 Stream complete: ${streamedThinking.length} thinking chars, ${streamedText.length} text chars`);
+    debugLog('Stream complete', { thinkingChars: streamedThinking.length, textChars: streamedText.length });
 
     // Extract refined prompt
     refinedPrompt = extractRefinedPrompt(streamedThinking, streamedText, lastFunctionCall, prompt);
 
-    console.log(`🤖 Agent refined prompt: "${refinedPrompt.substring(0, 100)}..."`);
+    debugLog('Agent refined prompt', { preview: refinedPrompt.substring(0, 100) });
 
     sendProgress(res, {
       step: 'processing',
@@ -425,7 +477,7 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       actualIterations = iteration + 1;
-      console.log(`🤖 Iteration ${actualIterations}/${maxIterations}`);
+      debugLog('Iteration', { current: actualIterations, max: maxIterations });
 
       sendProgress(res, {
         step: 'calling_api',
@@ -454,7 +506,8 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
         finalResult = generationResult.imageData;
 
       } catch (editError) {
-        console.error('🤖 Image generation failed:', editError);
+        // Always log errors, even in production
+        console.error('[agenticService] Image generation failed:', editError);
         sendProgress(res, {
           step: 'error',
           message: 'Image generation failed',
@@ -468,7 +521,7 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
       }
 
       if (!finalResult) {
-        console.log('🤖 No result from edit, stopping');
+        debugLog('No result from edit, stopping');
         break;
       }
 
@@ -481,7 +534,7 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
 
       // Skip self-check on last iteration
       if (iteration >= maxIterations - 1) {
-        console.log('🤖 Max iterations reached, using current result');
+        debugLog('Max iterations reached, using current result');
         sendProgress(res, {
           step: 'processing',
           message: 'Max iterations reached, using final result',
@@ -491,6 +544,15 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
       }
 
       // Self-check: Did we meet the user's goal?
+      // Always log this to help debug - self-check should run on iterations < maxIterations-1
+      console.log(`[agenticService] Starting self-check for iteration ${actualIterations}/${maxIterations}`);
+      
+      sendProgress(res, {
+        step: 'self_checking',
+        message: 'Evaluating result...',
+        iteration: { current: actualIterations, max: maxIterations },
+      });
+      
       const checkResult = await selfCheck(
         sourceImage,
         finalResult,
@@ -501,15 +563,15 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
       );
 
       if (checkResult.satisfied) {
-        console.log(`🤖 Self-check SATISFIED: ${checkResult.reasoning}`);
+        debugLog('Self-check SATISFIED', { reasoning: checkResult.reasoning });
         sendProgress(res, {
-          step: 'processing',
+          step: 'self_checking',
           message: `AI approved: ${checkResult.reasoning}`,  // Include reasoning
           iteration: { current: actualIterations, max: maxIterations },
         });
         break;
       } else {
-        console.log(`🤖 Self-check requested REVISION: ${checkResult.reasoning}`);
+        debugLog('Self-check requested REVISION', { reasoning: checkResult.reasoning });
         
         if (checkResult.suggestion) {
           sendProgress(res, {
@@ -520,9 +582,9 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
           });
 
           refinedPrompt = checkResult.suggestion;
-          console.log(`🤖 Trying revised prompt: "${refinedPrompt.substring(0, 100)}..."`);
+          debugLog('Trying revised prompt', { preview: refinedPrompt.substring(0, 100) });
         } else {
-          console.log('🤖 No suggestion provided, using current result');
+          debugLog('No suggestion provided, using current result');
           sendProgress(res, {
             step: 'processing',
             message: 'No revision suggested, using current result',
@@ -537,11 +599,8 @@ Be strict but fair. If the edit is close to correct, consider it satisfied.`;
       throw new Error('Failed to generate image after all iterations');
     }
 
-    sendProgress(res, {
-      step: 'complete',
-      message: 'Edit completed successfully!',
-      iteration: { current: actualIterations, max: maxIterations },
-    });
+    // Note: The final 'complete' progress event with iterationImage is sent by completeAIStream in the route
+    // We just return the result here
 
     return {
       imageData: finalResult,

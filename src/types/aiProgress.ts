@@ -25,6 +25,16 @@ export type ThinkingStatus =
   | 'rejected';         // Iteration rejected (red flash)
 
 /**
+ * An input image sent to the AI (for full transparency logging)
+ */
+export interface AIInputImage {
+  /** Label describing what this image is (e.g., "Original Image", "Edited Result", "Mask") */
+  label: string;
+  /** Base64 data URL of the image */
+  dataUrl: string;
+}
+
+/**
  * A single log entry in the AI console
  */
 export interface AILogEntry {
@@ -34,13 +44,15 @@ export interface AILogEntry {
   message: string;
   thinkingText?: string;
   
-  // NEW: Add these fields for full transparency
+  // Full transparency fields
   /** The prompt being sent to the AI (system prompt, user prompt, etc) */
   prompt?: string;
   /** Raw text output from the AI (non-thinking response) */
   rawOutput?: string;
   /** Incremental raw output delta (for streaming) */
   rawOutputDelta?: string;
+  /** All input images sent to the AI for this call */
+  inputImages?: AIInputImage[];
   
   iteration?: {
     current: number;
@@ -72,6 +84,10 @@ export interface AILogEntry {
     totalChangedPixels: number;
     percentChanged: number;
   };
+  /** @deprecated Use inputImages instead */
+  sourceImage?: string;
+  /** @deprecated Use inputImages instead */
+  maskImage?: string;
 }
 
 /**
@@ -125,13 +141,15 @@ export interface AIProgressEvent {
   /** Incremental thinking text delta (for streaming - append to existing) */
   thinkingTextDelta?: string;
   
-  // NEW: Add these fields for full transparency
+  // Full transparency fields
   /** The prompt being sent to the AI (system prompt, user prompt, etc) */
   prompt?: string;
   /** Raw text output from the AI (non-thinking response) */
   rawOutput?: string;
   /** Incremental raw output delta (for streaming) */
   rawOutputDelta?: string;
+  /** All input images sent to the AI for this call */
+  inputImages?: AIInputImage[];
   
   iteration?: {
     current: number;
@@ -145,6 +163,10 @@ export interface AIProgressEvent {
   iterationImage?: string;
   /** If true, forces creation of a new log entry instead of updating existing */
   newLogEntry?: boolean;
+  /** @deprecated Use inputImages instead */
+  sourceImage?: string;
+  /** @deprecated Use inputImages instead */
+  maskImage?: string;
 }
 
 /**

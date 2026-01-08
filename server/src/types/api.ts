@@ -42,6 +42,16 @@ export type AIProgressStep =
   | 'error';
 
 /**
+ * An input image sent to the AI (for full transparency logging)
+ */
+export interface AIInputImage {
+  /** Label describing what this image is (e.g., "Original Image", "Edited Result", "Mask") */
+  label: string;
+  /** Base64 data URL of the image */
+  dataUrl: string;
+}
+
+/**
  * SSE progress event for streaming operations (matches client AIProgressEvent)
  */
 export interface AIProgressEvent {
@@ -51,13 +61,15 @@ export interface AIProgressEvent {
   /** Incremental thinking text delta (for streaming - append to existing) */
   thinkingTextDelta?: string;
   
-  // NEW: Add these fields for full transparency
+  // Full transparency fields
   /** The prompt being sent to the AI (system prompt, user prompt, etc) */
   prompt?: string;
   /** Raw text output from the AI (non-thinking response) */
   rawOutput?: string;
   /** Incremental raw output delta (for streaming) */
   rawOutputDelta?: string;
+  /** All input images sent to the AI for this call */
+  inputImages?: AIInputImage[];
   
   iteration?: {
     current: number;
@@ -71,19 +83,60 @@ export interface AIProgressEvent {
   iterationImage?: string;
   /** If true, forces creation of a new log entry instead of updating existing */
   newLogEntry?: boolean;
+  /** 
+   * @deprecated Use inputImages instead. 
+   * Kept for backward compatibility with existing SSE consumers.
+   * TODO: Remove in next major version after client migration.
+   */
+  sourceImage?: string;
+  /** 
+   * @deprecated Use inputImages instead.
+   * Kept for backward compatibility with existing SSE consumers.
+   * TODO: Remove in next major version after client migration.
+   */
+  maskImage?: string;
 }
 
 // ============================================================================
 // POST /api/ai/generate - Text generation
 // ============================================================================
 
+/**
+ * Gemini content part - text or inline data
+ * @see https://ai.google.dev/api/generate-content#v1beta.Content
+ */
+export interface GeminiContentPart {
+  text?: string;
+  inlineData?: {
+    mimeType: string;
+    data: string;
+  };
+}
+
+/**
+ * Gemini content structure for multi-turn conversations
+ */
+export interface GeminiContent {
+  role: 'user' | 'model';
+  parts: GeminiContentPart[];
+}
+
+/**
+ * Gemini function declaration for tool use
+ */
+export interface GeminiFunctionDeclaration {
+  name: string;
+  description: string;
+  parameters?: Record<string, unknown>;
+}
+
 export interface GenerateTextRequest {
   /** The model to use */
   model: string;
-  /** The content/prompt to send */
-  contents: any[];
+  /** The content/prompt to send (Gemini Content format) */
+  contents: GeminiContent[];
   /** Optional tools (function declarations) */
-  tools?: any[];
+  tools?: Array<{ functionDeclarations: GeminiFunctionDeclaration[] }>;
   /** Generation config */
   generationConfig?: Record<string, unknown>;
   /** Thinking budget - defaults to MEDIUM */
@@ -94,9 +147,32 @@ export interface GenerateTextRequest {
   logLabel?: string;
 }
 
+/**
+ * Raw Gemini API response structure (simplified)
+ * Full type would require @google/generative-ai types
+ */
+export interface GeminiRawResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string;
+        functionCall?: {
+          name: string;
+          args: Record<string, unknown>;
+        };
+      }>;
+    };
+  }>;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
+}
+
 export interface GenerateTextResponse {
-  /** The raw result from the API */
-  raw: any;
+  /** The raw result from the API (Gemini response structure) */
+  raw: GeminiRawResponse;
   /** Extracted text response (non-thinking parts) */
   text: string;
   /** Extracted thinking text */
@@ -104,7 +180,7 @@ export interface GenerateTextResponse {
   /** Function call if present */
   functionCall?: {
     name: string;
-    args: Record<string, any>;
+    args: Record<string, unknown>;
   };
 }
 
@@ -128,8 +204,8 @@ export interface GenerateImageRequest {
 }
 
 export interface GenerateImageResponse {
-  /** The raw result from the API */
-  raw: any;
+  /** The raw result from the API (Gemini response structure) */
+  raw: GeminiRawResponse;
   /** Generated image (base64 data URL) */
   imageData: string;
 }
@@ -149,13 +225,17 @@ export interface InpaintRequest {
   thinkingBudget?: number;
 }
 
+/**
+ * InpaintResponse - now returns same format as AgenticEditResponse
+ * since both endpoints use the agentic graph
+ */
 export interface InpaintResponse {
   /** Generated image (base64 data URL) */
   imageData: string;
-  /** AI's refined prompt used for generation */
-  refinedPrompt: string;
-  /** AI's thinking during planning */
-  thinking: string;
+  /** Number of iterations performed */
+  iterations: number;
+  /** Final prompt that produced the result */
+  finalPrompt: string;
 }
 
 // ============================================================================

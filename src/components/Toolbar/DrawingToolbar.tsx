@@ -15,8 +15,7 @@ import {
   ScreenshotIcon,
   ImageIcon,
   GenerativeFillIcon,
-  AIReferenceIcon,
-  AIMoveIcon
+  AIReferenceIcon
 } from '@/components/Icons/ToolIcons';
 import { ColorPicker } from '@/components/ColorPicker';
 import { ChevronDown } from 'lucide-react';
@@ -34,8 +33,7 @@ const tools = [
   { tool: DrawingTool.IMAGE, icon: ImageIcon, label: 'Image/PDF', shortcut: 'I' },
   { tool: DrawingTool.SCREENSHOT, icon: ScreenshotIcon, label: 'Screenshot', shortcut: 'X' },
   { tool: DrawingTool.MEASURE, icon: MeasureIcon, label: 'Measure', shortcut: 'M' },
-  { tool: DrawingTool.GENERATIVE_FILL, icon: GenerativeFillIcon, label: 'AI Fill', shortcut: 'G' },
-  { tool: DrawingTool.AI_MOVE, icon: AIMoveIcon, label: 'AI Move', shortcut: 'Q' }
+  { tool: DrawingTool.GENERATIVE_FILL, icon: GenerativeFillIcon, label: 'AI Fill', shortcut: 'G' }
 ];
 
 interface DrawingToolbarProps {

@@ -15,6 +15,12 @@ from .agentic import (
     GenerateTextResponse,
     FunctionCall,
 )
+from .images import (
+    GenerateImageRequest,
+    GenerateImageResponse,
+    InpaintRequest,
+    InpaintResponse,
+)
 
 __all__ = [
     # Config
@@ -36,4 +42,9 @@ __all__ = [
     "GenerateTextRequest",
     "GenerateTextResponse",
     "FunctionCall",
+    # Image Generation Types
+    "GenerateImageRequest",
+    "GenerateImageResponse",
+    "InpaintRequest",
+    "InpaintResponse",
 ]

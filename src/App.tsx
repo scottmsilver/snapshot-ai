@@ -42,8 +42,8 @@ import { SettingsDialog } from '@/components/Settings';
 import { createGenerativeService } from '@/services/generativeApi';
 import { AgenticPainterService, type MovePlan } from '@/services/agenticService';
 import { settingsManager } from '@/services/settingsManager';
-// SAM service removed - AI Move not yet implemented
-import { generateBrushMask, generateRectangleMask, generateLassoMask, imageDataToBase64 } from '@/utils/maskRendering';
+import { generateBrushMask, generateRectangleMask, generateLassoMask, imageDataToBase64, base64ToImageData } from '@/utils/maskRendering';
+import { createAPIClient } from '@/services/apiClient';
 import { annotateImage } from '@/utils/imageAnnotation';
 import { InlineTextPlayground } from '@/components/Test/InlineTextPlayground';
 import { ManipulationDialog, MoveConfirmationDialog } from '@/components/AIReference';
@@ -91,7 +91,7 @@ function MainApp(): React.ReactElement {
   const [isPlanningMove, setIsPlanningMove] = useState(false);
 
   const authContext = useOptionalAuth();
-  const { updateProgress } = useAIProgress();
+  const { updateProgress, setExportData } = useAIProgress();
   const captureAiSourceAndMask = useCallback((stage: Konva.Stage) => {
     const sourceCanvas = captureCleanCanvas(stage);
     const sourceCtx = sourceCanvas.getContext('2d')!;
@@ -119,7 +119,7 @@ function MainApp(): React.ReactElement {
     deleteSelected,
     updateStyle,
   } = useDrawing();
-  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes, clearReferencePoints, setAiReferenceMode, clearAiMoveState, clearAiMarkupShapes } = useDrawingContext();
+  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes, clearReferencePoints, setAiReferenceMode, clearAiMarkupShapes } = useDrawingContext();
   const { canUndo, canRedo, pushState, undo, redo, getCurrentState, currentIndex } = useHistory();
 
   const selectedShapes = useMemo(
@@ -312,175 +312,6 @@ function MainApp(): React.ReactElement {
     setCalibrationDialogOpen(false);
     setPendingCalibrationLine(null);
   }, [deleteShapes, pendingCalibrationLine]);
-
-  const handleAiMoveClick = useCallback(async () => {
-    // AI Move requires SAM (Segment Anything Model) which is not yet implemented
-    console.log('AI Move: Not yet implemented - SAM service needs to be integrated');
-    clearAiMoveState();
-  }, [clearAiMoveState]);
-
-  // Effect to execute AI move when phase transitions to 'executing'
-  useEffect(() => {
-    const aiMoveState = drawingState.aiMoveState;
-    if (!aiMoveState || aiMoveState.phase !== 'executing') {
-      return;
-    }
-
-    // Capture required data before async operation
-    const { segmentedBounds, originalClickPoint, currentDragPoint } = aiMoveState;
-    if (!segmentedBounds || !originalClickPoint || !currentDragPoint) {
-      console.error('AI Move: Missing required data for execution');
-      clearAiMoveState();
-      return;
-    }
-
-    // Calculate movement offset
-    const offsetX = currentDragPoint.x - originalClickPoint.x;
-    const offsetY = currentDragPoint.y - originalClickPoint.y;
-
-    // Skip if no movement
-    if (Math.abs(offsetX) < 5 && Math.abs(offsetY) < 5) {
-      console.log('AI Move: Movement too small, cancelling');
-      clearAiMoveState();
-      return;
-    }
-
-    const executeMove = async (): Promise<void> => {
-      try {
-        const stage = stageRef.current;
-        if (!stage) {
-          clearAiMoveState();
-          return;
-        }
-
-        updateProgress({
-          step: 'planning',
-          message: 'Preparing AI move operation...',
-          thinkingText: `## AI Move Operation\n\nMoving object from (${Math.round(originalClickPoint.x)}, ${Math.round(originalClickPoint.y)}) to (${Math.round(currentDragPoint.x)}, ${Math.round(currentDragPoint.y)})\n\n**Offset:** ${Math.round(offsetX)}px horizontal, ${Math.round(offsetY)}px vertical`,
-          iteration: { current: 0, max: 3 }
-        });
-
-        // Get settings for API key and LangGraph preference
-        let geminiApiKey: string | null = null;
-        let useLangGraph = false;
-        if (authContext?.isAuthenticated && authContext?.getAccessToken) {
-          try {
-            const accessToken = authContext.getAccessToken();
-            if (accessToken) {
-              await settingsManager.initialize(accessToken);
-              geminiApiKey = await settingsManager.getGeminiApiKey();
-              useLangGraph = await settingsManager.getUseLangGraph();
-            }
-          } catch (error) {
-            console.error('Failed to get settings:', error);
-          }
-        }
-
-        // In server mode, API key is handled server-side. In legacy mode, we need it client-side.
-        const apiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
-        if (!isServerAIEnabled() && !apiKey) {
-          updateProgress({
-            step: 'error',
-            message: 'No API key configured',
-            error: { message: 'Please add your Gemini API key in Settings (or enable server mode)' }
-          });
-          clearAiMoveState();
-          return;
-        }
-
-        // Capture clean canvas plus alpha mask for smart transparency remask
-        const { sourceImageData, alphaMaskImageData } = captureAiSourceAndMask(stage);
-
-        // Build the move prompt describing what to do
-        const moveDirection = [];
-        if (offsetX > 0) moveDirection.push(`${Math.round(offsetX)} pixels to the right`);
-        if (offsetX < 0) moveDirection.push(`${Math.round(Math.abs(offsetX))} pixels to the left`);
-        if (offsetY > 0) moveDirection.push(`${Math.round(offsetY)} pixels down`);
-        if (offsetY < 0) moveDirection.push(`${Math.round(Math.abs(offsetY))} pixels up`);
-
-        const movePrompt = `Move the object that was at position (${Math.round(originalClickPoint.x)}, ${Math.round(originalClickPoint.y)}) to position (${Math.round(currentDragPoint.x)}, ${Math.round(currentDragPoint.y)}). That's ${moveDirection.join(' and ')}. Fill in the original location naturally to match the surrounding background. Keep the moved object exactly the same but in the new position.`;
-
-        updateProgress({
-          step: 'calling_api',
-          message: 'Executing AI move...',
-          thinkingText: `## AI Move Prompt\n\n${movePrompt}`,
-          iteration: { current: 1, max: 3 }
-        });
-
-        // Create services and execute edit
-        const generativeService = createGenerativeService(apiKey);
-        const agenticService = new AgenticPainterService(apiKey, generativeService);
-
-        const result = await agenticService.edit(
-          sourceImageData,
-          movePrompt,
-          undefined, // no mask - let AI figure out what to move based on coordinates
-          updateProgress,
-          { useLangGraph }
-        );
-        const remaskedResult = applySmartTransparencyMask(result, sourceImageData, alphaMaskImageData);
-
-        // Convert result to image and add to canvas
-        const resultCanvas = document.createElement('canvas');
-        resultCanvas.width = remaskedResult.width;
-        resultCanvas.height = remaskedResult.height;
-        const resultCtx = resultCanvas.getContext('2d')!;
-        resultCtx.putImageData(remaskedResult, 0, 0);
-        const resultDataUrl = resultCanvas.toDataURL('image/png');
-
-        // Create image element
-        const img = new Image();
-        img.src = resultDataUrl;
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = reject;
-        });
-
-        // Add as new image shape
-        const newShape = {
-          id: `ai_move_${Date.now()}`,
-          type: DrawingTool.IMAGE as typeof DrawingTool.IMAGE,
-          x: 0,
-          y: 0,
-          width: remaskedResult.width,
-          height: remaskedResult.height,
-          src: resultDataUrl,
-          image: img,
-          style: {
-            stroke: '#000000',
-            strokeWidth: 0,
-            opacity: 1,
-          },
-          visible: true,
-          locked: false,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-
-        addShape(newShape);
-        setActiveTool(DrawingTool.SELECT);
-        selectShape(newShape.id);
-
-        updateProgress({
-          step: 'complete',
-          message: 'AI move completed!',
-          thinkingText: '## Complete\n\nThe object has been moved successfully.',
-        });
-
-        clearAiMoveState();
-      } catch (error) {
-        console.error('AI Move execution failed:', error);
-        updateProgress({
-          step: 'error',
-          message: 'AI move failed',
-          error: { message: error instanceof Error ? error.message : 'Unknown error' }
-        });
-        clearAiMoveState();
-      }
-    };
-
-    executeMove();
-  }, [drawingState.aiMoveState, clearAiMoveState, updateProgress, authContext, addShape, setActiveTool, selectShape]);
 
   const handleDismissSharedFileError = useCallback(() => {
     setSharedFileError(null);
@@ -810,8 +641,12 @@ function MainApp(): React.ReactElement {
         // Capture clean canvas and alpha mask for smart transparency remask
         const { sourceCanvas, sourceImageData, alphaMaskImageData } = captureAiSourceAndMask(stage);
 
+        // Convert source to base64 for export
+        const sourceBase64ForExport = sourceCanvas.toDataURL('image/png');
+
         // Generate mask only if in inpainting mode
         let maskExport;
+        let maskBase64ForExport: string | undefined;
         if (mode === 'inpainting') {
           if (selectionTool === GenerativeFillSelectionTool.BRUSH) {
             maskExport = generateBrushMask(sourceCanvas, selectionPoints, brushWidth);
@@ -822,6 +657,14 @@ function MainApp(): React.ReactElement {
           } else {
             throw new Error('Invalid selection tool or missing selection data');
           }
+
+          // Convert mask to base64 for export
+          const maskCanvas = document.createElement('canvas');
+          maskCanvas.width = maskExport.maskImageData.width;
+          maskCanvas.height = maskExport.maskImageData.height;
+          const maskCtx = maskCanvas.getContext('2d')!;
+          maskCtx.putImageData(maskExport.maskImageData, 0, 0);
+          maskBase64ForExport = maskCanvas.toDataURL('image/png');
         }
 
         // Get settings
@@ -883,22 +726,41 @@ function MainApp(): React.ReactElement {
         // Resolve Gemini API Key for the Agent (and Nano Banana tool)
         const effectiveGeminiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
 
-        // Create specific service for the Nano Banana tool (always Gemini)
-        const nanoBananaService = createGenerativeService(
-          effectiveGeminiKey,
-          'gemini',
-          undefined,
-          'gemini',
-          'gemini'
-        );
+        let resultImageData: ImageData;
 
-        // Use Agentic Service for the interaction
-        const agenticService = new AgenticPainterService(effectiveGeminiKey, nanoBananaService);
+        // Use SSE streaming for inpainting mode when server AI is enabled
+        if (isServerAIEnabled() && mode === 'inpainting' && maskExport && maskBase64ForExport) {
+          // Use new SSE streaming inpaint endpoint
+          console.log('🎨 App: Starting inpaintStream...');
+          const apiClient = createAPIClient();
+          const result = await apiClient.inpaintStream(
+            sourceBase64ForExport,
+            maskBase64ForExport,
+            prompt,
+            {
+              onProgress: updateProgress,
+            }
+          );
+          console.log('🎨 App: inpaintStream resolved!', { hasImageData: !!result.imageData, imageDataLength: result.imageData?.length || 0 });
+          resultImageData = await base64ToImageData(result.imageData);
+        } else {
+          // Create specific service for the Nano Banana tool (always Gemini)
+          const nanoBananaService = createGenerativeService(
+            effectiveGeminiKey,
+            'gemini',
+            undefined,
+            'gemini',
+            'gemini'
+          );
 
-        // Call edit() method which handles both inpainting and text-only modes
-        const resultImageData = mode === 'inpainting' && maskExport
-          ? await agenticService.edit(sourceImageData, prompt, maskExport.maskImageData, updateProgress, { useLangGraph })
-          : await agenticService.edit(sourceImageData, prompt, undefined, updateProgress, { useLangGraph });
+          // Use Agentic Service for text-only mode or when server AI is disabled
+          const agenticService = new AgenticPainterService(effectiveGeminiKey, nanoBananaService);
+
+          // Call edit() method which handles both inpainting and text-only modes
+          resultImageData = mode === 'inpainting' && maskExport
+            ? await agenticService.edit(sourceImageData, prompt, maskExport.maskImageData, updateProgress, { useLangGraph })
+            : await agenticService.edit(sourceImageData, prompt, undefined, updateProgress, { useLangGraph });
+        }
         const remaskedResult = applySmartTransparencyMask(
           resultImageData,
           sourceImageData,
@@ -948,6 +810,19 @@ function MainApp(): React.ReactElement {
         addShape(imageShape);
         selectShape(imageShape.id);
 
+        // Set export data for Save button in AI Progress Panel
+        setExportData({
+          sourceImage: sourceBase64ForExport,
+          resultImage: resultBase64,
+          prompt,
+          maskImage: maskBase64ForExport,
+          type: mode === 'inpainting' ? 'ai_fill' : 'ai_fill_text_only',
+          canvas: {
+            width: sourceCanvas.width,
+            height: sourceCanvas.height,
+          },
+        });
+
         // Exit generative fill mode
         dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
       } catch (error) {
@@ -957,7 +832,7 @@ function MainApp(): React.ReactElement {
         dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
       }
     },
-    [dispatch, drawingState.generativeFillMode, stageRef, shapes, addShape, selectShape, authContext, updateProgress]
+    [dispatch, drawingState.generativeFillMode, stageRef, shapes, addShape, selectShape, authContext, updateProgress, setExportData]
   );
 
   const handleGenerativeFillDialogCancel = useCallback(() => {
@@ -1452,7 +1327,6 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
               clearAiMarkupShapes();
               setAiReferenceMode(false);
             }}
-            onAiMoveClick={handleAiMoveClick}
             isManipulationDialogOpen={manipulationDialogOpen || moveConfirmationOpen}
           />
 

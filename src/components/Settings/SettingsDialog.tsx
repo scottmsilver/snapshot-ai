@@ -581,6 +581,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps): React.
                         style={{ display: 'none' }}
                       />
                     </div>
+
                   </div>
 
                   {/* API Keys Section */}

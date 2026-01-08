@@ -29,6 +29,14 @@ export function initSSE(res: Response): void {
 }
 
 /**
+ * Extended Response type that includes optional flush method
+ * (added by compression middleware)
+ */
+interface FlushableResponse extends Response {
+  flush?: () => void;
+}
+
+/**
  * Send an SSE event to the client
  * 
  * @param res - Express response object
@@ -38,11 +46,23 @@ export function initSSE(res: Response): void {
 export function sendSSE(
   res: Response,
   event: string,
-  data: any
+  data: unknown
 ): void {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  res.write(message);
+  // Force flush - try multiple methods (flush is added by compression middleware)
+  const flushableRes = res as FlushableResponse;
+  if (typeof flushableRes.flush === 'function') {
+    flushableRes.flush();
+  }
+  // For Node.js streams, cork/uncork can help with flushing
+  if (res.socket && !res.socket.destroyed) {
+    res.socket.uncork?.();
+  }
 }
+
+// Only log in development
+const DEBUG = process.env.NODE_ENV !== 'production';
 
 /**
  * Send a progress event (convenience wrapper)
@@ -54,6 +74,14 @@ export function sendProgress(
   res: Response,
   progressEvent: AIProgressEvent
 ): void {
+  if (DEBUG) {
+    console.log('[SSE] sendProgress:', {
+      step: progressEvent.step,
+      message: progressEvent.message,
+      hasSourceImage: !!progressEvent.sourceImage,
+      hasMaskImage: !!progressEvent.maskImage,
+    });
+  }
   sendSSE(res, 'progress', progressEvent);
 }
 
@@ -65,7 +93,7 @@ export function sendProgress(
  */
 export function sendComplete(
   res: Response,
-  data: any
+  data: unknown
 ): void {
   sendSSE(res, 'complete', data);
 }
@@ -97,7 +125,7 @@ export function sendError(
  */
 export function endSSE(
   res: Response,
-  finalEvent?: { event: string; data: any }
+  finalEvent?: { event: string; data: unknown }
 ): void {
   if (finalEvent) {
     sendSSE(res, finalEvent.event, finalEvent.data);

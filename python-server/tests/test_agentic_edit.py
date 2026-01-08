@@ -262,20 +262,21 @@ class TestPlanningNode:
     @pytest.mark.asyncio
     async def test_planning_returns_refined_prompt(self, basic_state: GraphState):
         """Test that planning node returns a refined prompt."""
+        from services.gemini_client import GeminiResult
 
-        async def mock_stream():
-            # Simulate streaming chunks
-            mock_chunk = {
-                "function_call": MagicMock(
-                    args={"prompt": "Create a vibrant red rectangular button"}
-                )
-            }
-            yield mock_chunk
-            yield {"done": True}
+        mock_client = MagicMock()
+        mock_client.generate_with_thinking = AsyncMock(
+            return_value=GeminiResult(
+                text="",
+                thinking="Let me think about this...",
+                function_call={
+                    "name": "gemini_image_painter",
+                    "args": {"prompt": "Create a vibrant red rectangular button"},
+                },
+            )
+        )
 
-        with patch("graphs.agentic_edit._call_planning_model_streaming") as mock_call:
-            mock_call.return_value = mock_stream()
-
+        with patch("graphs.agentic_edit.get_gemini_client", return_value=mock_client):
             result = await planning_node(basic_state)
 
             assert "refined_prompt" in result
@@ -285,14 +286,12 @@ class TestPlanningNode:
     @pytest.mark.asyncio
     async def test_planning_falls_back_on_error(self, basic_state: GraphState):
         """Test that planning falls back to user prompt on error."""
+        mock_client = MagicMock()
+        mock_client.generate_with_thinking = AsyncMock(
+            side_effect=Exception("API Error")
+        )
 
-        async def mock_error_stream():
-            raise Exception("API Error")
-            yield  # Never reached, but needed for async generator
-
-        with patch("graphs.agentic_edit._call_planning_model_streaming") as mock_call:
-            mock_call.return_value = mock_error_stream()
-
+        with patch("graphs.agentic_edit.get_gemini_client", return_value=mock_client):
             result = await planning_node(basic_state)
 
             assert result["refined_prompt"] == basic_state.user_prompt
@@ -305,11 +304,16 @@ class TestGenerateNode:
     @pytest.mark.asyncio
     async def test_generate_returns_image(self, basic_state: GraphState):
         """Test that generate node returns an image."""
+        from services.gemini_client import GeminiImageResult
+
         basic_state.refined_prompt = "Create a red button"
 
-        with patch("graphs.agentic_edit._generate_image") as mock_gen:
-            mock_gen.return_value = b"fake image data"
+        mock_client = MagicMock()
+        mock_client.generate_image = AsyncMock(
+            return_value=GeminiImageResult(image_bytes=b"fake image data", text="")
+        )
 
+        with patch("graphs.agentic_edit.get_gemini_client", return_value=mock_client):
             result = await generate_node(basic_state)
 
             assert "current_result" in result
@@ -321,9 +325,12 @@ class TestGenerateNode:
         """Test that generate node handles errors gracefully."""
         basic_state.refined_prompt = "Create a red button"
 
-        with patch("graphs.agentic_edit._generate_image") as mock_gen:
-            mock_gen.side_effect = Exception("Generation failed")
+        mock_client = MagicMock()
+        mock_client.generate_image = AsyncMock(
+            side_effect=Exception("Generation failed")
+        )
 
+        with patch("graphs.agentic_edit.get_gemini_client", return_value=mock_client):
             result = await generate_node(basic_state)
 
             assert result.get("current_result") is None
@@ -340,13 +347,17 @@ class TestSelfCheckNode:
         basic_state.current_result = basic_state.source_image
         basic_state.refined_prompt = "Add a button"
 
-        with patch("graphs.agentic_edit._evaluate_result") as mock_eval:
-            mock_eval.return_value = {
+        mock_client = MagicMock()
+        mock_client.evaluate = AsyncMock(
+            return_value={
                 "satisfied": True,
                 "reasoning": "Edit looks good",
                 "revised_prompt": "",
+                "thinking": "The edit meets the requirements.",
             }
+        )
 
+        with patch("graphs.agentic_edit.get_gemini_client", return_value=mock_client):
             result = await self_check_node(basic_state)
 
             assert result["satisfied"] is True
@@ -359,13 +370,17 @@ class TestSelfCheckNode:
         basic_state.current_result = basic_state.source_image
         basic_state.refined_prompt = "Add a button"
 
-        with patch("graphs.agentic_edit._evaluate_result") as mock_eval:
-            mock_eval.return_value = {
+        mock_client = MagicMock()
+        mock_client.evaluate = AsyncMock(
+            return_value={
                 "satisfied": False,
                 "reasoning": "Button too small",
                 "revised_prompt": "Add a larger button",
+                "thinking": "The button is not visible enough.",
             }
+        )
 
+        with patch("graphs.agentic_edit.get_gemini_client", return_value=mock_client):
             result = await self_check_node(basic_state)
 
             assert result["satisfied"] is False

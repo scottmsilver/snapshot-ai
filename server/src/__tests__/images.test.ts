@@ -13,7 +13,7 @@ import imagesRouter from '../routes/images.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { createMockGeminiService, mockEnv, createTestImageDataUrl, createInvalidImageDataUrl } from './helpers/mockGemini.js';
 import * as geminiService from '../services/geminiService.js';
-import type { GenerateImageRequest, GenerateImageResponse, InpaintRequest, InpaintResponse } from '../types/api.js';
+import type { GenerateImageRequest, GenerateImageResponse } from '../types/api.js';
 
 describe('POST /api/images/generate', () => {
   let app: Express;
@@ -245,7 +245,6 @@ describe('POST /api/images/generate', () => {
 
 describe('POST /api/images/inpaint', () => {
   let app: Express;
-  let cleanupEnv: () => void;
 
   beforeEach(() => {
     // Setup test app
@@ -253,208 +252,27 @@ describe('POST /api/images/inpaint', () => {
     app.use(express.json({ limit: '50mb' }));
     app.use('/api/images', imagesRouter);
     app.use(errorHandler);
-
-    // Mock environment
-    cleanupEnv = mockEnv({ GEMINI_API_KEY: 'test-api-key' });
   });
 
   afterEach(() => {
-    cleanupEnv();
     vi.restoreAllMocks();
   });
 
-  describe('Successful inpainting', () => {
-    it('should complete two-step inpainting flow', async () => {
-      const testImageUrl = createTestImageDataUrl();
-      const mockService = createMockGeminiService({
-        image: testImageUrl,
-        text: {
-          text: 'A detailed description of the masked area',
-          thinking: 'Analyzing the masked region...',
-        },
-      });
-
-      vi.spyOn(geminiService, 'createGeminiService').mockReturnValue(mockService);
-
-      const requestBody: InpaintRequest = {
-        sourceImage: testImageUrl,
-        maskImage: testImageUrl,
-        prompt: 'Replace with a tree',
-      };
-
-      const response = await request(app)
-        .post('/api/images/inpaint')
-        .send(requestBody)
-        .expect(200)
-        .expect('Content-Type', /json/);
-
-      const data = response.body as InpaintResponse;
-
-      expect(data.imageData).toBeDefined();
-      expect(data.imageData).toContain('data:image/');
-      expect(data.refinedPrompt).toBeDefined();
-      expect(data.thinking).toBeDefined();
-    });
-
-    it('should handle custom thinkingBudget', async () => {
-      const testImageUrl = createTestImageDataUrl();
-      const mockService = createMockGeminiService({
-        image: testImageUrl,
-        text: {
-          text: 'Refined prompt',
-          thinking: 'Deep thinking with high budget',
-        },
-      });
-
-      vi.spyOn(geminiService, 'createGeminiService').mockReturnValue(mockService);
-
-      const requestBody: InpaintRequest = {
-        sourceImage: testImageUrl,
-        maskImage: testImageUrl,
-        prompt: 'Replace with a mountain',
-        thinkingBudget: 8192,
-      };
-
-      const response = await request(app)
-        .post('/api/images/inpaint')
-        .send(requestBody)
-        .expect(200);
-
-      const data = response.body as InpaintResponse;
-      expect(data.thinking).toBeDefined();
-      expect(data.thinking.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Validation', () => {
-    it('should reject missing sourceImage', async () => {
-      const requestBody = {
-        maskImage: createTestImageDataUrl(),
-        prompt: 'Replace with a tree',
-      };
-
-      const response = await request(app)
-        .post('/api/images/inpaint')
-        .send(requestBody)
-        .expect(400);
-
-      expect(response.body.error).toContain('sourceImage');
-    });
-
-    it('should reject invalid sourceImage', async () => {
-      const requestBody = {
-        sourceImage: createInvalidImageDataUrl(),
-        maskImage: createTestImageDataUrl(),
-        prompt: 'Replace with a tree',
-      };
-
-      const response = await request(app)
-        .post('/api/images/inpaint')
-        .send(requestBody)
-        .expect(400);
-
-      expect(response.body.error).toContain('sourceImage');
-    });
-
-    it('should reject missing maskImage', async () => {
-      const requestBody = {
-        sourceImage: createTestImageDataUrl(),
-        prompt: 'Replace with a tree',
-      };
-
-      const response = await request(app)
-        .post('/api/images/inpaint')
-        .send(requestBody)
-        .expect(400);
-
-      expect(response.body.error).toContain('maskImage');
-    });
-
-    it('should reject invalid maskImage', async () => {
-      const requestBody = {
-        sourceImage: createTestImageDataUrl(),
-        maskImage: createInvalidImageDataUrl(),
-        prompt: 'Replace with a tree',
-      };
-
-      const response = await request(app)
-        .post('/api/images/inpaint')
-        .send(requestBody)
-        .expect(400);
-
-      expect(response.body.error).toContain('maskImage');
-    });
-
-    it('should reject missing prompt', async () => {
+  describe('Deprecation', () => {
+    it('should return 501 with deprecation message', async () => {
       const requestBody = {
         sourceImage: createTestImageDataUrl(),
         maskImage: createTestImageDataUrl(),
-      };
-
-      const response = await request(app)
-        .post('/api/images/inpaint')
-        .send(requestBody)
-        .expect(400);
-
-      expect(response.body.error).toContain('prompt');
-    });
-
-    it('should reject non-string prompt', async () => {
-      const requestBody = {
-        sourceImage: createTestImageDataUrl(),
-        maskImage: createTestImageDataUrl(),
-        prompt: null,
-      };
-
-      const response = await request(app)
-        .post('/api/images/inpaint')
-        .send(requestBody)
-        .expect(400);
-
-      expect(response.body.error).toContain('prompt');
-    });
-  });
-
-  describe('Error handling', () => {
-    it('should handle missing API key', async () => {
-      cleanupEnv();
-      cleanupEnv = mockEnv({});
-
-      const requestBody: InpaintRequest = {
-        sourceImage: createTestImageDataUrl(),
-        maskImage: createTestImageDataUrl(),
         prompt: 'Replace with a tree',
       };
 
       const response = await request(app)
         .post('/api/images/inpaint')
         .send(requestBody)
-        .expect(500);
+        .expect(501);
 
-      expect(response.body.error).toContain('GEMINI_API_KEY');
-    });
-
-    it('should handle Gemini API errors during inpainting', async () => {
-      const mockService = createMockGeminiService({
-        shouldError: true,
-        errorMessage: 'Inpainting service unavailable',
-      });
-
-      vi.spyOn(geminiService, 'createGeminiService').mockReturnValue(mockService);
-
-      const requestBody: InpaintRequest = {
-        sourceImage: createTestImageDataUrl(),
-        maskImage: createTestImageDataUrl(),
-        prompt: 'Replace with a tree',
-      };
-
-      const response = await request(app)
-        .post('/api/images/inpaint')
-        .send(requestBody)
-        .expect(500);
-
-      expect(response.body.error).toBeDefined();
-      expect(response.body.details).toContain('unavailable');
+      expect(response.body.error).toContain('DEPRECATED');
+      expect(response.body.error).toContain('Python server');
     });
   });
 });

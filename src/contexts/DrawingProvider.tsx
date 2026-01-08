@@ -148,14 +148,6 @@ export const DrawingProvider: React.FC<DrawingProviderProps> = ({ children }) =>
     dispatch({ type: DrawingActionType.REMOVE_REFERENCE_POINT, id });
   }, []);
 
-  const setAiMoveState = useCallback((state: Partial<import('@/types/drawing').AiMoveState>) => {
-    dispatch({ type: DrawingActionType.SET_AI_MOVE_STATE, state });
-  }, []);
-
-  const clearAiMoveState = useCallback(() => {
-    dispatch({ type: DrawingActionType.CLEAR_AI_MOVE_STATE });
-  }, []);
-
   const setAiReferenceSubTool = useCallback((subTool: AIReferenceSubTool) => {
     dispatch({ type: DrawingActionType.SET_AI_REFERENCE_SUB_TOOL, subTool });
   }, []);
@@ -195,8 +187,6 @@ export const DrawingProvider: React.FC<DrawingProviderProps> = ({ children }) =>
     addReferencePoint,
     clearReferencePoints,
     removeReferencePoint,
-    setAiMoveState,
-    clearAiMoveState,
     setAiReferenceSubTool,
     addAiMarkupShape,
     clearAiMarkupShapes,

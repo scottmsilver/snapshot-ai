@@ -5,10 +5,12 @@ This server provides the Python/LangGraph backend for agentic image editing,
 designed to work alongside (or eventually replace) the Express backend.
 
 Endpoints:
-- GET  /health          - Health check
-- GET  /                - API information
-- POST /api/echo        - Echo test (proxy verification)
-- POST /api/agentic/edit - Agentic edit with SSE streaming
+- GET  /health              - Health check
+- GET  /                    - API information
+- POST /api/echo            - Echo test (proxy verification)
+- POST /api/ai/generate     - Text generation with Gemini
+- POST /api/images/generate - Image generation/editing with Gemini
+- POST /api/agentic/edit    - Agentic edit with SSE streaming
 """
 
 from __future__ import annotations
@@ -37,7 +39,10 @@ from pydantic import BaseModel
 from graphs.agentic_edit import GraphState, agentic_edit_graph
 from schemas import AgenticEditRequest, AgenticEditResponse, AIProgressEvent
 from schemas import GenerateTextRequest, GenerateTextResponse, FunctionCall
+from schemas import GenerateImageRequest, GenerateImageResponse
+from schemas import InpaintRequest, InpaintResponse
 from schemas.agentic import IterationInfo
+from schemas.config import AI_MODELS
 from schemas.config import THINKING_BUDGETS
 from utils.sse import (
     format_complete_event,
@@ -45,12 +50,19 @@ from utils.sse import (
     format_progress_event,
     format_sse_event,
 )
+from utils.ai_logging import (
+    log_image_inputs,
+    log_contents_images,
+    extract_base64_data,
+    extract_mime_type,
+)
 
 # Load environment variables
 load_dotenv()
 
 # Track server start time for uptime calculation
-_start_time = time.time()
+# Initialized in lifespan handler, not at import time
+_start_time: float | None = None
 
 
 # =============================================================================
@@ -61,7 +73,9 @@ _start_time = time.time()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown."""
+    global _start_time
     # Startup
+    _start_time = time.time()
     logger.info("Python AI Server starting...")
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     logger.info("API Key: %s", "configured" if api_key else "MISSING")
@@ -118,10 +132,11 @@ class RootResponse(BaseModel):
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """Return server health status."""
+    uptime = round(time.time() - _start_time, 2) if _start_time else 0.0
     return HealthResponse(
         status="healthy",
         timestamp=datetime.now(timezone.utc).isoformat(),
-        uptime_seconds=round(time.time() - _start_time, 2),
+        uptime_seconds=uptime,
         environment=os.getenv("ENVIRONMENT", "development"),
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
     )
@@ -138,6 +153,8 @@ async def root() -> RootResponse:
             "health": "GET /health",
             "echo": "POST /api/echo",
             "generate": "POST /api/ai/generate",
+            "images_generate": "POST /api/images/generate",
+            "images_inpaint": "POST /api/images/inpaint",
             "agentic_edit": "POST /api/agentic/edit",
         },
     )
@@ -225,6 +242,9 @@ async def generate_text(request: GenerateTextRequest) -> GenerateTextResponse:
 
         config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
+        # Log any images in the contents
+        log_contents_images(logger, request.contents)
+
         # Make the API call
         response = await client.aio.models.generate_content(
             model=request.model,
@@ -278,6 +298,283 @@ async def generate_text(request: GenerateTextRequest) -> GenerateTextResponse:
             status_code=500,
             detail=f"Gemini API call failed: {str(e)}",
         )
+
+
+# =============================================================================
+# Image Generation Endpoint (POST /api/images/generate)
+# =============================================================================
+
+# Note: extract_base64_data and extract_mime_type are imported from utils.ai_logging
+
+
+def extract_image_from_response(response) -> str | None:
+    """
+    Extract image data from Gemini API response.
+
+    Returns base64 data URL or None if no image found.
+
+    Note: The Gemini SDK may return inline_data.data as:
+    - Raw bytes (need base64 encoding)
+    - Already base64 encoded string (use as-is)
+    """
+    import base64
+
+    if not response.candidates or len(response.candidates) == 0:
+        return None
+
+    candidate = response.candidates[0]
+    if not candidate.content or not candidate.content.parts:
+        return None
+
+    for part in candidate.content.parts:
+        if hasattr(part, "inline_data") and part.inline_data and part.inline_data.data:
+            # Reconstruct data URL
+            mime_type = part.inline_data.mime_type or "image/png"
+            data = part.inline_data.data
+
+            # Handle both raw bytes and base64-encoded strings
+            if isinstance(data, bytes):
+                data = base64.b64encode(data).decode("utf-8")
+
+            return f"data:{mime_type};base64,{data}"
+
+    return None
+
+
+@app.post(
+    "/api/images/generate",
+    response_model=GenerateImageResponse,
+)
+async def generate_image(request: GenerateImageRequest) -> GenerateImageResponse:
+    """
+    Image generation/editing endpoint using Gemini.
+
+    Matches the Express endpoint at POST /api/images/generate.
+    Uses Gemini's imagen model for image generation/editing.
+    """
+    from google import genai
+    from google.genai import types
+
+    # Get API key
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: GEMINI_API_KEY not set",
+        )
+
+    client = genai.Client(api_key=api_key)
+
+    # Extract base64 data from data URL
+    source_base64 = extract_base64_data(request.sourceImage)
+    source_mime_type = extract_mime_type(request.sourceImage)
+
+    # Build edit prompt (same as Express implementation)
+    edit_prompt = f"""{request.prompt}
+
+Make SIGNIFICANT, VISIBLE changes to create the requested modification. The result should look clearly different from the original."""
+
+    logger.info(
+        "Image generation request: model=%s, prompt_length=%d, has_source=%s",
+        request.model,
+        len(request.prompt),
+        bool(request.sourceImage),
+    )
+
+    # Log image inputs with thumbnails and metadata
+    log_image_inputs(logger, source_image=request.sourceImage)
+
+    try:
+        # Build content as dict (the API accepts dict format)
+        # This matches how the Express implementation passes content
+        contents = [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": "SOURCE IMAGE:"},
+                    {
+                        "inline_data": {
+                            "mime_type": source_mime_type,
+                            "data": source_base64,
+                        }
+                    },
+                    {"text": edit_prompt},
+                ],
+            }
+        ]
+
+        # Configure for image output
+        config = types.GenerateContentConfig(
+            response_modalities=["IMAGE"],
+        )
+
+        # Make the API call
+        response = await client.aio.models.generate_content(
+            model=request.model,
+            contents=contents,  # type: ignore[arg-type] - dict format accepted at runtime
+            config=config,
+        )
+
+        # Extract image from response
+        image_data = extract_image_from_response(response)
+        if not image_data:
+            raise HTTPException(
+                status_code=500,
+                detail="No image data returned from Gemini",
+            )
+
+        logger.info("Image generation successful")
+
+        # Build raw response (simplified - full response is not JSON serializable)
+        raw = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"inlineData": {"mimeType": "image/png", "data": "..."}}
+                        ]
+                        if image_data
+                        else [],
+                    }
+                }
+            ]
+            if response.candidates
+            else [],
+        }
+
+        return GenerateImageResponse(
+            raw=raw,
+            imageData=image_data,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Image generation failed: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Image generation failed: {str(e)}",
+        )
+
+
+# =============================================================================
+# Inpaint Endpoint (POST /api/images/inpaint)
+# Now uses the full agentic workflow with SSE streaming
+# =============================================================================
+
+
+@app.post("/api/images/inpaint")
+async def inpaint(request: InpaintRequest) -> StreamingResponse:
+    """
+    Agentic inpainting endpoint with SSE progress streaming.
+
+    This endpoint now uses the full agentic workflow:
+    1. Plans the edit using AI reasoning (mask-aware)
+    2. Generates the edited image
+    3. Self-checks the result
+    4. Iterates if needed (up to 3 times)
+
+    Progress is streamed via Server-Sent Events (SSE).
+
+    Note: This replaces the old two-step inpaint process.
+    The response is now SSE events, not JSON.
+    """
+    max_iterations = 3  # Full agentic workflow
+
+    async def generate_events():
+        """Async generator yielding SSE events."""
+        try:
+            # Initialize state with mask_image (required for inpaint)
+            state = GraphState(
+                source_image=request.sourceImage,
+                mask_image=request.maskImage,  # This is required for inpaint
+                user_prompt=request.prompt,
+                max_iterations=max_iterations,
+            )
+
+            # Initial progress event
+            from graphs.agentic_edit import build_planning_prompt
+
+            planning_prompt = build_planning_prompt(
+                request.prompt,
+                has_mask=True,  # Always True for inpaint
+            )
+            yield format_progress_event(
+                AIProgressEvent(
+                    step="planning",
+                    message="Sending planning request to AI...",
+                    prompt=planning_prompt,
+                    iteration=IterationInfo(
+                        current=0,
+                        max=max_iterations,
+                    ),
+                )
+            )
+
+            # Stream graph execution
+            final_state = None
+
+            async for mode, data in agentic_edit_graph.astream(
+                state.model_dump(),
+                stream_mode=["custom", "values"],
+            ):
+                if mode == "custom":
+                    yield format_sse_event("progress", data)
+                elif mode == "values":
+                    final_state = data
+
+            # Send completion
+            if final_state:
+                image = final_state.get("current_result") or final_state.get(
+                    "source_image"
+                )
+                prompt = final_state.get("refined_prompt") or final_state.get(
+                    "user_prompt", ""
+                )
+                iterations = final_state.get("current_iteration", 1)
+
+                if image:
+                    yield format_progress_event(
+                        AIProgressEvent(
+                            step="complete",
+                            message="Inpaint completed successfully!",
+                            iteration=IterationInfo(
+                                current=iterations,
+                                max=max_iterations,
+                            ),
+                        )
+                    )
+                    yield format_complete_event(
+                        AgenticEditResponse(
+                            imageData=image,
+                            iterations=iterations,
+                            finalPrompt=prompt,
+                        )
+                    )
+                else:
+                    yield format_error_event(
+                        "No image generated",
+                        "The workflow completed but did not produce an image",
+                    )
+            else:
+                yield format_error_event(
+                    "No result from workflow",
+                    "The graph did not return a final state",
+                )
+
+        except Exception as e:
+            logger.exception("Inpaint error: %s", e)
+            yield format_error_event(str(e), traceback.format_exc())
+
+    return StreamingResponse(
+        generate_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # =============================================================================

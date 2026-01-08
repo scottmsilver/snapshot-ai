@@ -5,8 +5,17 @@ import { aiLogService, type AILogState } from '@/services/aiLogService';
 import { useCoordinateHighlightOptional } from '@/contexts/CoordinateHighlightContext';
 import { wrapCoordinatesInHtml } from './aiProgressMarkup';
 import type { AIProgressStep, AILogEntry } from '@/types/aiProgress';
-import { Brain, Zap, Cog, CheckCircle, AlertCircle, RefreshCw, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, X, Bug, Copy, Check, ArrowDownToLine, ListEnd, FileCode } from 'lucide-react';
+import { Brain, Zap, Cog, CheckCircle, AlertCircle, RefreshCw, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, X, Bug, Copy, Check, ArrowDownToLine, ListEnd, FileCode, Download } from 'lucide-react';
 import { EditRegionDebugOverlay } from './EditRegionDebugOverlay';
+import { downloadInteractionZip, createBundleFromLogEntries } from '@/services/aiInteractionExportService';
+
+// Only log in development
+const DEBUG = import.meta.env.DEV;
+function debugLog(message: string, data?: Record<string, unknown>): void {
+  if (DEBUG) {
+    console.log(`[AIProgressPanel] ${message}`, data ?? '');
+  }
+}
 
 // Configure marked for safe rendering
 marked.setOptions({
@@ -135,14 +144,26 @@ const LogEntryComponent: React.FC<{
   const hasPrompt = entry.prompt && entry.prompt.trim().length > 0;
   const hasRawOutput = entry.rawOutput && entry.rawOutput.trim().length > 0;
   const hasDebugData = !!entry.debugData;
-  const hasExpandableContent = hasThinking || hasPrompt || hasRawOutput;
+  const hasInputImages = entry.inputImages && entry.inputImages.length > 0;
+  const hasExpandableContent = hasThinking || hasPrompt || hasRawOutput || hasInputImages;
 
   // Debug: log when we have debug data
   useEffect(() => {
     if (hasDebugData) {
-      console.log('📊 LogEntryComponent: Entry has debugData', entry.id, 'regions:', entry.debugData?.editRegions?.length);
+      debugLog('Entry has debugData', { id: entry.id, regions: entry.debugData?.editRegions?.length });
     }
   }, [hasDebugData, entry.id, entry.debugData]);
+
+  // Debug: log image presence in entry
+  useEffect(() => {
+    debugLog('LogEntryComponent render', {
+      id: entry.id,
+      hasInputImages: entry.inputImages?.length ?? 0,
+      hasSourceImage: !!entry.sourceImage,
+      hasMaskImage: !!entry.maskImage,
+      hasIterationImage: !!entry.iterationImage,
+    });
+  }, [entry.id, entry.inputImages, entry.sourceImage, entry.maskImage, entry.iterationImage]);
 
   // Auto-expand latest entry when it gets content
   useEffect(() => {
@@ -263,6 +284,56 @@ const LogEntryComponent: React.FC<{
         </div>
       )}
 
+      {/* Input Images (collapsible) - shows ALL images sent to AI */}
+      {hasInputImages && expanded && (
+        <div
+          style={{
+            marginTop: '8px',
+            paddingLeft: '20px',
+            borderLeft: '2px solid #e67e22',
+            marginLeft: '6px',
+          }}
+        >
+          <div style={{ fontSize: '11px', fontWeight: 600, color: '#e67e22', marginBottom: '8px' }}>
+            INPUT IMAGES SENT TO AI:
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              gap: '16px',
+              flexWrap: 'wrap',
+            }}
+          >
+            {entry.inputImages!.map((img, idx) => (
+              <div key={idx}>
+                <div
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: '500',
+                    color: '#666',
+                    marginBottom: '4px',
+                  }}
+                >
+                  {img.label}:
+                </div>
+                <img
+                  src={img.dataUrl}
+                  alt={img.label}
+                  style={{
+                    maxWidth: '200px',
+                    maxHeight: '200px',
+                    borderRadius: '4px',
+                    border: '1px solid rgba(0, 0, 0, 0.1)',
+                    objectFit: 'contain',
+                    background: '#f5f5f5',
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Thinking text (collapsible) */}
       {hasThinking && expanded && (
         <div
@@ -294,36 +365,98 @@ const LogEntryComponent: React.FC<{
         </div>
       )}
 
-      {/* Iteration image preview */}
-      {entry.iterationImage && expanded && (
+      {/* Image previews (source, mask, and generated) */}
+      {(entry.sourceImage || entry.maskImage || entry.iterationImage) && expanded && (
         <div
           style={{
             marginTop: '8px',
             paddingLeft: '20px',
             marginLeft: '6px',
+            display: 'flex',
+            gap: '16px',
+            flexWrap: 'wrap',
           }}
         >
-          <div
-            style={{
-              fontSize: '11px',
-              fontWeight: '500',
-              color: '#666',
-              marginBottom: '4px',
-            }}
-          >
-            Generated Image:
-          </div>
-          <img
-            src={entry.iterationImage}
-            alt="Generated iteration"
-            style={{
-              maxWidth: '100%',
-              maxHeight: '200px',
-              borderRadius: '4px',
-              border: '1px solid rgba(0, 0, 0, 0.1)',
-              objectFit: 'contain',
-            }}
-          />
+          {/* Source image */}
+          {entry.sourceImage && (
+            <div>
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontWeight: '500',
+                  color: '#666',
+                  marginBottom: '4px',
+                }}
+              >
+                Source:
+              </div>
+              <img
+                src={entry.sourceImage}
+                alt="Source"
+                style={{
+                  maxWidth: '150px',
+                  maxHeight: '150px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  objectFit: 'contain',
+                  background: '#f5f5f5',
+                }}
+              />
+            </div>
+          )}
+          {/* Mask image */}
+          {entry.maskImage && (
+            <div>
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontWeight: '500',
+                  color: '#666',
+                  marginBottom: '4px',
+                }}
+              >
+                Mask:
+              </div>
+              <img
+                src={entry.maskImage}
+                alt="Mask"
+                style={{
+                  maxWidth: '150px',
+                  maxHeight: '150px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  objectFit: 'contain',
+                  background: '#000',
+                }}
+              />
+            </div>
+          )}
+          {/* Generated image */}
+          {entry.iterationImage && (
+            <div>
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontWeight: '500',
+                  color: '#666',
+                  marginBottom: '4px',
+                }}
+              >
+                Generated Image:
+              </div>
+              <img
+                src={entry.iterationImage}
+                alt="Generated iteration"
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '200px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  objectFit: 'contain',
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -339,7 +472,7 @@ const DEFAULT_PANEL_WIDTH = 320;
  * Subscribes to both the React context and the aiLogService singleton
  */
 export const AIProgressPanel: React.FC = () => {
-  const { state: contextState, clearLog: clearContextLog } = useAIProgress();
+  const { state: contextState, clearLog: clearContextLog, exportData, setExportData } = useAIProgress();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
@@ -349,6 +482,8 @@ export const AIProgressPanel: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [copiedRaw, setCopiedRaw] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   // Subscribe to aiLogService for entries from agenticService
   const [serviceLog, setServiceLog] = useState<AILogEntry[]>([]);
@@ -572,6 +707,54 @@ export const AIProgressPanel: React.FC = () => {
     });
   }, [mergedLog]);
 
+  // Save AI interaction as zip file
+  const handleSaveInteraction = useCallback(async () => {
+    if (!exportData) return;
+
+    setIsSaving(true);
+    try {
+      // Convert log entries to export events format
+      const events = mergedLog.map(entry => ({
+        timestamp: entry.timestamp,
+        step: entry.step,
+        message: entry.message,
+        thinkingText: entry.thinkingText,
+        prompt: entry.prompt,
+        rawOutput: entry.rawOutput,
+        iteration: entry.iteration,
+        error: entry.error,
+        durationMs: entry.durationMs,
+      }));
+
+      const bundle = createBundleFromLogEntries(
+        exportData.sourceImage,
+        exportData.resultImage,
+        exportData.prompt,
+        events,
+        {
+          type: exportData.type,
+          canvas: exportData.canvas,
+        },
+        exportData.maskImage
+      );
+
+      await downloadInteractionZip(bundle);
+      
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      console.error('Failed to save AI interaction:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [exportData, mergedLog]);
+
+  // Clear export data when log is cleared
+  const handleClearLogAndExport = useCallback(() => {
+    handleClearLog();
+    setExportData(null);
+  }, [handleClearLog, setExportData]);
+
   const handleResizeStart = (e: React.MouseEvent): void => {
     e.preventDefault();
     setIsResizing(true);
@@ -732,8 +915,33 @@ export const AIProgressPanel: React.FC = () => {
                   >
                     {copiedRaw ? <Check size={14} /> : <FileCode size={14} />}
                   </button>
+                  {exportData && !isActive && (
+                    <button
+                      onClick={handleSaveInteraction}
+                      disabled={isSaving}
+                      style={{
+                        background: 'none',
+                        border: '1px solid',
+                        borderColor: saved ? '#27ae60' : '#4a90e2',
+                        color: saved ? '#27ae60' : '#4a90e2',
+                        cursor: isSaving ? 'wait' : 'pointer',
+                        padding: '2px 8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        borderRadius: '3px',
+                        fontSize: '11px',
+                        fontWeight: 500,
+                        opacity: isSaving ? 0.7 : 1,
+                      }}
+                      title={saved ? 'Saved!' : 'Save AI interaction as zip file'}
+                    >
+                      {saved ? <Check size={12} /> : <Download size={12} />}
+                      {isSaving ? 'Saving...' : saved ? 'Saved!' : 'Save'}
+                    </button>
+                  )}
                   <button
-                    onClick={handleClearLog}
+                    onClick={handleClearLogAndExport}
                     style={{
                       background: 'none',
                       border: 'none',

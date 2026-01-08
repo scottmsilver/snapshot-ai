@@ -8,6 +8,14 @@
 import ky from 'ky';
 import { buildApiUrl, API_ENDPOINTS, getApiUrl } from '@/config/apiConfig';
 import { ssePostRequest, SSEError } from './sseClient';
+
+// Only log in development
+const DEBUG = import.meta.env.DEV;
+function debugLog(message: string, data?: Record<string, unknown>): void {
+  if (DEBUG) {
+    console.log(`[apiClient] ${message}`, data ?? '');
+  }
+}
 import type {
   GenerateTextRequest,
   GenerateTextResponse,
@@ -227,6 +235,54 @@ export function createAPIClient() {
   }
 
   /**
+   * Perform SSE streaming inpaint via the server
+   * 
+   * Uses the /api/ai/inpaint-stream endpoint which wraps the Python backend.
+   * Sends SSE events: progress (analyzing, generating) and complete (with imageData).
+   * 
+   * @param sourceImage - Base64 encoded source image
+   * @param maskImage - Base64 encoded mask image
+   * @param prompt - User's edit prompt
+   * @param options.thinkingBudget - Optional thinking budget for AI
+   * @param options.onProgress - Callback for SSE progress events
+   */
+  async function inpaintStream(
+    sourceImage: string,
+    maskImage: string,
+    prompt: string,
+    options: {
+      thinkingBudget?: number;
+      onProgress?: (event: AIProgressEvent) => void;
+    } = {}
+  ): Promise<InpaintResponse> {
+    const request: InpaintRequest = {
+      sourceImage,
+      maskImage,
+      prompt,
+      thinkingBudget: options.thinkingBudget,
+    };
+
+    const url = buildApiUrl(API_ENDPOINTS.INPAINT_STREAM);
+    debugLog('Inpaint streaming', { url, hasSourceImage: !!sourceImage, hasMaskImage: !!maskImage });
+
+    try {
+      return await ssePostRequest<InpaintResponse, AIProgressEvent>(
+        url,
+        request,
+        {
+          onProgress: options.onProgress,
+        }
+      );
+    } catch (error) {
+      // Map SSEError to APIError
+      if (error instanceof SSEError) {
+        throw new APIError(error.message, undefined, error.details);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Perform agentic edit with SSE streaming
    * 
    * @param sourceImage - Base64 encoded source image
@@ -254,12 +310,11 @@ export function createAPIClient() {
     };
 
     // Choose endpoint based on useLangGraph setting
-    // Both routes go through Express - the LangGraph route is proxied to Python
     const endpoint = options.useLangGraph 
-      ? API_ENDPOINTS.AGENTIC_EDIT_LANGGRAPH  // Express proxies to Python
-      : API_ENDPOINTS.AGENTIC_EDIT;           // Express handles directly
+      ? API_ENDPOINTS.AGENTIC_EDIT_LANGGRAPH 
+      : API_ENDPOINTS.AGENTIC_EDIT;
     const url = buildApiUrl(endpoint);
-    console.log(`${options.useLangGraph ? '🐍 LangGraph' : '📦 Express'} backend:`, url);
+    debugLog('Agentic edit', { backend: options.useLangGraph ? 'LangGraph' : 'Express', url });
 
     try {
       return await ssePostRequest<AgenticEditResponse, AIProgressEvent>(
@@ -283,6 +338,7 @@ export function createAPIClient() {
     callStream,
     generateImage,
     inpaint,
+    inpaintStream,
     agenticEdit,
   };
 }

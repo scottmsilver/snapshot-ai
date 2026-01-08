@@ -24,6 +24,10 @@ export interface GeminiProgressEvent {
 
 export type GeminiProgressCallback = (event: GeminiProgressEvent) => void;
 
+/**
+ * Options for non-streaming Gemini calls (e.g., image generation).
+ * Progress callback is optional for these calls.
+ */
 export interface GeminiCallOptions {
   /** The model to use */
   model: string;
@@ -41,6 +45,30 @@ export interface GeminiCallOptions {
   isImageGeneration?: boolean;
   /** Optional callback for progress events */
   onProgress?: GeminiProgressCallback;
+}
+
+/**
+ * Options for streaming Gemini calls with thinking.
+ * Progress callback is REQUIRED to ensure transparency.
+ * 
+ * This enforces that all streaming AI calls emit:
+ * - The prompt being sent
+ * - Thinking deltas as they stream
+ * - The raw output when complete
+ */
+export interface GeminiStreamOptions {
+  /** The model to use */
+  model: string;
+  /** The content/prompt to send */
+  contents: any[];
+  /** Optional tools (function declarations) */
+  tools?: any[];
+  /** Thinking budget - defaults to HIGH for streaming */
+  thinkingBudget?: number;
+  /** Whether to include thoughts in response - defaults to true */
+  includeThoughts?: boolean;
+  /** REQUIRED callback for progress events - ensures transparency */
+  onProgress: GeminiProgressCallback;
 }
 
 export interface GeminiCallResult {
@@ -148,9 +176,16 @@ export function createGeminiService(apiKey: string) {
   }
 
   /**
-   * Make a streaming AI call
+   * Make a streaming AI call with REQUIRED progress callback.
+   * 
+   * This ensures full transparency for all streaming AI calls:
+   * - The prompt being sent (emitted at start)
+   * - Thinking deltas (emitted as they stream)
+   * - The raw output (emitted at end)
+   * 
+   * Use this for any AI call that involves thinking/reasoning.
    */
-  async function* callStream(options: GeminiCallOptions): AsyncGenerator<{
+  async function* callStream(options: GeminiStreamOptions): AsyncGenerator<{
     text: string;
     thinking: string;
     functionCall?: { name: string; args: Record<string, any> };
@@ -169,8 +204,8 @@ export function createGeminiService(apiKey: string) {
     const promptText = extractPromptText(contents);
 
     try {
-      // Emit request event
-      onProgress?.({ type: 'request', prompt: promptText });
+      // Emit request event - this is now guaranteed since onProgress is required
+      onProgress({ type: 'request', prompt: promptText });
 
       // Build the request
       const request: any = {
@@ -211,8 +246,8 @@ export function createGeminiService(apiKey: string) {
           functionCall = extracted.functionCall;
         }
 
-        // Emit streaming event with accumulated data
-        onProgress?.({
+        // Emit streaming event with accumulated data - guaranteed since onProgress is required
+        onProgress({
           type: 'streaming',
           prompt: promptText,
           thinking: accumulatedThinking,
@@ -228,8 +263,8 @@ export function createGeminiService(apiKey: string) {
         };
       }
 
-      // Emit final response event
-      onProgress?.({
+      // Emit final response event - guaranteed since onProgress is required
+      onProgress({
         type: 'response',
         prompt: promptText,
         thinking: accumulatedThinking,
@@ -245,8 +280,8 @@ export function createGeminiService(apiKey: string) {
       };
 
     } catch (error) {
-      // Emit error event
-      onProgress?.({
+      // Emit error event - guaranteed since onProgress is required
+      onProgress({
         type: 'error',
         prompt: promptText,
         error: error instanceof Error ? error.message : String(error),

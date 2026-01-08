@@ -3,7 +3,7 @@
  * 
  * Provides:
  * - POST /api/images/generate - Image generation/editing
- * - POST /api/images/inpaint - Two-step inpainting
+ * - POST /api/images/inpaint - DEPRECATED (migrated to Python server)
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -12,9 +12,8 @@ import { createImageGenerationService } from '../services/imageGenerationService
 import { asyncHandler, APIError } from '../middleware/errorHandler.js';
 import type {
   GenerateImageResponse,
-  InpaintResponse,
 } from '../types/api.js';
-import { generateImageRequestSchema, inpaintRequestSchema } from '../schemas/index.js';
+import { generateImageRequestSchema } from '../schemas/index.js';
 
 const router = Router();
 
@@ -75,60 +74,11 @@ router.post('/generate', asyncHandler(async (req: Request, res: Response) => {
 /**
  * POST /api/images/inpaint
  * 
- * Two-step inpainting endpoint using Gemini
- * 
- * Step 1: Describe the masked area
- * Step 2: Edit using the description
- * 
- * Request body: InpaintRequest
- * Response: InpaintResponse
+ * DEPRECATED: This endpoint has been migrated to the Python server.
+ * Use /api/images/inpaint on the Python server (port 8001) instead.
  */
-router.post('/inpaint', asyncHandler(async (req: Request, res: Response) => {
-  // Validate request body with Zod
-  const {
-    sourceImage,
-    maskImage,
-    prompt,
-    thinkingBudget,
-  } = inpaintRequestSchema.parse(req.body);
-
-  // Get API key from environment
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new APIError(500, 'Server configuration error: GEMINI_API_KEY not set');
-  }
-
-  // Create services
-  const gemini = createGeminiService(apiKey);
-  const imageService = createImageGenerationService(gemini);
-
-  try {
-    const result = await imageService.inpaint({
-      sourceImage,
-      maskImage,
-      prompt,
-      thinkingBudget,
-    });
-
-    const response: InpaintResponse = {
-      imageData: result.imageData,
-      refinedPrompt: result.refinedPrompt,
-      thinking: result.thinking,
-    };
-
-    res.json(response);
-
-  } catch (error) {
-    // Handle Gemini API errors
-    if (error instanceof Error) {
-      throw new APIError(
-        500,
-        'Inpainting failed',
-        error.message
-      );
-    }
-    throw error;
-  }
+router.post('/inpaint', asyncHandler(async (_req: Request, _res: Response) => {
+  throw new APIError(501, 'DEPRECATED: Use Python server at /api/images/inpaint instead');
 }));
 
 export default router;

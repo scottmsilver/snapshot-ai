@@ -9,7 +9,6 @@ import { DrawingTool, type Point } from '@/types/drawing';
 import { useDrawingContext } from '@/contexts/DrawingContext';
 import { useAIProgress } from '@/contexts/AIProgressContext';
 import { ReferenceLabelOverlay } from '@/components/AIReference';
-import { DragPreview } from '@/components/AIMove';
 import { ThinkingOverlay } from '@/components/GenerativeFill/ThinkingOverlay';
 
 interface CanvasSize {
@@ -38,7 +37,6 @@ interface WorkspaceCanvasProps {
   onImageToolComplete: (bounds: { x: number; y: number; width: number; height: number }) => void;
   onReferenceManipulate?: () => void;
   onReferenceClear?: () => void;
-  onAiMoveClick?: (x: number, y: number) => void;
   isManipulationDialogOpen?: boolean;
 }
 
@@ -63,10 +61,9 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
   onImageToolComplete,
   onReferenceManipulate,
   onReferenceClear,
-  onAiMoveClick,
   isManipulationDialogOpen,
 }) => {
-  const { state: drawingState, setAiMoveState } = useDrawingContext();
+  const { state: drawingState } = useDrawingContext();
   const { state: aiProgressState } = useAIProgress();
   const [showRainbowBorder, setShowRainbowBorder] = React.useState(false);
   const lastCanvasSizeRef = React.useRef<CanvasSize | null>(null);
@@ -99,40 +96,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
 
   const effectiveCanvasSize = canvasSize ?? lastCanvasSizeRef.current;
 
-  // Handle mouse move during AI Move drag phase
-  const handleMouseMove = React.useCallback(() => {
-    const aiMoveState = drawingState.aiMoveState;
-    if (!aiMoveState || aiMoveState.phase !== 'dragging') {
-      return;
-    }
 
-    const stage = stageRef.current;
-    if (!stage) return;
-
-    const pointerPos = stage.getPointerPosition();
-    if (!pointerPos) return;
-
-    // Update current drag point (in canvas coordinates, not zoomed)
-    setAiMoveState({
-      currentDragPoint: {
-        x: pointerPos.x / zoomLevel,
-        y: pointerPos.y / zoomLevel,
-      },
-    });
-  }, [drawingState.aiMoveState, stageRef, zoomLevel, setAiMoveState]);
-
-  // Handle mouse up to complete drag and transition to executing phase
-  const handleMouseUp = React.useCallback(() => {
-    const aiMoveState = drawingState.aiMoveState;
-    if (!aiMoveState || aiMoveState.phase !== 'dragging') {
-      return;
-    }
-
-    // Transition to executing phase (the actual move will be handled elsewhere)
-    setAiMoveState({
-      phase: 'executing',
-    });
-  }, [drawingState.aiMoveState, setAiMoveState]);
   if (isLoadingSharedFile) {
     return (
       <section
@@ -331,8 +295,6 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
             height: effectiveCanvasSize.height * zoomLevel,
             overflow: 'visible',
           }}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
         >
           <Stage
             width={effectiveCanvasSize.width * zoomLevel}
@@ -367,7 +329,6 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
               onTextClick={onTextClick}
               onTextShapeEdit={onTextShapeEdit}
               onImageToolComplete={onImageToolComplete}
-              onAiMoveClick={onAiMoveClick}
             />
           </Stage>
           {/* AI Reference Mode overlay - positioned relative to canvas, hidden when dialog is open */}
@@ -378,8 +339,6 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
               zoomLevel={zoomLevel}
             />
           )}
-          {/* AI Move drag preview overlay */}
-          <DragPreview zoomLevel={zoomLevel} />
           {/* Coordinate highlight marker (from AI console hover) */}
           <CoordinateMarker
             zoomLevel={zoomLevel}

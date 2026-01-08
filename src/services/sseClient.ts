@@ -6,6 +6,14 @@
 
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 
+// Only log in development
+const DEBUG = import.meta.env.DEV;
+function debugLog(message: string, data?: Record<string, unknown>): void {
+  if (DEBUG) {
+    console.log(`[sseClient] ${message}`, data ?? '');
+  }
+}
+
 export interface SSEEvent<T = any> {
   /** Event type (e.g., 'progress', 'complete', 'error') */
   event: string;
@@ -226,8 +234,12 @@ export async function ssePostRequest<TComplete = any, TProgress = any>(
     onProgress?: (data: TProgress) => void;
   } = {}
 ): Promise<TComplete> {
+  // Use AbortController to stop the connection after receiving complete event
+  const abortController = new AbortController();
+  let isComplete = false;
+  
   return new Promise<TComplete>((resolve, reject) => {
-    let result: TComplete | undefined;
+    let lastProgressJson: string | undefined; // Track last progress event to prevent duplicates
     
     fetchEventSource(url, {
       method: 'POST',
@@ -235,8 +247,24 @@ export async function ssePostRequest<TComplete = any, TProgress = any>(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal: abortController.signal,
+      
+      // Disable automatic retry - we handle completion ourselves
+      openWhenHidden: true,
+      
+      async onopen(response: Response) {
+        debugLog('SSE connection opened', { status: response.status });
+        if (!response.ok) {
+          throw new SSEError(`HTTP error ${response.status}`, response.statusText);
+        }
+      },
       
       onmessage(ev) {
+        // If we've already completed, ignore any further events
+        if (isComplete) return;
+        
+        debugLog('SSE raw event', { event: ev.event || '(empty)', dataLength: ev.data?.length || 0 });
+        
         // Skip events with no data (e.g., SSE comments)
         if (!ev.data) return;
         
@@ -244,28 +272,58 @@ export async function ssePostRequest<TComplete = any, TProgress = any>(
           const data = JSON.parse(ev.data);
           
           if (ev.event === 'progress') {
+            // Prevent duplicate progress events (can happen with SSE retry/reconnect)
+            const currentJson = ev.data;
+            if (currentJson === lastProgressJson) {
+              debugLog('Skipping duplicate progress event');
+              return;
+            }
+            lastProgressJson = currentJson;
+            debugLog('SSE received progress', {
+              step: data.step,
+              message: data.message,
+              hasSourceImage: !!data.sourceImage,
+              hasMaskImage: !!data.maskImage,
+              newLogEntry: data.newLogEntry,
+            });
             options.onProgress?.(data);
           } else if (ev.event === 'complete') {
-            result = data;
+            debugLog('SSE received complete event', {
+              hasImageData: !!data.imageData,
+              imageDataLength: data.imageData?.length || 0,
+            });
+            isComplete = true;
+            // Abort the connection to prevent retries
+            abortController.abort();
+            resolve(data as TComplete);
           } else if (ev.event === 'error') {
+            isComplete = true;
+            abortController.abort();
             reject(new SSEError(data.message || 'Server error', data.details));
           }
-        } catch {
-          // Ignore parse errors for non-JSON data (like SSE comments)
+        } catch (parseError) {
+          // Only ignore SyntaxError (expected for SSE comments)
+          // Re-throw unexpected errors from onProgress callback
+          if (!(parseError instanceof SyntaxError)) {
+            throw parseError;
+          }
         }
       },
       
       onclose() {
-        if (result !== undefined) {
-          resolve(result);
-        } else {
+        // Only reject if we didn't complete successfully
+        if (!isComplete) {
           reject(new SSEError('SSE stream closed without complete event'));
         }
       },
       
       onerror(err) {
+        // If we aborted intentionally after complete, don't treat as error
+        if (isComplete) return;
+        
         reject(new SSEError('SSE connection error', err?.message));
-        throw err; // Stop retrying
+        // Throw to stop retrying
+        throw err;
       },
     });
   });

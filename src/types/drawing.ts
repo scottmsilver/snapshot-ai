@@ -12,8 +12,7 @@ export const DrawingTool = {
   CALIBRATE: 'calibrate', // Internal tool for setting scale
   SCREENSHOT: 'screenshot', // Tool for capturing canvas area
   IMAGE: 'image', // Shape type for pasted images
-  GENERATIVE_FILL: 'generativeFill', // AI-powered inpainting tool
-  AI_MOVE: 'ai_move' // AI-powered click-to-segment-and-drag tool
+  GENERATIVE_FILL: 'generativeFill' // AI-powered inpainting tool
 } as const;
 
 export type DrawingTool = typeof DrawingTool[keyof typeof DrawingTool];
@@ -83,15 +82,7 @@ export interface ReferencePoint {
   y: number;
 }
 
-// AI Move state for click-to-segment-and-drag operation
-export interface AiMoveState {
-  phase: 'idle' | 'segmenting' | 'dragging' | 'executing';
-  segmentedMask: string | null;  // base64 mask from SAM
-  segmentedBounds: { x: number; y: number; width: number; height: number } | null;
-  originalClickPoint: { x: number; y: number } | null;
-  currentDragPoint: { x: number; y: number } | null;
-  segmentedImageData: string | null; // cropped image of the segmented region
-}
+
 
 // Style properties
 export interface DrawingStyle {
@@ -296,9 +287,6 @@ export interface DrawingState {
   nextReferenceLabel: string;
   // Markup shapes for AI Reference mode (separate from main shapes, not in undo history)
   aiMarkupShapes: Shape[];
-
-  // AI Move state
-  aiMoveState: AiMoveState | null;
 }
 
 // Helper functions for z-order management

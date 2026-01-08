@@ -15,6 +15,8 @@ export function isServerAIEnabled(): boolean {
   return import.meta.env.VITE_USE_SERVER_AI !== 'false';
 }
 
+
+
 /**
  * Get the API base URL from environment or use default
  */
@@ -38,11 +40,16 @@ export const API_ENDPOINTS = {
   /** POST /api/ai/inpaint - Two-step inpainting process */
   INPAINT: 'api/ai/inpaint',
   
+  /** POST /api/ai/inpaint-stream - SSE streaming inpaint (wraps Python backend) */
+  INPAINT_STREAM: 'api/ai/inpaint-stream',
+  
   /** POST /api/ai/agentic/edit - SSE streaming agentic edit with iterations (Express) */
   AGENTIC_EDIT: 'api/ai/agentic/edit',
   
   /** POST /api/python/agentic/edit - SSE streaming agentic edit with LangGraph (proxied to Python) */
   AGENTIC_EDIT_LANGGRAPH: 'api/python/agentic/edit',
+  
+
 } as const;
 
 /**

@@ -25,7 +25,6 @@ interface DrawingLayerProps {
   onTextClick?: (position: Point) => void;
   onTextShapeEdit?: (shapeId: string) => void;
   onImageToolComplete?: (bounds: { x: number; y: number; width: number; height: number }) => void;
-  onAiMoveClick?: (x: number, y: number) => void;
 }
 
 type ShapeCommonProps = {
@@ -89,7 +88,7 @@ const ImageShapeComponent: React.FC<{
   );
 };
 
-export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel = 1, onTextClick, onTextShapeEdit, onImageToolComplete, onAiMoveClick }) => {
+export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel = 1, onTextClick, onTextShapeEdit, onImageToolComplete }) => {
   const {
     activeTool,
     currentStyle,
@@ -484,14 +483,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         return;
       }
 
-      if (activeTool === DrawingTool.AI_MOVE) {
-        // For AI_MOVE tool, call SAM to segment at click point
-        if (clickedOnEmpty && onAiMoveClick) {
-          onAiMoveClick(adjustedPos.x, adjustedPos.y);
-        }
-        return;
-      }
-
       if (clickedOnEmpty) {
         startDrawing(adjustedPos);
       }
@@ -848,7 +839,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     endControlPointDrag,
     onTextClick,
     onImageToolComplete,
-    onAiMoveClick,
     selectShape,
     clearSelection,
     selectedShapeIds,

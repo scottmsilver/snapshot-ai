@@ -9,7 +9,6 @@ import {
   type Point,
   type Rectangle,
   type ReferencePoint,
-  type AiMoveState,
   LayerOperation,
   GenerativeFillSelectionTool,
   AIReferenceSubTool,
@@ -78,8 +77,6 @@ export enum DrawingActionType {
   ADD_REFERENCE_POINT = 'ADD_REFERENCE_POINT',
   CLEAR_REFERENCE_POINTS = 'CLEAR_REFERENCE_POINTS',
   REMOVE_REFERENCE_POINT = 'REMOVE_REFERENCE_POINT',
-  SET_AI_MOVE_STATE = 'SET_AI_MOVE_STATE',
-  CLEAR_AI_MOVE_STATE = 'CLEAR_AI_MOVE_STATE',
   SET_AI_REFERENCE_SUB_TOOL = 'SET_AI_REFERENCE_SUB_TOOL',
   ADD_AI_MARKUP_SHAPE = 'ADD_AI_MARKUP_SHAPE',
   CLEAR_AI_MARKUP_SHAPES = 'CLEAR_AI_MARKUP_SHAPES',
@@ -131,8 +128,6 @@ type DrawingAction =
   | { type: DrawingActionType.ADD_REFERENCE_POINT; point: { x: number; y: number } }
   | { type: DrawingActionType.CLEAR_REFERENCE_POINTS }
   | { type: DrawingActionType.REMOVE_REFERENCE_POINT; id: string }
-  | { type: DrawingActionType.SET_AI_MOVE_STATE; state: Partial<AiMoveState> }
-  | { type: DrawingActionType.CLEAR_AI_MOVE_STATE }
   | { type: DrawingActionType.SET_AI_REFERENCE_SUB_TOOL; subTool: AIReferenceSubTool }
   | { type: DrawingActionType.ADD_AI_MARKUP_SHAPE; shape: Shape }
   | { type: DrawingActionType.CLEAR_AI_MARKUP_SHAPES };
@@ -170,7 +165,6 @@ export const initialState: DrawingState = {
   referencePoints: [],
   nextReferenceLabel: 'A',
   aiMarkupShapes: [],
-  aiMoveState: null,
 };
 
 // Reducer
@@ -569,28 +563,6 @@ export const drawingReducer = (state: DrawingState, action: DrawingAction): Draw
         referencePoints: state.referencePoints.filter(p => p.id !== action.id),
       };
 
-    case DrawingActionType.SET_AI_MOVE_STATE:
-      return {
-        ...state,
-        aiMoveState: state.aiMoveState
-          ? { ...state.aiMoveState, ...action.state }
-          : {
-              phase: 'idle',
-              segmentedMask: null,
-              segmentedBounds: null,
-              originalClickPoint: null,
-              currentDragPoint: null,
-              segmentedImageData: null,
-              ...action.state,
-            },
-      };
-
-    case DrawingActionType.CLEAR_AI_MOVE_STATE:
-      return {
-        ...state,
-        aiMoveState: null,
-      };
-
     case DrawingActionType.SET_AI_REFERENCE_SUB_TOOL:
       return {
         ...state,
@@ -666,10 +638,6 @@ export interface DrawingContextType {
   addReferencePoint: (point: { x: number; y: number }) => void;
   clearReferencePoints: () => void;
   removeReferencePoint: (id: string) => void;
-
-  // AI Move
-  setAiMoveState: (state: Partial<AiMoveState>) => void;
-  clearAiMoveState: () => void;
 
   // AI Reference markup
   setAiReferenceSubTool: (subTool: AIReferenceSubTool) => void;

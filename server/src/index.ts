@@ -55,6 +55,7 @@ const SHADOW_TEST_ENABLED = process.env.SHADOW_TEST_ENABLED === 'true';
 const SHADOW_TEST_SAMPLE_RATE = parseFloat(process.env.SHADOW_TEST_SAMPLE_RATE || '0.1');
 const SHADOW_TEST_TIMEOUT = parseInt(process.env.SHADOW_TEST_TIMEOUT || '30000', 10);
 
+
 // Create metrics collector for shadow testing
 const shadowMetrics = createMetricsCollector();
 
@@ -357,6 +358,8 @@ app.use('/api/ai/agentic', agenticRateLimiter, sseShadowMiddleware, agenticRoute
  * - POST /api/images/inpaint - Two-step inpainting (implemented)
  */
 app.use('/api/images', aiRateLimiter, shadowTestMiddleware, imageRoutes);
+
+
 
 // ============================================================================
 // Error handling

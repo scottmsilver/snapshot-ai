@@ -61,6 +61,13 @@ class ErrorInfo(BaseModel):
     details: Optional[str] = None
 
 
+class AIInputImage(BaseModel):
+    """An input image sent to the AI (for full transparency logging)."""
+
+    label: str  # e.g., "Original Image", "Edited Result", "Mask"
+    dataUrl: str  # Base64 data URL
+
+
 class AIProgressEvent(BaseModel):
     """
     SSE progress event for streaming operations.
@@ -75,10 +82,11 @@ class AIProgressEvent(BaseModel):
     thinkingText: Optional[str] = None
     thinkingTextDelta: Optional[str] = None
 
-    # Prompt and raw output for transparency
+    # Full transparency fields
     prompt: Optional[str] = None
     rawOutput: Optional[str] = None
     rawOutputDelta: Optional[str] = None
+    inputImages: Optional[list[AIInputImage]] = None  # All images sent to AI
 
     # Iteration tracking
     iteration: Optional[IterationInfo] = None
