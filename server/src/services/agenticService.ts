@@ -122,7 +122,7 @@ export interface AgenticEditResult {
 export function createAgenticService(
   gemini: GeminiService,
   imageGen: ImageGenerationService
-) {
+): { agenticEdit: (options: AgenticEditOptions) => Promise<AgenticEditResult> } {
   /**
    * Build the system prompt for the planning phase
    */

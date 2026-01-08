@@ -8,8 +8,10 @@
 import { Router, type Request, type Response } from 'express';
 import { createGeminiService } from '../services/geminiService.js';
 import { asyncHandler, APIError } from '../middleware/errorHandler.js';
-import type { GenerateTextResponse } from '../types/api.js';
+import { requireGeminiApiKey, type ApiKeyRequest } from '../middleware/apiKeyValidation.js';
+import type { GenerateTextResponse, GeminiRawResponse } from '../types/api.js';
 import { generateTextRequestSchema, inpaintRequestSchema } from '../schemas/index.js';
+import { initSSE, sendSSE } from '../utils/sseHelpers.js';
 
 const router = Router();
 
@@ -21,7 +23,7 @@ const router = Router();
  * Request body: GenerateTextRequest
  * Response: GenerateTextResponse
  */
-router.post('/generate', asyncHandler(async (req: Request, res: Response) => {
+router.post('/generate', requireGeminiApiKey, asyncHandler(async (req: Request, res: Response) => {
   // Validate request body with Zod
   const {
     model,
@@ -33,14 +35,8 @@ router.post('/generate', asyncHandler(async (req: Request, res: Response) => {
     logLabel: _logLabel,
   } = generateTextRequestSchema.parse(req.body);
 
-  // Get API key from environment
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new APIError(500, 'Server configuration error: GEMINI_API_KEY not set');
-  }
-
-  // Create service and make call
-  const gemini = createGeminiService(apiKey);
+  // Create service and make call (API key validated by middleware)
+  const gemini = createGeminiService((req as ApiKeyRequest).geminiApiKey);
 
   try {
     const result = await gemini.call({
@@ -54,7 +50,7 @@ router.post('/generate', asyncHandler(async (req: Request, res: Response) => {
     });
 
     const response: GenerateTextResponse = {
-      raw: result.raw,
+      raw: result.raw as GeminiRawResponse,
       text: result.text,
       thinking: result.thinking,
       functionCall: result.functionCall,
@@ -118,15 +114,11 @@ router.post('/inpaint-stream', asyncHandler(async (req: Request, res: Response) 
   // Get Python server URL from environment
   const pythonServerUrl = process.env.PYTHON_SERVER_URL || 'http://localhost:8001';
 
-  // Set up SSE response headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+  // Initialize SSE response using shared helper
+  initSSE(res);
 
   // Send initial progress event with all input data for frontend log entry creation
-  res.write(`event: progress\ndata: ${JSON.stringify({
+  sendSSE(res, 'progress', {
     step: 'processing',
     message: 'Starting AI operation',
     sourceImage,
@@ -135,7 +127,7 @@ router.post('/inpaint-stream', asyncHandler(async (req: Request, res: Response) 
     newLogEntry: true,
     hasSourceImage: !!sourceImage,
     hasMaskImage: !!maskImage,
-  })}\n\n`);
+  });
 
   try {
     // Call Python inpaint endpoint - now returns SSE
@@ -213,14 +205,14 @@ router.post('/inpaint-stream', asyncHandler(async (req: Request, res: Response) 
     }
 
   } catch (error) {
-    // Send error as SSE event
+    // Send error as SSE event using shared helper
     const message = error instanceof Error ? error.message : 'Unknown error';
     if (DEBUG) console.error('[inpaint-stream] Error:', message);
     
-    res.write(`event: error\ndata: ${JSON.stringify({
+    sendSSE(res, 'error', {
       message,
       details: error instanceof Error ? error.stack : undefined,
-    })}\n\n`);
+    });
   }
 
   res.end();

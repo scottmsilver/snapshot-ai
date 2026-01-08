@@ -143,7 +143,7 @@ export async function runAIStream(
     debugLog('runAIStream starting');
     startAIStream(ctx);
     
-    const update = (u: Parameters<typeof updateAIStream>[1]) => updateAIStream(ctx.res, u);
+    const update = (u: Parameters<typeof updateAIStream>[1]): void => updateAIStream(ctx.res, u);
     debugLog('runAIStream calling operation');
     const result = await operation(update);
     debugLog('runAIStream operation returned');

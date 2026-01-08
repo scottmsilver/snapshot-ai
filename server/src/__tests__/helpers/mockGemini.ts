@@ -7,17 +7,46 @@
 
 import type { GeminiService, GeminiCallOptions, GeminiCallResult } from '../../services/geminiService.js';
 
+/** Part structure in a Gemini response */
+interface MockResponsePart {
+  thought?: boolean;
+  text?: string;
+  functionCall?: { name: string; args: Record<string, unknown> };
+  inlineData?: { mimeType: string; data: string };
+}
+
+/** Structure for mock Gemini text response */
+interface MockTextResponse {
+  candidates: Array<{
+    content: {
+      parts: MockResponsePart[];
+    };
+  }>;
+  text?: string;
+}
+
+/** Structure for mock Gemini image response */
+interface MockImageResponse {
+  candidates: Array<{
+    content: {
+      parts: Array<{
+        inlineData: { mimeType: string; data: string };
+      }>;
+    };
+  }>;
+}
+
 /**
  * Mock response for a text generation call
  */
 export function createMockTextResponse(options: {
   text?: string;
   thinking?: string;
-  functionCall?: { name: string; args: Record<string, any> };
-}): any {
+  functionCall?: { name: string; args: Record<string, unknown> };
+}): MockTextResponse {
   const { text = 'Mock response', thinking = '', functionCall } = options;
 
-  const parts: any[] = [];
+  const parts: MockResponsePart[] = [];
 
   // Add thinking parts
   if (thinking) {
@@ -56,7 +85,7 @@ export function createMockTextResponse(options: {
 /**
  * Mock response for an image generation call
  */
-export function createMockImageResponse(imageData: string = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='): any {
+export function createMockImageResponse(imageData: string = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='): MockImageResponse {
   return {
     candidates: [
       {
@@ -119,7 +148,12 @@ export function createMockGeminiService(
     };
   }
 
-  async function* callStream(options: GeminiCallOptions) {
+  async function* callStream(options: GeminiCallOptions): AsyncGenerator<{
+    text: string;
+    thinking: string;
+    functionCall?: { name: string; args: Record<string, unknown> };
+    done: boolean;
+  }> {
     if (responses.shouldError) {
       throw new Error(responses.errorMessage || 'Mock Gemini streaming error');
     }
@@ -170,7 +204,7 @@ export function createMockGeminiService(
   return {
     call,
     callStream,
-    raw: {} as any, // Not used in tests
+    raw: {} as GeminiService['raw'], // Not used in tests
   };
 }
 

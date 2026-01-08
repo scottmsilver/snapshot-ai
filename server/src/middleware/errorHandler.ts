@@ -26,9 +26,9 @@ export class APIError extends Error {
  * Async handler wrapper to catch errors in async route handlers
  */
 export function asyncHandler(
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<any>
-) {
-  return (req: Request, res: Response, next: NextFunction) => {
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
+): (req: Request, res: Response, next: NextFunction) => void {
+  return (req: Request, res: Response, next: NextFunction): void => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
 }
@@ -42,7 +42,7 @@ export function errorHandler(
   _req: Request,
   res: Response,
   _next: NextFunction
-) {
+): Response | void {
   console.error('Error:', err);
 
   // Handle APIError instances
@@ -98,7 +98,7 @@ export function errorHandler(
 /**
  * 404 handler
  */
-export function notFoundHandler(req: Request, res: Response) {
+export function notFoundHandler(req: Request, res: Response): void {
   const response: ErrorResponse = {
     error: 'Not Found',
     details: `Cannot ${req.method} ${req.path}`,

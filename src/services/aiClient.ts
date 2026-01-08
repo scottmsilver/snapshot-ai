@@ -6,19 +6,43 @@
  * In legacy mode (VITE_USE_SERVER_AI=false), calls go directly to Gemini.
  */
 
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, type GenerateContentParameters } from '@google/genai';
 import { aiLogService } from './aiLogService';
 import { THINKING_BUDGETS } from '@/config/aiModels';
 import { createAPIClient } from './apiClient';
 import { isServerAIEnabled } from '@/config/apiConfig';
 
+/** Content part that can be text or inline data */
+export interface AIContentPart {
+  text?: string;
+  inlineData?: {
+    mimeType: string;
+    data: string;
+  };
+}
+
+/** Content message with role and parts */
+export interface AIContent {
+  role: string;
+  parts: AIContentPart[];
+}
+
+/** Tool declaration for function calling */
+export interface AIToolDeclaration {
+  functionDeclarations?: Array<{
+    name: string;
+    description: string;
+    parameters?: Record<string, unknown>;
+  }>;
+}
+
 export interface AICallOptions {
   /** The model to use */
   model: string;
   /** The content/prompt to send */
-  contents: any[];
+  contents: AIContent[];
   /** Optional tools (function declarations) */
-  tools?: any[];
+  tools?: AIToolDeclaration[];
   /** Generation config (e.g., responseModalities for image generation) */
   generationConfig?: Record<string, unknown>;
   /** Thinking budget - defaults to MEDIUM */
@@ -31,9 +55,12 @@ export interface AICallOptions {
   isImageGeneration?: boolean;
 }
 
+/** Raw API response - kept as unknown since it varies by provider */
+export type AIRawResponse = unknown;
+
 export interface AICallResult {
   /** The raw result from the API */
-  raw: any;
+  raw: AIRawResponse;
   /** Extracted text response (non-thinking parts) */
   text: string;
   /** Extracted thinking text */
@@ -41,7 +68,7 @@ export interface AICallResult {
   /** Function call if present */
   functionCall?: {
     name: string;
-    args: Record<string, any>;
+    args: Record<string, unknown>;
   };
 }
 
@@ -113,28 +140,19 @@ export function createAIClient(apiKey: string) {
 
     try {
       // Build the request
-      const request: any = {
+      const request = {
         model,
         contents,
-      };
-
-      if (tools) {
-        request.tools = tools;
-      }
-
-      if (generationConfig) {
-        request.generationConfig = generationConfig;
-      }
-
-      // Add thinking config for non-image-generation calls
-      if (!isImageGeneration && includeThoughts) {
-        request.config = {
+        tools,
+        generationConfig,
+        // Add thinking config for non-image-generation calls
+        config: (!isImageGeneration && includeThoughts) ? {
           thinkingConfig: {
             thinkingBudget,
             includeThoughts: true,
           },
-        };
-      }
+        } : undefined,
+      } as GenerateContentParameters;
 
       // Make the API call
       const result = await genAI.models.generateContent(request);
@@ -157,7 +175,7 @@ export function createAIClient(apiKey: string) {
 
       if (isImageGeneration) {
         const hasImage = result.candidates?.[0]?.content?.parts?.some(
-          (p: any) => p.inlineData?.data
+          (p) => p.inlineData?.data
         );
         if (hasImage) {
           aiLogService.appendThinking(`**Image generated successfully**\n\n`);
@@ -185,7 +203,7 @@ export function createAIClient(apiKey: string) {
   async function* callStream(options: AICallOptions): AsyncGenerator<{
     text: string;
     thinking: string;
-    functionCall?: { name: string; args: Record<string, any> };
+    functionCall?: { name: string; args: Record<string, unknown> };
     done: boolean;
   }> {
     const {
@@ -227,30 +245,24 @@ export function createAIClient(apiKey: string) {
 
     try {
       // Build the request
-      const request: any = {
+      const request = {
         model,
         contents,
-      };
-
-      if (tools) {
-        request.tools = tools;
-      }
-
-      if (includeThoughts) {
-        request.config = {
+        tools,
+        config: includeThoughts ? {
           thinkingConfig: {
             thinkingBudget,
             includeThoughts: true,
           },
-        };
-      }
+        } : undefined,
+      } as GenerateContentParameters;
 
       // Make the streaming API call
       const stream = await genAI.models.generateContentStream(request);
 
       let accumulatedText = '';
       let accumulatedThinking = '';
-      let functionCall: { name: string; args: Record<string, any> } | undefined;
+      let functionCall: { name: string; args: Record<string, unknown> } | undefined;
 
       for await (const chunk of stream) {
         const extracted = extractResponseParts(chunk);
@@ -321,28 +333,24 @@ interface ImageInfo {
  * Extract text and image info from contents array for logging
  * Returns image metadata instead of full base64 to keep logs clean
  */
-function extractPromptParts(contents: any[]): { text: string; imageInfos: ImageInfo[] } {
+function extractPromptParts(contents: AIContent[]): { text: string; imageInfos: ImageInfo[] } {
   const textParts: string[] = [];
   const imageInfos: ImageInfo[] = [];
 
   for (const content of contents) {
-    if (content.parts) {
-      for (const part of content.parts) {
-        if (part.text) {
-          textParts.push(part.text);
-        } else if (part.inlineData) {
-          // Extract image metadata (not full base64)
-          const mimeType = part.inlineData.mimeType || 'image/png';
-          const data = part.inlineData.data;
-          if (data) {
-            // Estimate size: base64 is ~4/3 of binary size
-            const sizeKB = Math.round((data.length * 3) / 4 / 1024);
-            imageInfos.push({ sizeKB, mimeType });
-          }
+    for (const part of content.parts) {
+      if (part.text) {
+        textParts.push(part.text);
+      } else if (part.inlineData) {
+        // Extract image metadata (not full base64)
+        const mimeType = part.inlineData.mimeType || 'image/png';
+        const data = part.inlineData.data;
+        if (data) {
+          // Estimate size: base64 is ~4/3 of binary size
+          const sizeKB = Math.round((data.length * 3) / 4 / 1024);
+          imageInfos.push({ sizeKB, mimeType });
         }
       }
-    } else if (content.text) {
-      textParts.push(content.text);
     }
   }
 
@@ -351,20 +359,37 @@ function extractPromptParts(contents: any[]): { text: string; imageInfos: ImageI
 
 /**
  * Extract text, thinking, and function calls from API response
+ * Uses unknown with type narrowing to handle the loosely-typed Gemini API response
  */
-function extractResponseParts(result: any): { text: string; thinking: string; functionCall?: { name: string; args: Record<string, any> } } {
+function extractResponseParts(result: unknown): { text: string; thinking: string; functionCall?: { name: string; args: Record<string, unknown> } } {
+  // Type guard for accessing nested properties safely
+  const resultObj = result as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{
+          text?: string;
+          thought?: boolean;
+          functionCall?: {
+            name?: string;
+            args?: Record<string, unknown>;
+          };
+        }>;
+      };
+    }>;
+    text?: string;
+  };
   let text = '';
   let thinking = '';
-  let functionCall: { name: string; args: Record<string, any> } | undefined;
+  let functionCall: { name: string; args: Record<string, unknown> } | undefined;
 
-  const parts = result.candidates?.[0]?.content?.parts || [];
+  const parts = resultObj.candidates?.[0]?.content?.parts || [];
 
   for (const part of parts) {
     if (part.thought && part.text) {
       thinking += part.text;
     } else if (part.text) {
       text += part.text;
-    } else if (part.functionCall) {
+    } else if (part.functionCall?.name) {
       functionCall = {
         name: part.functionCall.name,
         args: part.functionCall.args || {},
@@ -372,9 +397,9 @@ function extractResponseParts(result: any): { text: string; thinking: string; fu
     }
   }
 
-  // Fallback to result.text if available
-  if (!text && result.text) {
-    text = result.text;
+  // Fallback to resultObj.text if available
+  if (!text && resultObj.text) {
+    text = resultObj.text;
   }
 
   return { text, thinking, functionCall };

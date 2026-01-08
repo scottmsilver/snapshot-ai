@@ -14,7 +14,7 @@ function debugLog(message: string, data?: Record<string, unknown>): void {
   }
 }
 
-export interface SSEEvent<T = any> {
+export interface SSEEvent<T = unknown> {
   /** Event type (e.g., 'progress', 'complete', 'error') */
   event: string;
   /** Parsed JSON data */
@@ -182,7 +182,7 @@ export function createSSEClient(
  * }
  * ```
  */
-export function sseRequest<TComplete = any, TProgress = any>(
+export function sseRequest<TComplete, TProgress>(
   url: string,
   options: {
     onProgress?: (data: TProgress) => void;
@@ -192,10 +192,10 @@ export function sseRequest<TComplete = any, TProgress = any>(
     const cleanup = createSSEClient(url, {
       onEvent: (event) => {
         if (event.event === 'progress') {
-          options.onProgress?.(event.data);
+          options.onProgress?.(event.data as TProgress);
         } else if (event.event === 'complete') {
           cleanup();
-          resolve(event.data);
+          resolve(event.data as TComplete);
         }
       },
       onError: (error) => {
@@ -227,7 +227,7 @@ export function sseRequest<TComplete = any, TProgress = any>(
  * }
  * ```
  */
-export async function ssePostRequest<TComplete = any, TProgress = any>(
+export async function ssePostRequest<TComplete, TProgress>(
   url: string,
   body: unknown,
   options: {

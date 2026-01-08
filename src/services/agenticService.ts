@@ -11,6 +11,29 @@ import { DrawingTool } from '@/types/drawing';
 import { createAPIClient, type APIClient } from './apiClient';
 import { base64ToImageData } from '@/utils/maskRendering';
 
+/** Response part from Gemini API */
+interface GeminiResponsePart {
+    text?: string;
+    thought?: boolean;
+    functionCall?: {
+        name: string;
+        args: Record<string, unknown>;
+    };
+    inlineData?: {
+        mimeType: string;
+        data: string;
+    };
+}
+
+/** Gemini API response structure */
+interface GeminiApiResponse {
+    candidates?: Array<{
+        content?: {
+            parts?: GeminiResponsePart[];
+        };
+    }>;
+}
+
 /**
  * Result of the planning phase for AI Move operations
  */
@@ -75,8 +98,8 @@ Call gemini_image_painter with a detailed prompt that achieves the goal while en
 You MUST call the gemini_image_painter tool.`;
     }
 
-    private extractRefinedPrompt(result: any, fallback: string): { refinedPrompt: string; thinking: string } {
-        const parts = result.candidates?.[0]?.content?.parts || [];
+    private extractRefinedPrompt(result: GeminiApiResponse, fallback: string): { refinedPrompt: string; thinking: string } {
+        const parts = result.candidates?.[0]?.content?.parts ?? [];
         let refinedPrompt = fallback;
         let thinking = '';
 
@@ -87,8 +110,9 @@ You MUST call the gemini_image_painter tool.`;
             }
             // Check for function call
             if (part.functionCall) {
-                const args = part.functionCall.args || {};
-                refinedPrompt = args.prompt || fallback;
+                const args = part.functionCall.args ?? {};
+                const promptArg = args.prompt;
+                refinedPrompt = typeof promptArg === 'string' ? promptArg : fallback;
                 thinking += `[Action] Called gemini_image_painter`;
             } else if (part.text && !part.thought) {
                 // Try to extract from text response
@@ -104,8 +128,8 @@ You MUST call the gemini_image_painter tool.`;
         return { refinedPrompt, thinking };
     }
 
-    private extractEvaluation(result: any): { satisfied: boolean; reasoning: string; suggestion: string; thinking: string } {
-        const parts = result.candidates?.[0]?.content?.parts || [];
+    private extractEvaluation(result: GeminiApiResponse): { satisfied: boolean; reasoning: string; suggestion: string; thinking: string } {
+        const parts = result.candidates?.[0]?.content?.parts ?? [];
         const evaluation = { satisfied: true, reasoning: '', suggestion: '' };
         let thinking = '';
         let allText = '';
@@ -248,7 +272,7 @@ ${systemPrompt}
         });
 
         try {
-            const contentParts: any[] = [
+            const contentParts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
                 { text: systemPrompt },
                 { inlineData: { mimeType: 'image/png', data: sourceBase64.split(',')[1] } },
             ];
@@ -746,7 +770,7 @@ IMPORTANT: You MUST output exactly one JSON code block with your evaluation.`;
             });
 
             // Build the parts array with optional mask
-            const contentParts: any[] = [
+            const contentParts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
                 { text: checkPrompt },
             ];
 
@@ -784,7 +808,7 @@ IMPORTANT: You MUST output exactly one JSON code block with your evaluation.`;
                 functionCall: result.functionCall,
             });
 
-            const evaluation = this.extractEvaluation(result.raw);
+            const evaluation = this.extractEvaluation(result.raw as GeminiApiResponse);
 
             // Log decision to AI console (wrapper already logged prompt/response)
             aiLogService.appendThinking(`## Decision: ${evaluation.satisfied ? '✅ SATISFIED' : '⚠️ NEEDS REVISION'}

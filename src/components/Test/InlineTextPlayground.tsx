@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Stage, Layer, Text, Rect } from 'react-konva';
+import Konva from 'konva';
 import { InlineTextEditor, type TextFlowMode } from '@/components/Canvas/InlineTextEditor';
 
 export const InlineTextPlayground: React.FC = () => {
@@ -24,7 +25,7 @@ export const InlineTextPlayground: React.FC = () => {
     const [showBackgroundText, setShowBackgroundText] = useState(false); // Keep text visible for alignment
     const [padding, setPadding] = useState(0);
     const [showDebugBorders, setShowDebugBorders] = useState(false);
-    const stageRef = useRef<any>(null);
+    const stageRef = useRef<Konva.Stage>(null);
 
     const handleTextChange = (newText: string): void => {
         setTextState((prev) => ({ ...prev, text: newText }));

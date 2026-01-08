@@ -115,9 +115,10 @@ export interface GeminiContentPart {
 
 /**
  * Gemini content structure for multi-turn conversations
+ * Note: role is string to accept frontend AIContent which uses string
  */
 export interface GeminiContent {
-  role: 'user' | 'model';
+  role: string;
   parts: GeminiContentPart[];
 }
 
@@ -135,8 +136,8 @@ export interface GenerateTextRequest {
   model: string;
   /** The content/prompt to send (Gemini Content format) */
   contents: GeminiContent[];
-  /** Optional tools (function declarations) */
-  tools?: Array<{ functionDeclarations: GeminiFunctionDeclaration[] }>;
+  /** Optional tools (function declarations) - flexible to accept frontend AIToolDeclaration */
+  tools?: Array<{ functionDeclarations?: GeminiFunctionDeclaration[] }>;
   /** Generation config */
   generationConfig?: Record<string, unknown>;
   /** Thinking budget - defaults to MEDIUM */

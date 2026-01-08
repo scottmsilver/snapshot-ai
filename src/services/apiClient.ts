@@ -64,7 +64,7 @@ const api = ky.create({
             );
             // Preserve the original error but add our custom error as the cause
             error.message = apiError.message;
-            (error as any).apiError = apiError;
+            (error as Error & { apiError?: APIError }).apiError = apiError;
           } catch {
             // If we can't parse JSON, use default error
             const apiError = new APIError(
@@ -72,7 +72,7 @@ const api = ky.create({
               response.status
             );
             error.message = apiError.message;
-            (error as any).apiError = apiError;
+            (error as Error & { apiError?: APIError }).apiError = apiError;
           }
         }
         return error;
@@ -129,10 +129,11 @@ export function createAPIClient() {
         thinking: response.thinking,
         functionCall: response.functionCall,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Re-throw APIError from hook
-      if (error.apiError) {
-        throw error.apiError;
+      const errorWithApi = error as Error & { apiError?: APIError };
+      if (errorWithApi.apiError) {
+        throw errorWithApi.apiError;
       }
       // Wrap other errors (network errors, etc.)
       throw new APIError(
@@ -152,7 +153,7 @@ export function createAPIClient() {
   async function* callStream(_options: AICallOptions): AsyncGenerator<{
     text: string;
     thinking: string;
-    functionCall?: { name: string; args: Record<string, any> };
+    functionCall?: { name: string; args: Record<string, unknown> };
     done: boolean;
   }> {
     // This is a simplified implementation
@@ -186,10 +187,11 @@ export function createAPIClient() {
     try {
       const response = await api.post(API_ENDPOINTS.GENERATE_IMAGE, { json: request }).json<GenerateImageResponse>();
       return { imageData: response.imageData };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Re-throw APIError from hook
-      if (error.apiError) {
-        throw error.apiError;
+      const errorWithApi = error as Error & { apiError?: APIError };
+      if (errorWithApi.apiError) {
+        throw errorWithApi.apiError;
       }
       // Wrap other errors (network errors, etc.)
       throw new APIError(
@@ -220,10 +222,11 @@ export function createAPIClient() {
 
     try {
       return await api.post(API_ENDPOINTS.INPAINT, { json: request }).json<InpaintResponse>();
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Re-throw APIError from hook
-      if (error.apiError) {
-        throw error.apiError;
+      const errorWithApi = error as Error & { apiError?: APIError };
+      if (errorWithApi.apiError) {
+        throw errorWithApi.apiError;
       }
       // Wrap other errors (network errors, etc.)
       throw new APIError(

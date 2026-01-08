@@ -694,38 +694,29 @@ class TestInpaintEndpoint:
             assert "No image generated" in error_event["data"]["message"]
 
     @pytest.mark.asyncio
-    async def test_inpaint_missing_api_key_yields_sse_error(self, client, monkeypatch):
-        """Should return SSE error event when API key is not configured."""
+    async def test_inpaint_missing_api_key_returns_500(self, client, monkeypatch):
+        """Should return 500 error when API key is not configured.
+
+        API key validation now happens via FastAPI dependency injection,
+        which validates before the request handler runs. This means we get
+        a proper 500 error response instead of an SSE error event.
+        """
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
-        # The graph will throw when TransparentGeminiClient is instantiated
-        async def mock_astream_error(*args, **kwargs):
-            raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY must be set")
-            yield  # Make this a generator
+        response = client.post(
+            "/api/images/inpaint",
+            json={
+                "sourceImage": VALID_BASE64_IMAGE,
+                "maskImage": VALID_BASE64_IMAGE,
+                "prompt": "Remove this object",
+            },
+        )
 
-        with patch("main.agentic_edit_graph") as mock_graph:
-            mock_graph.astream = mock_astream_error
-
-            response = client.post(
-                "/api/images/inpaint",
-                json={
-                    "sourceImage": VALID_BASE64_IMAGE,
-                    "maskImage": VALID_BASE64_IMAGE,
-                    "prompt": "Remove this object",
-                },
-            )
-
-            # SSE always returns 200, errors are in the stream
-            assert response.status_code == 200
-
-            # Parse SSE events
-            events = parse_sse_events(response.text)
-
-            # Should have an error event about API key
-            error_event = next((e for e in events if e["type"] == "error"), None)
-            assert error_event is not None
-            assert "GEMINI_API_KEY" in error_event["data"]["message"]
+        # API key validation fails before SSE starts, returning 500
+        assert response.status_code == 500
+        data = response.json()
+        assert "GEMINI_API_KEY" in data["detail"]
 
 
 class TestInpaintRequestSchema:

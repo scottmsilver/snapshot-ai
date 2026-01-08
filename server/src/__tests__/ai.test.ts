@@ -382,7 +382,7 @@ describe('POST /api/ai/inpaint-stream', () => {
   /**
    * Create a mock SSE stream response from Python
    */
-  function createMockSSEStream(events: Array<{ type: string; data: unknown }>) {
+  function createMockSSEStream(events: Array<{ type: string; data: unknown }>): ReadableStream<Uint8Array> {
     const encoder = new TextEncoder();
     let eventIndex = 0;
     
@@ -403,7 +403,7 @@ describe('POST /api/ai/inpaint-stream', () => {
   /**
    * Create default mock Python SSE response with progress and complete events
    */
-  function createDefaultPythonSSEResponse() {
+  function createDefaultPythonSSEResponse(): ReadableStream<Uint8Array> {
     return createMockSSEStream([
       { 
         type: 'progress', 

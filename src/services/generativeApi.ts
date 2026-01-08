@@ -3,6 +3,40 @@ import { AI_MODELS, THINKING_BUDGETS } from '@/config/aiModels';
 import { createAIClient, type AIClient } from './aiClient';
 import { createAPIClient, type APIClient } from './apiClient';
 
+/** Debug info stored on window for Gemini interactions */
+interface GeminiDebugInfo {
+  step1MarkedImage?: string;
+  step1Prompt?: string;
+  step1Response?: string;
+  step2MarkedImage?: string;
+  step2Prompt?: string;
+  step2RawResponse?: string;
+}
+
+/** Extended window interface for debug data */
+interface WindowWithDebug extends Window {
+  geminiDebug?: GeminiDebugInfo;
+  debugSourceImage?: string;
+  debugMaskImage?: string;
+  debugGeminiOutput?: string;
+  debugImagenOutput?: string;
+  debugImagenTextOutput?: string;
+}
+
+/** Gemini API response structure for image generation */
+interface GeminiImageResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        inlineData?: {
+          mimeType: string;
+          data: string;
+        };
+      }>;
+    };
+  }>;
+}
+
 export interface InpaintRequest {
   sourceImage: string;  // Base64 PNG
   maskImage: string;    // Base64 PNG (binary: white=selected, black=not)
@@ -111,8 +145,9 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
       });
 
       // Extract image from response (result.raw contains the API response)
-      if (result.raw.candidates && result.raw.candidates.length > 0) {
-        const candidate = result.raw.candidates[0];
+      const rawResponse = result.raw as GeminiImageResponse;
+      if (rawResponse.candidates && rawResponse.candidates.length > 0) {
+        const candidate = rawResponse.candidates[0];
 
         if (candidate.content && candidate.content.parts) {
           for (const part of candidate.content.parts) {
@@ -236,7 +271,7 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
           }
 
           console.log('🔍 DEBUG: Imagen text-only response size:', resultImageData.width, 'x', resultImageData.height);
-          (window as any).debugImagenTextOutput = generatedBase64;
+          (window as WindowWithDebug).debugImagenTextOutput = generatedBase64;
           console.log('🔍 DEBUG: Access Imagen text-only output via window.debugImagenTextOutput');
 
           return resultImageData;
@@ -254,7 +289,7 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
    * Show debug dialog with Gemini interaction details
    */
   private showDebugDialog(): void {
-    const debug = (window as any).geminiDebug;
+    const debug = (window as WindowWithDebug).geminiDebug;
     if (!debug) return;
 
     // Create dialog
@@ -451,10 +486,11 @@ Be extremely specific and detailed so this object can be unambiguously identifie
       console.log('🔍 DEBUG: Area description:', description);
 
       // Store for debug dialog
-      (window as any).geminiDebug = (window as any).geminiDebug || {};
-      (window as any).geminiDebug.step1MarkedImage = markedImageBase64;
-      (window as any).geminiDebug.step1Prompt = describePrompt;
-      (window as any).geminiDebug.step1Response = description;
+      const debugWindow = window as WindowWithDebug;
+      debugWindow.geminiDebug = debugWindow.geminiDebug || {};
+      debugWindow.geminiDebug.step1MarkedImage = markedImageBase64;
+      debugWindow.geminiDebug.step1Prompt = describePrompt;
+      debugWindow.geminiDebug.step1Response = description;
 
       return description;
     } catch (error) {
@@ -528,8 +564,8 @@ Be extremely specific and detailed so this object can be unambiguously identifie
     console.log('🔍 DEBUG: Mask image data URL (right-click to save):', maskDebugUrl.substring(0, 100) + '...');
 
     // Store in window for easy access from console
-    (window as any).debugSourceImage = sourceDebugUrl;
-    (window as any).debugMaskImage = maskDebugUrl;
+    (window as WindowWithDebug).debugSourceImage = sourceDebugUrl;
+    (window as WindowWithDebug).debugMaskImage = maskDebugUrl;
     console.log('🔍 DEBUG: Access images via window.debugSourceImage and window.debugMaskImage');
 
     // Step 2: Build the edit instruction using the area description
@@ -579,8 +615,9 @@ Return the edited image.`;
       });
 
       // Extract image from response (result.raw contains the API response)
-      if (result.raw.candidates && result.raw.candidates.length > 0) {
-        const candidate = result.raw.candidates[0];
+      const rawResponse = result.raw as GeminiImageResponse;
+      if (rawResponse.candidates && rawResponse.candidates.length > 0) {
+        const candidate = rawResponse.candidates[0];
 
         if (candidate.content && candidate.content.parts) {
           for (const part of candidate.content.parts) {
@@ -598,13 +635,16 @@ Return the edited image.`;
               debugCtx.putImageData(resultImageData, 0, 0);
               const geminiDebugUrl = debugCanvas.toDataURL('image/png');
               console.log('🔍 DEBUG: Gemini raw output data URL (right-click to save):', geminiDebugUrl.substring(0, 100) + '...');
-              (window as any).debugGeminiOutput = geminiDebugUrl;
+              (window as WindowWithDebug).debugGeminiOutput = geminiDebugUrl;
               console.log('🔍 DEBUG: Access Gemini output via window.debugGeminiOutput');
 
               // Store for debug dialog
-              (window as any).geminiDebug.step2MarkedImage = sourceDebugUrl; // Now using clean original image
-              (window as any).geminiDebug.step2Prompt = editPrompt;
-              (window as any).geminiDebug.step2RawResponse = geminiDebugUrl;
+              const debugWindow = window as WindowWithDebug;
+              if (debugWindow.geminiDebug) {
+                debugWindow.geminiDebug.step2MarkedImage = sourceDebugUrl; // Now using clean original image
+                debugWindow.geminiDebug.step2Prompt = editPrompt;
+                debugWindow.geminiDebug.step2RawResponse = geminiDebugUrl;
+              }
 
               // Show debug dialog
               this.showDebugDialog();
@@ -751,7 +791,7 @@ Return the edited image.`;
 
           // DEBUG: Log what Imagen returned
           console.log('🔍 DEBUG: Imagen response size:', resultImageData.width, 'x', resultImageData.height);
-          (window as any).debugImagenOutput = generatedBase64;
+          (window as WindowWithDebug).debugImagenOutput = generatedBase64;
           console.log('🔍 DEBUG: Access Imagen output via window.debugImagenOutput');
 
           return resultImageData;

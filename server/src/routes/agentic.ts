@@ -9,7 +9,8 @@ import { Router, type Request, type Response } from 'express';
 import { createGeminiService } from '../services/geminiService.js';
 import { createImageGenerationService } from '../services/imageGenerationService.js';
 import { createAgenticService } from '../services/agenticService.js';
-import { asyncHandler, APIError } from '../middleware/errorHandler.js';
+import { asyncHandler } from '../middleware/errorHandler.js';
+import { requireGeminiApiKey, type ApiKeyRequest } from '../middleware/apiKeyValidation.js';
 import { startAIStream, completeAIStream, errorAIStream } from '../utils/aiStreamHelper.js';
 import type { AgenticEditResponse as _AgenticEditResponse } from '../types/api.js';
 import { agenticEditRequestSchema } from '../schemas/index.js';
@@ -29,7 +30,7 @@ const router = Router();
  * - event: complete, data: AgenticEditResponse (JSON)
  * - event: error, data: { message: string, details?: string } (JSON)
  */
-router.post('/edit', asyncHandler(async (req: Request, res: Response) => {
+router.post('/edit', requireGeminiApiKey, asyncHandler(async (req: Request, res: Response) => {
   // Validate request body with Zod
   const {
     sourceImage,
@@ -37,12 +38,6 @@ router.post('/edit', asyncHandler(async (req: Request, res: Response) => {
     maskImage,
     maxIterations,
   } = agenticEditRequestSchema.parse(req.body);
-
-  // Get API key from environment
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new APIError(500, 'Server configuration error: GEMINI_API_KEY not set');
-  }
 
   // Initialize SSE stream with first event containing images
   // This creates the log entry that agenticService will update
@@ -52,8 +47,8 @@ router.post('/edit', asyncHandler(async (req: Request, res: Response) => {
   await new Promise(resolve => setImmediate(resolve));
 
   try {
-    // Create services
-    const gemini = createGeminiService(apiKey);
+    // Create services (API key validated by middleware)
+    const gemini = createGeminiService((req as ApiKeyRequest).geminiApiKey);
     const imageGen = createImageGenerationService(gemini);
     const agentic = createAgenticService(gemini, imageGen);
 

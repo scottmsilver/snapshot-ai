@@ -22,6 +22,7 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Annotated, AsyncGenerator
 
 # Configure logging
 logging.basicConfig(
@@ -31,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -59,6 +60,38 @@ from utils.ai_logging import (
 
 # Load environment variables
 load_dotenv()
+
+
+# =============================================================================
+# SSE Response Helper
+# =============================================================================
+
+
+def create_sse_response(
+    event_generator: AsyncGenerator[str, None],
+) -> StreamingResponse:
+    """
+    Create a StreamingResponse for Server-Sent Events (SSE).
+
+    This helper encapsulates the common SSE response pattern used by
+    streaming endpoints (inpaint, agentic_edit).
+
+    Args:
+        event_generator: Async generator yielding SSE-formatted event strings.
+
+    Returns:
+        StreamingResponse configured for SSE with appropriate headers.
+    """
+    return StreamingResponse(
+        event_generator,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 
 # Track server start time for uptime calculation
 # Initialized in lifespan handler, not at import time
@@ -103,6 +136,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# =============================================================================
+# Dependencies
+# =============================================================================
+
+
+def get_gemini_api_key() -> str:
+    """
+    FastAPI dependency that returns the Gemini API key.
+
+    Raises HTTPException 500 if not configured.
+    """
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: GEMINI_API_KEY not set",
+        )
+    return api_key
+
+
+# Type alias for cleaner endpoint signatures
+GeminiApiKey = Annotated[str, Depends(get_gemini_api_key)]
 
 
 # =============================================================================
@@ -202,7 +259,10 @@ async def echo(request: EchoRequest) -> EchoResponse:
     response_model=GenerateTextResponse,
     response_model_exclude_none=True,
 )
-async def generate_text(request: GenerateTextRequest) -> GenerateTextResponse:
+async def generate_text(
+    request: GenerateTextRequest,
+    api_key: GeminiApiKey,
+) -> GenerateTextResponse:
     """
     Text generation endpoint using Gemini.
 
@@ -210,14 +270,6 @@ async def generate_text(request: GenerateTextRequest) -> GenerateTextResponse:
     """
     from google import genai
     from google.genai import types
-
-    # Get API key
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Server configuration error: GEMINI_API_KEY not set",
-        )
 
     client = genai.Client(api_key=api_key)
 
@@ -345,7 +397,10 @@ def extract_image_from_response(response) -> str | None:
     "/api/images/generate",
     response_model=GenerateImageResponse,
 )
-async def generate_image(request: GenerateImageRequest) -> GenerateImageResponse:
+async def generate_image(
+    request: GenerateImageRequest,
+    api_key: GeminiApiKey,
+) -> GenerateImageResponse:
     """
     Image generation/editing endpoint using Gemini.
 
@@ -354,14 +409,6 @@ async def generate_image(request: GenerateImageRequest) -> GenerateImageResponse
     """
     from google import genai
     from google.genai import types
-
-    # Get API key
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Server configuration error: GEMINI_API_KEY not set",
-        )
 
     client = genai.Client(api_key=api_key)
 
@@ -464,7 +511,7 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
 
 
 @app.post("/api/images/inpaint")
-async def inpaint(request: InpaintRequest) -> StreamingResponse:
+async def inpaint(request: InpaintRequest, api_key: GeminiApiKey) -> StreamingResponse:
     """
     Agentic inpainting endpoint with SSE progress streaming.
 
@@ -566,15 +613,7 @@ async def inpaint(request: InpaintRequest) -> StreamingResponse:
             logger.exception("Inpaint error: %s", e)
             yield format_error_event(str(e), traceback.format_exc())
 
-    return StreamingResponse(
-        generate_events(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return create_sse_response(generate_events())
 
 
 # =============================================================================
@@ -583,7 +622,9 @@ async def inpaint(request: InpaintRequest) -> StreamingResponse:
 
 
 @app.post("/api/agentic/edit")
-async def agentic_edit(request: AgenticEditRequest) -> StreamingResponse:
+async def agentic_edit(
+    request: AgenticEditRequest, api_key: GeminiApiKey
+) -> StreamingResponse:
     """
     Perform agentic image editing with SSE progress streaming.
 
@@ -683,15 +724,7 @@ async def agentic_edit(request: AgenticEditRequest) -> StreamingResponse:
             logger.exception("Agentic edit error: %s", e)
             yield format_error_event(str(e), traceback.format_exc())
 
-    return StreamingResponse(
-        generate_events(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return create_sse_response(generate_events())
 
 
 # =============================================================================

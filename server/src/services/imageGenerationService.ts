@@ -24,7 +24,7 @@ export interface ImageGenerationResult {
   /** Generated image (base64 data URL) */
   imageData: string;
   /** Raw API response */
-  raw: any;
+  raw: unknown;
 }
 
 export interface InpaintOptions {
@@ -46,13 +46,16 @@ export interface InpaintResult {
   /** AI's thinking during planning */
   thinking: string;
   /** Raw API response */
-  raw: any;
+  raw: unknown;
 }
 
 /**
  * Create an image generation service
  */
-export function createImageGenerationService(gemini: GeminiService) {
+export function createImageGenerationService(gemini: GeminiService): {
+  generateImage: (options: ImageGenerationOptions) => Promise<ImageGenerationResult>;
+  inpaint: (options: InpaintOptions) => Promise<InpaintResult>;
+} {
   /**
    * Generate/edit an image using Gemini
    * 
@@ -303,17 +306,40 @@ Be extremely specific and detailed so this object can be unambiguously identifie
 }
 
 /**
+ * Response part structure with inline image data
+ */
+interface GeminiImageResponsePart {
+  inlineData?: {
+    mimeType?: string;
+    data?: string;
+  };
+}
+
+/**
+ * Expected structure of Gemini API response with image data
+ */
+interface GeminiImageResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: GeminiImageResponsePart[];
+    };
+  }>;
+}
+
+/**
  * Extract image data from Gemini API response
  * 
  * @param response - Raw Gemini API response
  * @returns Base64 data URL or null if no image found
  */
-function extractImageFromResponse(response: any): string | null {
-  if (!response.candidates || response.candidates.length === 0) {
+function extractImageFromResponse(response: unknown): string | null {
+  const typedResponse = response as GeminiImageResponse | null;
+  
+  if (!typedResponse?.candidates || typedResponse.candidates.length === 0) {
     return null;
   }
 
-  const candidate = response.candidates[0];
+  const candidate = typedResponse.candidates[0];
   if (!candidate.content || !candidate.content.parts) {
     return null;
   }

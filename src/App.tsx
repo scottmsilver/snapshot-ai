@@ -832,7 +832,7 @@ function MainApp(): React.ReactElement {
         dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
       }
     },
-    [dispatch, drawingState.generativeFillMode, stageRef, shapes, addShape, selectShape, authContext, updateProgress, setExportData]
+    [dispatch, drawingState.generativeFillMode, stageRef, shapes, addShape, selectShape, authContext, updateProgress, setExportData, captureAiSourceAndMask]
   );
 
   const handleGenerativeFillDialogCancel = useCallback(() => {

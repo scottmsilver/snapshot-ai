@@ -542,7 +542,7 @@ export function createSSEShadowMiddleware(
     let buffer = '';
     let currentEventType = 'message';
     
-    res.write = function(chunk: any, ...args: any[]): boolean {
+    res.write = function(chunk: Buffer | string, ...args: unknown[]): boolean {
       if (chunk) {
         const text = typeof chunk === 'string' ? chunk : chunk.toString();
         buffer += text;
@@ -572,7 +572,7 @@ export function createSSEShadowMiddleware(
           }
         }
       }
-      return originalWrite(chunk, ...args);
+      return (originalWrite as (...args: unknown[]) => boolean)(chunk, ...args);
     };
     
     // Compare when Express completes

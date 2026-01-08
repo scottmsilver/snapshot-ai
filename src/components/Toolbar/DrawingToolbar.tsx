@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useDrawing } from '@/hooks/useDrawing';
-import { useDrawingContext } from '@/contexts/DrawingContext';
+import { useDrawingContext, DrawingActionType } from '@/contexts/DrawingContext';
 import { DrawingTool, type Shape, type TextShape, type CalloutShape, type DrawingStyle } from '@/types/drawing';
 import {
   SelectIcon,
@@ -49,8 +49,8 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
   const [showMeasureDropdown, setShowMeasureDropdown] = useState(false);
   const measureDropdownRef = useRef<HTMLDivElement>(null);
   
-  // AI Reference Mode state (will be added by another worker)
-  const aiReferenceMode = (drawingState as any).aiReferenceMode || false;
+  // AI Reference Mode state
+  const aiReferenceMode = drawingState.aiReferenceMode;
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -360,7 +360,7 @@ export const DrawingToolbar: React.FC<DrawingToolbarProps> = ({ style, horizonta
           title="AI Reference Mode (R)"
           onClick={() => {
             // Dispatch SET_AI_REFERENCE_MODE action
-            dispatch({ type: 'SET_AI_REFERENCE_MODE' as any, enabled: !aiReferenceMode });
+            dispatch({ type: DrawingActionType.SET_AI_REFERENCE_MODE, enabled: !aiReferenceMode });
           }}
           style={{
             padding: '0.375rem',

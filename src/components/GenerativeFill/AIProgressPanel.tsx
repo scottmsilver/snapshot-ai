@@ -562,10 +562,10 @@ export const AIProgressPanel: React.FC = () => {
   }, [isResizing]);
 
   // Clear both logs
-  const handleClearLog = (): void => {
+  const handleClearLog = useCallback((): void => {
     clearContextLog();
     aiLogService.clearLog();
-  };
+  }, [clearContextLog]);
 
   // Copy log content to clipboard
   const handleCopyLog = useCallback(() => {

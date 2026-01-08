@@ -10,8 +10,10 @@ import { Router, type Request, type Response } from 'express';
 import { createGeminiService } from '../services/geminiService.js';
 import { createImageGenerationService } from '../services/imageGenerationService.js';
 import { asyncHandler, APIError } from '../middleware/errorHandler.js';
+import { requireGeminiApiKey, type ApiKeyRequest } from '../middleware/apiKeyValidation.js';
 import type {
   GenerateImageResponse,
+  GeminiRawResponse,
 } from '../types/api.js';
 import { generateImageRequestSchema } from '../schemas/index.js';
 
@@ -25,7 +27,7 @@ const router = Router();
  * Request body: GenerateImageRequest
  * Response: GenerateImageResponse
  */
-router.post('/generate', asyncHandler(async (req: Request, res: Response) => {
+router.post('/generate', requireGeminiApiKey, asyncHandler(async (req: Request, res: Response) => {
   // Validate request body with Zod
   const {
     model,
@@ -34,14 +36,8 @@ router.post('/generate', asyncHandler(async (req: Request, res: Response) => {
     logLabel: _logLabel,
   } = generateImageRequestSchema.parse(req.body);
 
-  // Get API key from environment
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new APIError(500, 'Server configuration error: GEMINI_API_KEY not set');
-  }
-
-  // Create services
-  const gemini = createGeminiService(apiKey);
+  // Create services (API key validated by middleware)
+  const gemini = createGeminiService((req as ApiKeyRequest).geminiApiKey);
   const imageService = createImageGenerationService(gemini);
 
   try {
@@ -52,7 +48,7 @@ router.post('/generate', asyncHandler(async (req: Request, res: Response) => {
     });
 
     const response: GenerateImageResponse = {
-      raw: result.raw,
+      raw: result.raw as GeminiRawResponse,
       imageData: result.imageData,
     };
 

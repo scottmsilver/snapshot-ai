@@ -146,17 +146,21 @@ function captureResponse(res: Response): Promise<CapturedResponse> {
     const originalEnd = res.end.bind(res);
     
     // Capture writes
-    res.write = function(chunk: any, ...args: any[]): boolean {
+    res.write = function(chunk: Buffer | string, ...args: unknown[]): boolean {
       if (chunk) {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
-      return originalWrite(chunk, ...args);
+      return (originalWrite as (...args: unknown[]) => boolean)(chunk, ...args);
     };
     
-    // Capture end
-    res.end = function(chunk?: any, ...args: any[]): Response {
-      if (chunk) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    // Capture end - using function wrapper to handle overloaded signatures
+    const wrappedEnd = function(
+      chunkOrCb?: Buffer | string | (() => void),
+      encodingOrCb?: BufferEncoding | (() => void),
+      cb?: () => void,
+    ): Response {
+      if (chunkOrCb && typeof chunkOrCb !== 'function') {
+        chunks.push(Buffer.isBuffer(chunkOrCb) ? chunkOrCb : Buffer.from(chunkOrCb));
       }
       
       const headers: Record<string, string> = {};
@@ -171,8 +175,21 @@ function captureResponse(res: Response): Promise<CapturedResponse> {
         body: Buffer.concat(chunks),
       });
       
-      return originalEnd(chunk, ...args);
+      // Call original with proper arguments based on what was passed
+      if (typeof chunkOrCb === 'function') {
+        return originalEnd(chunkOrCb);
+      } else if (typeof encodingOrCb === 'function') {
+        return originalEnd(chunkOrCb, encodingOrCb);
+      } else if (cb && encodingOrCb) {
+        return originalEnd(chunkOrCb, encodingOrCb as BufferEncoding, cb);
+      } else if (encodingOrCb) {
+        return originalEnd(chunkOrCb, encodingOrCb as BufferEncoding);
+      } else if (chunkOrCb) {
+        return originalEnd(chunkOrCb);
+      }
+      return originalEnd();
     };
+    res.end = wrappedEnd as typeof res.end;
   });
 }
 

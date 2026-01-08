@@ -16,8 +16,8 @@ import type { AgenticEditRequest, AIProgressEvent, AgenticEditResponse } from '.
 /**
  * Helper to parse SSE stream from response text
  */
-function parseSSEStream(text: string): Array<{ event: string; data: any }> {
-  const events: Array<{ event: string; data: any }> = [];
+function parseSSEStream(text: string): Array<{ event: string; data: unknown }> {
+  const events: Array<{ event: string; data: unknown }> = [];
   const lines = text.split('\n');
 
   let currentEvent: string | null = null;
@@ -273,7 +273,7 @@ describe('POST /api/ai/agentic/edit', () => {
       const completeEvents = events.filter(e => e.event === 'complete');
 
       expect(completeEvents.length).toBe(1);
-      expect(completeEvents[0].data.imageData).toBeDefined();
+      expect((completeEvents[0].data as { imageData?: string }).imageData).toBeDefined();
     });
 
     it('should validate maskImage format', async () => {
@@ -389,7 +389,7 @@ describe('POST /api/ai/agentic/edit', () => {
       const errorEvents = events.filter(e => e.event === 'error');
 
       expect(errorEvents.length).toBeGreaterThan(0);
-      expect(errorEvents[0].data.message).toBeDefined();
+      expect((errorEvents[0].data as { message?: string }).message).toBeDefined();
     });
   });
 
