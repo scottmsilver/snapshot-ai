@@ -14,8 +14,9 @@ import { useHistorySync } from '@/hooks/useHistorySync';
 import { useClipboardPaste } from '@/hooks/useClipboardPaste';
 import { useMeasurementEffects } from '@/hooks/useMeasurementEffects';
 import { useFileImports } from '@/hooks/useFileImports';
+import { useExport } from '@/hooks/useExport';
 import { useAIProgress } from '@/contexts/AIProgressContext';
-import { copyCanvasToClipboard, downloadCanvasAsImage, downloadCanvasAsPdf, captureCleanCanvas } from '@/utils/exportUtils';
+import { captureCleanCanvas } from '@/utils/exportUtils';
 import { applySmartTransparencyMask } from '@/utils/aiImageRemask';
 import {
   DrawingTool,
@@ -35,6 +36,7 @@ import { WorkspaceHeader } from '@/components/App/WorkspaceHeader';
 import { WorkspaceToolbar } from '@/components/App/WorkspaceToolbar';
 import { WorkspaceCanvas } from '@/components/App/WorkspaceCanvas';
 import { WorkspaceDialogs } from '@/components/App/WorkspaceDialogs';
+import { LoadingOverlay } from '@/components/App/LoadingOverlay';
 import { GenerativeFillToolbar } from '@/components/GenerativeFill/GenerativeFillToolbar';
 import { GenerativeFillDialog } from '@/components/GenerativeFill/GenerativeFillDialog';
 import { AIProgressPanel } from '@/components/GenerativeFill/AIProgressPanel';
@@ -203,6 +205,8 @@ function MainApp(): React.ReactElement {
     },
   });
 
+  const { handleCopyToClipboard, handleDownloadImage, handleDownloadPdf } = useExport({ stageRef });
+
   const handleTextShapeEdit = useCallback(
     (shapeId: string) => {
       const shape = shapes.find(item => item.id === shapeId);
@@ -213,56 +217,6 @@ function MainApp(): React.ReactElement {
     },
     [shapes],
   );
-
-  const handleCopyToClipboard = useCallback(async () => {
-    if (!stageRef.current) {
-      return;
-    }
-
-    try {
-      await copyCanvasToClipboard(stageRef.current);
-      const button = document.querySelector('div[title*="Copy"]') as HTMLElement | null;
-      if (!button) {
-        return;
-      }
-
-      const originalTitle = button.title;
-      button.title = 'Copied!';
-      button.style.backgroundColor = '#4caf50';
-      button.style.color = 'white';
-
-      setTimeout(() => {
-        button.title = originalTitle;
-        button.style.backgroundColor = 'transparent';
-        button.style.color = '#5f6368';
-      }, 2000);
-    } catch (error) {
-      console.error('Failed to copy to clipboard:', error);
-      if (error instanceof Error) {
-        alert(error.message);
-      } else {
-        alert('Failed to copy to clipboard. Your browser may not support this feature.');
-      }
-    }
-  }, []);
-
-  const handleDownloadImage = useCallback(() => {
-    if (!stageRef.current) {
-      return;
-    }
-
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
-    downloadCanvasAsImage(stageRef.current, `markup-${timestamp}.png`);
-  }, []);
-
-  const handleDownloadPdf = useCallback(() => {
-    if (!stageRef.current) {
-      return;
-    }
-
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
-    void downloadCanvasAsPdf(stageRef.current, `markup-${timestamp}.pdf`);
-  }, []);
 
   useKeyboardShortcuts({
     canUndo,
@@ -1379,60 +1333,7 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
         )}
 
         {/* Loading Overlay - block all interactions while generating */}
-        {drawingState.generativeFillMode?.isGenerating && (
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.3)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 999,
-              pointerEvents: 'all',
-            }}
-          >
-            <div
-              style={{
-                backgroundColor: 'white',
-                padding: '24px 32px',
-                borderRadius: '8px',
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '16px',
-              }}
-            >
-              <div
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  border: '4px solid #e5e5e5',
-                  borderTopColor: '#4a90e2',
-                  borderRadius: '50%',
-                  animation: 'spin 1s linear infinite',
-                }}
-              />
-              <div style={{ fontSize: '16px', fontWeight: '500', color: '#333' }}>
-                Generating with AI...
-              </div>
-              <div style={{ fontSize: '14px', color: '#666' }}>
-                This may take 10-30 seconds
-              </div>
-            </div>
-            <style>
-              {`
-                @keyframes spin {
-                  to { transform: rotate(360deg); }
-                }
-              `}
-            </style>
-          </div>
-        )}
+        <LoadingOverlay isVisible={drawingState.generativeFillMode?.isGenerating ?? false} />
 
 
         {/* AI Reference Mode - Manipulation Dialog only (overlay is in WorkspaceCanvas) */}

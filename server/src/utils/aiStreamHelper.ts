@@ -5,7 +5,7 @@
  * Both inpaint and agentic edit use this same interface.
  * 
  * Protocol:
- * 1. First progress event: includes sourceImage, maskImage (if any), prompt, newLogEntry: true
+ * 1. First progress event: includes inputImages array, prompt, newLogEntry: true
  * 2. Subsequent progress events: step updates, thinking text, iteration info
  * 3. Final progress event: step: 'complete', iterationImage with result
  * 4. Complete event: full result data for promise resolution
@@ -25,9 +25,9 @@ function debugLog(message: string, data?: Record<string, unknown>): void {
 
 export interface AIStreamContext {
   res: Response;
-  sourceImage: string;
-  maskImage?: string;
   prompt: string;
+  /** All input images to include in the first progress event */
+  inputImages?: Array<{ label: string; dataUrl: string }>;
 }
 
 export interface AIStreamResult {
@@ -46,16 +46,14 @@ export function startAIStream(ctx: AIStreamContext): void {
   initSSE(ctx.res);
   
   debugLog('startAIStream', { 
-    hasSourceImage: !!ctx.sourceImage, 
-    hasMaskImage: !!ctx.maskImage 
+    hasInputImages: ctx.inputImages?.length ?? 0,
   });
   
   // First event MUST include all inputs for the log display
   sendProgress(ctx.res, {
     step: 'processing',
     message: 'Starting AI operation',
-    sourceImage: ctx.sourceImage,
-    maskImage: ctx.maskImage,
+    inputImages: ctx.inputImages,
     prompt: ctx.prompt,
     newLogEntry: true,
   });
@@ -125,7 +123,7 @@ export function errorAIStream(res: Response, error: Error | string): void {
  * @example
  * ```ts
  * await runAIStream(
- *   { res, sourceImage, maskImage, prompt },
+ *   { res, prompt, inputImages: [{ label: 'Source', dataUrl: '...' }] },
  *   async (update) => {
  *     update({ message: 'Analyzing...' });
  *     const result = await doSomething();

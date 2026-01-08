@@ -83,18 +83,6 @@ export interface AIProgressEvent {
   iterationImage?: string;
   /** If true, forces creation of a new log entry instead of updating existing */
   newLogEntry?: boolean;
-  /** 
-   * @deprecated Use inputImages instead. 
-   * Kept for backward compatibility with existing SSE consumers.
-   * TODO: Remove in next major version after client migration.
-   */
-  sourceImage?: string;
-  /** 
-   * @deprecated Use inputImages instead.
-   * Kept for backward compatibility with existing SSE consumers.
-   * TODO: Remove in next major version after client migration.
-   */
-  maskImage?: string;
 }
 
 // ============================================================================

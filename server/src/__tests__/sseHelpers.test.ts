@@ -288,20 +288,22 @@ describe('sseHelpers', () => {
       expect(data.iteration).toEqual({ current: 2, max: 3 });
     });
 
-    it('should include sourceImage and maskImage (deprecated fields)', () => {
+    it('should include inputImages when present', () => {
       const { res, written } = createMockResponse();
+      const inputImages = [
+        { label: 'Source Image', dataUrl: 'data:image/png;base64,SOURCE' },
+        { label: 'Mask', dataUrl: 'data:image/png;base64,MASK' },
+      ];
       const progressEvent: AIProgressEvent = {
         step: 'planning',
         message: 'Planning',
-        sourceImage: 'data:image/png;base64,SOURCE',
-        maskImage: 'data:image/png;base64,MASK',
+        inputImages,
       };
 
       sendProgress(res, progressEvent);
 
       const data = JSON.parse(written[0].split('data: ')[1].split('\n')[0]);
-      expect(data.sourceImage).toBe('data:image/png;base64,SOURCE');
-      expect(data.maskImage).toBe('data:image/png;base64,MASK');
+      expect(data.inputImages).toEqual(inputImages);
     });
 
     it('should include prompt when present', () => {

@@ -41,7 +41,13 @@ router.post('/edit', requireGeminiApiKey, asyncHandler(async (req: Request, res:
 
   // Initialize SSE stream with first event containing images
   // This creates the log entry that agenticService will update
-  startAIStream({ res, sourceImage, maskImage, prompt });
+  const inputImages: Array<{ label: string; dataUrl: string }> = [
+    { label: 'Source Image', dataUrl: sourceImage },
+  ];
+  if (maskImage) {
+    inputImages.push({ label: 'Mask (white = edit area)', dataUrl: maskImage });
+  }
+  startAIStream({ res, prompt, inputImages });
 
   // Small delay to ensure first SSE event is flushed
   await new Promise(resolve => setImmediate(resolve));

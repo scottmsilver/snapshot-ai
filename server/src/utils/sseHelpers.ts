@@ -78,8 +78,7 @@ export function sendProgress(
     console.log('[SSE] sendProgress:', {
       step: progressEvent.step,
       message: progressEvent.message,
-      hasSourceImage: !!progressEvent.sourceImage,
-      hasMaskImage: !!progressEvent.maskImage,
+      hasInputImages: progressEvent.inputImages?.length ?? 0,
     });
   }
   sendSSE(res, 'progress', progressEvent);

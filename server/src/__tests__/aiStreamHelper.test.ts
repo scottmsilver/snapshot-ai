@@ -70,8 +70,8 @@ describe('aiStreamHelper', () => {
     it('should initialize SSE connection', () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       startAIStream(ctx);
@@ -79,11 +79,12 @@ describe('aiStreamHelper', () => {
       expect(initSSESpy).toHaveBeenCalledWith(mockRes);
     });
 
-    it('should send initial progress event with sourceImage and prompt', () => {
+    it('should send initial progress event with inputImages and prompt', () => {
+      const testInputImages = [{ label: 'Source Image', dataUrl: testSourceImage }];
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: testInputImages,
       };
 
       startAIStream(ctx);
@@ -91,19 +92,21 @@ describe('aiStreamHelper', () => {
       expect(sendProgressSpy).toHaveBeenCalledWith(mockRes, {
         step: 'processing',
         message: 'Starting AI operation',
-        sourceImage: testSourceImage,
-        maskImage: undefined,
+        inputImages: testInputImages,
         prompt: testPrompt,
         newLogEntry: true,
       });
     });
 
-    it('should include maskImage in initial progress event when provided', () => {
+    it('should include multiple images in initial progress event when provided', () => {
+      const testInputImages = [
+        { label: 'Source Image', dataUrl: testSourceImage },
+        { label: 'Mask (white = edit area)', dataUrl: testMaskImage },
+      ];
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
-        maskImage: testMaskImage,
         prompt: testPrompt,
+        inputImages: testInputImages,
       };
 
       startAIStream(ctx);
@@ -111,8 +114,7 @@ describe('aiStreamHelper', () => {
       expect(sendProgressSpy).toHaveBeenCalledWith(mockRes, {
         step: 'processing',
         message: 'Starting AI operation',
-        sourceImage: testSourceImage,
-        maskImage: testMaskImage,
+        inputImages: testInputImages,
         prompt: testPrompt,
         newLogEntry: true,
       });
@@ -121,8 +123,8 @@ describe('aiStreamHelper', () => {
     it('should set newLogEntry: true for first event', () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       startAIStream(ctx);
@@ -135,11 +137,11 @@ describe('aiStreamHelper', () => {
       );
     });
 
-    it('should handle empty sourceImage', () => {
+    it('should handle empty inputImages', () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: '',
         prompt: testPrompt,
+        inputImages: [],
       };
 
       startAIStream(ctx);
@@ -147,18 +149,18 @@ describe('aiStreamHelper', () => {
       expect(sendProgressSpy).toHaveBeenCalledWith(mockRes, {
         step: 'processing',
         message: 'Starting AI operation',
-        sourceImage: '',
-        maskImage: undefined,
+        inputImages: [],
         prompt: testPrompt,
         newLogEntry: true,
       });
     });
 
     it('should handle empty prompt', () => {
+      const testInputImages = [{ label: 'Source Image', dataUrl: testSourceImage }];
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: '',
+        inputImages: testInputImages,
       };
 
       startAIStream(ctx);
@@ -166,8 +168,7 @@ describe('aiStreamHelper', () => {
       expect(sendProgressSpy).toHaveBeenCalledWith(mockRes, {
         step: 'processing',
         message: 'Starting AI operation',
-        sourceImage: testSourceImage,
-        maskImage: undefined,
+        inputImages: testInputImages,
         prompt: '',
         newLogEntry: true,
       });
@@ -418,11 +419,14 @@ describe('aiStreamHelper', () => {
 
   describe('runAIStream', () => {
     it('should call startAIStream with context', async () => {
+      const testInputImages = [
+        { label: 'Source Image', dataUrl: testSourceImage },
+        { label: 'Mask (white = edit area)', dataUrl: testMaskImage },
+      ];
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
-        maskImage: testMaskImage,
         prompt: testPrompt,
+        inputImages: testInputImages,
       };
 
       await runAIStream(ctx, async () => ({
@@ -432,8 +436,7 @@ describe('aiStreamHelper', () => {
       // startAIStream calls initSSE and sendProgress
       expect(initSSESpy).toHaveBeenCalledWith(mockRes);
       expect(sendProgressSpy).toHaveBeenCalledWith(mockRes, expect.objectContaining({
-        sourceImage: testSourceImage,
-        maskImage: testMaskImage,
+        inputImages: testInputImages,
         prompt: testPrompt,
         newLogEntry: true,
       }));
@@ -442,8 +445,8 @@ describe('aiStreamHelper', () => {
     it('should call operation with update function', async () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       const operationSpy = vi.fn().mockResolvedValue({
@@ -458,8 +461,8 @@ describe('aiStreamHelper', () => {
     it('should allow operation to send updates', async () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       await runAIStream(ctx, async (update) => {
@@ -482,8 +485,8 @@ describe('aiStreamHelper', () => {
     it('should call completeAIStream with operation result', async () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       const result: AIStreamResult = {
@@ -502,8 +505,8 @@ describe('aiStreamHelper', () => {
     it('should handle operation errors', async () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       const error = new Error('Operation failed');
@@ -518,8 +521,8 @@ describe('aiStreamHelper', () => {
     it('should convert non-Error throws to Error', async () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       await runAIStream(ctx, async () => {
@@ -532,8 +535,8 @@ describe('aiStreamHelper', () => {
     it('should not call completeAIStream on error', async () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       await runAIStream(ctx, async () => {
@@ -547,8 +550,8 @@ describe('aiStreamHelper', () => {
     it('should handle async operation correctly', async () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       await runAIStream(ctx, async (update) => {
@@ -568,8 +571,8 @@ describe('aiStreamHelper', () => {
       const longPrompt = 'x'.repeat(10000);
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: longPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       startAIStream(ctx);
@@ -579,18 +582,18 @@ describe('aiStreamHelper', () => {
       }));
     });
 
-    it('should handle large base64 images', () => {
+    it('should handle large base64 images in inputImages', () => {
       const largeImage = 'data:image/png;base64,' + 'A'.repeat(100000);
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: largeImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: largeImage }],
       };
 
       startAIStream(ctx);
 
       expect(sendProgressSpy).toHaveBeenCalledWith(mockRes, expect.objectContaining({
-        sourceImage: largeImage,
+        inputImages: [{ label: 'Source Image', dataUrl: largeImage }],
       }));
     });
 
@@ -598,8 +601,8 @@ describe('aiStreamHelper', () => {
       const unicodePrompt = 'Remove the background and add emoji: 🌟✨🎨';
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: unicodePrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       startAIStream(ctx);
@@ -612,8 +615,8 @@ describe('aiStreamHelper', () => {
     it('should handle special characters in thinking text', async () => {
       const ctx: AIStreamContext = {
         res: mockRes,
-        sourceImage: testSourceImage,
         prompt: testPrompt,
+        inputImages: [{ label: 'Source Image', dataUrl: testSourceImage }],
       };
 
       await runAIStream(ctx, async (update) => {

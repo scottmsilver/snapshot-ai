@@ -83,72 +83,77 @@ describe('AIProgressContext - Inpaint SSE Events', () => {
     });
   });
 
-  describe('sourceImage and maskImage handling', () => {
-    it('should store sourceImage in log entry when provided', () => {
+  describe('inputImages handling', () => {
+    it('should store inputImages in log entry when provided', () => {
       const { result } = renderHook(() => useAIProgress(), { wrapper });
-      const testSourceImage = 'data:image/png;base64,SOURCE';
+      const testInputImages = [
+        { label: 'Source Image', dataUrl: 'data:image/png;base64,SOURCE' },
+        { label: 'Mask', dataUrl: 'data:image/png;base64,MASK' },
+      ];
 
       act(() => {
         result.current.updateProgress({
           step: 'processing',
           message: 'Processing',
-          sourceImage: testSourceImage,
+          inputImages: testInputImages,
           newLogEntry: true,
         });
       });
 
-      expect(result.current.state.log[0].sourceImage).toBe(testSourceImage);
+      expect(result.current.state.log[0].inputImages).toEqual(testInputImages);
     });
 
-    it('should store maskImage in log entry when provided', () => {
+    it('should handle single input image', () => {
       const { result } = renderHook(() => useAIProgress(), { wrapper });
-      const testMaskImage = 'data:image/png;base64,MASK';
+      const testInputImages = [
+        { label: 'Source Image', dataUrl: 'data:image/png;base64,SOURCE' },
+      ];
 
       act(() => {
         result.current.updateProgress({
           step: 'processing',
           message: 'Processing',
-          maskImage: testMaskImage,
+          inputImages: testInputImages,
           newLogEntry: true,
         });
       });
 
-      expect(result.current.state.log[0].maskImage).toBe(testMaskImage);
+      expect(result.current.state.log[0].inputImages).toEqual(testInputImages);
     });
 
-    it('should inherit sourceImage and maskImage in new entries', () => {
+    it('should not inherit inputImages in new entries', () => {
       const { result } = renderHook(() => useAIProgress(), { wrapper });
-      const testSourceImage = 'data:image/png;base64,SOURCE';
-      const testMaskImage = 'data:image/png;base64,MASK';
+      const testInputImages = [
+        { label: 'Source Image', dataUrl: 'data:image/png;base64,SOURCE' },
+      ];
       const testPrompt = 'Edit this image';
 
-      // First event with all data
+      // First event with inputImages
       act(() => {
         result.current.updateProgress({
           step: 'processing',
           message: 'Analyzing',
-          sourceImage: testSourceImage,
-          maskImage: testMaskImage,
+          inputImages: testInputImages,
           prompt: testPrompt,
           newLogEntry: true,
         });
       });
 
-      // Second event creates new entry but inherits images
+      // Second event creates new entry without inputImages
       act(() => {
         result.current.updateProgress({
           step: 'processing',
           message: 'Generating',
           thinkingText: 'AI is thinking...',
-          // No sourceImage, maskImage - should inherit from previous entry
         });
       });
 
       // Append-only: now we have 2 entries
       expect(result.current.state.log.length).toBe(2);
-      // New entry inherits images from previous
-      expect(result.current.state.log[1].sourceImage).toBe(testSourceImage);
-      expect(result.current.state.log[1].maskImage).toBe(testMaskImage);
+      // First entry has inputImages
+      expect(result.current.state.log[0].inputImages).toEqual(testInputImages);
+      // Second entry does NOT inherit inputImages (they are only on the first event)
+      expect(result.current.state.log[1].inputImages).toBeUndefined();
       expect(result.current.state.log[1].message).toBe('Generating');
       expect(result.current.state.log[1].thinkingText).toBe('AI is thinking...');
     });
@@ -157,8 +162,10 @@ describe('AIProgressContext - Inpaint SSE Events', () => {
   describe('complete inpaint flow simulation', () => {
     it('should handle full inpaint SSE flow with append-only log', () => {
       const { result } = renderHook(() => useAIProgress(), { wrapper });
-      const testSourceImage = 'data:image/png;base64,SOURCE';
-      const testMaskImage = 'data:image/png;base64,MASK';
+      const testInputImages = [
+        { label: 'Source Image', dataUrl: 'data:image/png;base64,SOURCE' },
+        { label: 'Mask', dataUrl: 'data:image/png;base64,MASK' },
+      ];
       const testPrompt = 'Remove background';
 
       // Step 1: First progress event (creates entry with inputs)
@@ -166,8 +173,7 @@ describe('AIProgressContext - Inpaint SSE Events', () => {
         result.current.updateProgress({
           step: 'processing',
           message: 'Analyzing masked area',
-          sourceImage: testSourceImage,
-          maskImage: testMaskImage,
+          inputImages: testInputImages,
           prompt: testPrompt,
           newLogEntry: true,
         });
@@ -176,8 +182,9 @@ describe('AIProgressContext - Inpaint SSE Events', () => {
       expect(result.current.state.log.length).toBe(1);
       expect(result.current.state.step).toBe('processing');
       expect(result.current.state.message).toBe('Analyzing masked area');
+      expect(result.current.state.log[0].inputImages).toEqual(testInputImages);
 
-      // Step 2: Second progress event (appends new entry, inherits images)
+      // Step 2: Second progress event (appends new entry, no inherited images)
       act(() => {
         result.current.updateProgress({
           step: 'processing',
@@ -191,9 +198,8 @@ describe('AIProgressContext - Inpaint SSE Events', () => {
       expect(result.current.state.log.length).toBe(2);
       expect(result.current.state.message).toBe('Generating edit');
       expect(result.current.state.log[1].message).toBe('Generating edit');
-      // Images are inherited from the first entry
-      expect(result.current.state.log[1].sourceImage).toBe(testSourceImage);
-      expect(result.current.state.log[1].maskImage).toBe(testMaskImage);
+      // inputImages are only on the first entry (not inherited)
+      expect(result.current.state.log[1].inputImages).toBeUndefined();
       expect(result.current.state.log[1].thinkingText).toBe('Thinking about the edit...');
 
       // Step 3: Complete event (appends new entry)
@@ -206,9 +212,6 @@ describe('AIProgressContext - Inpaint SSE Events', () => {
 
       expect(result.current.state.step).toBe('complete');
       expect(result.current.state.log.length).toBe(3);
-      // Images are inherited through all entries
-      expect(result.current.state.log[2].sourceImage).toBe(testSourceImage);
-      expect(result.current.state.log[2].maskImage).toBe(testMaskImage);
     });
 
     it('should append thinking deltas to last entry instead of creating new', () => {

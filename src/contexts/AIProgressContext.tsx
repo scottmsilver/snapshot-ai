@@ -150,10 +150,7 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
       const elapsedMs = startTimeRef.current ? Date.now() - startTimeRef.current : prev.elapsedMs;
       const newLog = [...prev.log];
 
-      // Get source/mask from previous entry if not provided (inherit within operation)
       const lastEntry = newLog[newLog.length - 1];
-      const inheritedSourceImage = event.sourceImage ?? lastEntry?.sourceImage;
-      const inheritedMaskImage = event.maskImage ?? lastEntry?.maskImage;
 
       if (shouldAppendToLast && lastEntry) {
         // Append thinking/raw output deltas to the last entry
@@ -184,8 +181,6 @@ export const AIProgressProvider: React.FC<AIProgressProviderProps> = ({ children
           iteration: event.iteration,
           error: event.error,
           iterationImage: event.iterationImage,
-          sourceImage: inheritedSourceImage,
-          maskImage: inheritedMaskImage,
           durationMs: isCompletingOrError ? elapsedMs : undefined,
         };
         newLog.push(newEntry);

@@ -282,8 +282,7 @@ export async function ssePostRequest<TComplete, TProgress>(
             debugLog('SSE received progress', {
               step: data.step,
               message: data.message,
-              hasSourceImage: !!data.sourceImage,
-              hasMaskImage: !!data.maskImage,
+              hasInputImages: data.inputImages?.length ?? 0,
               newLogEntry: data.newLogEntry,
             });
             options.onProgress?.(data);

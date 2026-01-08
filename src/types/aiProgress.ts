@@ -84,10 +84,6 @@ export interface AILogEntry {
     totalChangedPixels: number;
     percentChanged: number;
   };
-  /** @deprecated Use inputImages instead */
-  sourceImage?: string;
-  /** @deprecated Use inputImages instead */
-  maskImage?: string;
 }
 
 /**
@@ -163,10 +159,6 @@ export interface AIProgressEvent {
   iterationImage?: string;
   /** If true, forces creation of a new log entry instead of updating existing */
   newLogEntry?: boolean;
-  /** @deprecated Use inputImages instead */
-  sourceImage?: string;
-  /** @deprecated Use inputImages instead */
-  maskImage?: string;
 }
 
 /**

@@ -159,11 +159,9 @@ const LogEntryComponent: React.FC<{
     debugLog('LogEntryComponent render', {
       id: entry.id,
       hasInputImages: entry.inputImages?.length ?? 0,
-      hasSourceImage: !!entry.sourceImage,
-      hasMaskImage: !!entry.maskImage,
       hasIterationImage: !!entry.iterationImage,
     });
-  }, [entry.id, entry.inputImages, entry.sourceImage, entry.maskImage, entry.iterationImage]);
+  }, [entry.id, entry.inputImages, entry.iterationImage]);
 
   // Auto-expand latest entry when it gets content
   useEffect(() => {
@@ -365,8 +363,8 @@ const LogEntryComponent: React.FC<{
         </div>
       )}
 
-      {/* Image previews (source, mask, and generated) */}
-      {(entry.sourceImage || entry.maskImage || entry.iterationImage) && expanded && (
+      {/* Generated image preview */}
+      {entry.iterationImage && expanded && (
         <div
           style={{
             marginTop: '8px',
@@ -377,86 +375,29 @@ const LogEntryComponent: React.FC<{
             flexWrap: 'wrap',
           }}
         >
-          {/* Source image */}
-          {entry.sourceImage && (
-            <div>
-              <div
-                style={{
-                  fontSize: '11px',
-                  fontWeight: '500',
-                  color: '#666',
-                  marginBottom: '4px',
-                }}
-              >
-                Source:
-              </div>
-              <img
-                src={entry.sourceImage}
-                alt="Source"
-                style={{
-                  maxWidth: '150px',
-                  maxHeight: '150px',
-                  borderRadius: '4px',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  objectFit: 'contain',
-                  background: '#f5f5f5',
-                }}
-              />
+          <div>
+            <div
+              style={{
+                fontSize: '11px',
+                fontWeight: '500',
+                color: '#666',
+                marginBottom: '4px',
+              }}
+            >
+              Generated Image:
             </div>
-          )}
-          {/* Mask image */}
-          {entry.maskImage && (
-            <div>
-              <div
-                style={{
-                  fontSize: '11px',
-                  fontWeight: '500',
-                  color: '#666',
-                  marginBottom: '4px',
-                }}
-              >
-                Mask:
-              </div>
-              <img
-                src={entry.maskImage}
-                alt="Mask"
-                style={{
-                  maxWidth: '150px',
-                  maxHeight: '150px',
-                  borderRadius: '4px',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  objectFit: 'contain',
-                  background: '#000',
-                }}
-              />
-            </div>
-          )}
-          {/* Generated image */}
-          {entry.iterationImage && (
-            <div>
-              <div
-                style={{
-                  fontSize: '11px',
-                  fontWeight: '500',
-                  color: '#666',
-                  marginBottom: '4px',
-                }}
-              >
-                Generated Image:
-              </div>
-              <img
-                src={entry.iterationImage}
-                alt="Generated iteration"
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: '200px',
-                  borderRadius: '4px',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  objectFit: 'contain',
-                }}
-              />
-            </div>
-          )}
+            <img
+              src={entry.iterationImage}
+              alt="Generated iteration"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '200px',
+                borderRadius: '4px',
+                border: '1px solid rgba(0, 0, 0, 0.1)',
+                objectFit: 'contain',
+              }}
+            />
+          </div>
         </div>
       )}
     </div>
