@@ -1,18 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Layer, Line, Rect, Circle, Arrow, Text, Transformer, Group, Path, Star, RegularPolygon, Image } from 'react-konva';
+import { Layer, Line, Rect, Circle, Arrow, Text, Group, Path, Star, RegularPolygon, Image } from 'react-konva';
 import Konva from 'konva';
 import { useDrawing } from '@/hooks/useDrawing';
-import { useDrawingContext, DrawingActionType } from '@/contexts/DrawingContext';
+import { useDrawingContext } from '@/contexts/DrawingContext';
 import { useSelectionMachine } from '@/hooks/useSelectionMachine';
 import { DrawingTool, AIReferenceSubTool } from '@/types/drawing';
-import { SelectionOverlay } from '@/components/GenerativeFill/SelectionOverlay';
-import { ResultOverlay } from '@/components/GenerativeFill/ResultOverlay';
+import { GenerativeFillOverlay } from './GenerativeFillOverlay';
 import { SelectionBoxRenderer } from '@/components/Canvas/SelectionBoxRenderer';
 import { ArrowControlPoints } from './ArrowControlPoints';
 import { MeasurementControlPoints } from './MeasurementControlPoints';
 import { CalloutControlPoints } from './CalloutControlPoints';
 import { MarkupPreview } from './MarkupPreview';
 import { TempDrawingPreview } from './TempDrawingPreview';
+import { TransformerWrapper } from './TransformerWrapper';
 import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, StarShape, MeasurementLineShape, ImageShape, Point } from '@/types/drawing';
 import {
   perimeterOffsetToPoint,
@@ -115,10 +115,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
   const { state: drawingState, dispatch, addReferencePoint, addAiMarkupShape } = useDrawingContext();
 
-  // Track if mouse is down for generative fill
-  const [isGenerativeFillDrawing, setIsGenerativeFillDrawing] = useState(false);
-  const [polygonPreviewPoint, setPolygonPreviewPoint] = useState<Point | null>(null);
-
   // Track markup drawing state for AI Reference mode
   const [isMarkupDrawing, setIsMarkupDrawing] = useState(false);
   const [markupStartPoint, setMarkupStartPoint] = useState<Point | null>(null);
@@ -159,7 +155,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   const [, forceUpdate] = useState({});
   const [currentlyDraggingShapeId, setCurrentlyDraggingShapeId] = useState<string | null>(null);
   const justFinishedDraggingRef = useRef(false);
-  const [isSnapping, setIsSnapping] = useState(false);
 
   // Drag session tracking
   const dragSessionRef = useRef<{ id: string; session: string; oldPoints: number[] } | null>(null);
@@ -195,9 +190,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
   // Track callout drag start position for calculating delta
   const calloutDragStart = useRef<Map<string, { x: number; y: number }>>(new Map());
-
-  // Snap angles for rotation
-  const SNAP_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
 
   const pointsEqual = (a?: number[], b?: number[]): boolean => {
     if (!a || !b || a.length !== b.length) {
@@ -2076,133 +2068,19 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     );
   };
 
-  // Helper function to check if a point is near the first point of the polygon
-  const isNearFirstPoint = (currentPos: Point, firstPoint: Point, threshold: number = 10): boolean => {
-    const dx = currentPos.x - firstPoint.x;
-    const dy = currentPos.y - firstPoint.y;
-    return Math.sqrt(dx * dx + dy * dy) <= threshold;
-  };
-
-  // Generative fill mouse event handlers
-  const handleGenerativeFillMouseDown = (e: Konva.KonvaEventObject<MouseEvent>): void => {
-    if (!drawingState.generativeFillMode?.isActive) return;
-
-    const pos = e.target.getStage()?.getPointerPosition();
-    if (!pos) return;
-
-    const { selectionTool, selectionPoints } = drawingState.generativeFillMode;
-
-    if (selectionTool === 'polygon') {
-      // Polygon is click-based, not drag-based
-      const newPoint = { x: pos.x / zoomLevel, y: pos.y / zoomLevel };
-      
-      // Check if we should close the polygon
-      if (selectionPoints.length >= 3 && isNearFirstPoint(newPoint, selectionPoints[0], 10 / zoomLevel)) {
-        // Close polygon - trigger completion
-        // TODO: This will be handled by the completion logic
-        setPolygonPreviewPoint(null);
-        return;
-      }
-      
-      // Add point to polygon
-      dispatch({
-        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
-        points: [...selectionPoints, newPoint],
-      });
-      return;
-    }
-
-    setIsGenerativeFillDrawing(true);
-
-    if (selectionTool === 'brush' || selectionTool === 'lasso') {
-      // Start collecting points
-      dispatch({
-        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
-        points: [{ x: pos.x / zoomLevel, y: pos.y / zoomLevel }],
-      });
-    } else if (selectionTool === 'rectangle') {
-      // Start rectangle
-      dispatch({
-        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
-        rectangle: { x: pos.x / zoomLevel, y: pos.y / zoomLevel, width: 0, height: 0 },
-      });
-    }
-  };
-
-  const handleGenerativeFillMouseMove = (e: Konva.KonvaEventObject<MouseEvent>): void => {
-    if (!drawingState.generativeFillMode?.isActive) return;
-    if (!e.target.getStage()) return;
-
-    const pos = e.target.getStage()!.getPointerPosition();
-    if (!pos) return;
-
-    const { selectionTool, selectionPoints, selectionRectangle } = drawingState.generativeFillMode;
-
-    // Handle polygon preview point
-    if (selectionTool === 'polygon') {
-      setPolygonPreviewPoint({ x: pos.x / zoomLevel, y: pos.y / zoomLevel });
-      return;
-    }
-
-    // Other tools require mouse to be down
-    if (!isGenerativeFillDrawing) return;
-
-    if ((selectionTool === 'brush' || selectionTool === 'lasso') && selectionPoints.length > 0) {
-      // Add point to path
-      dispatch({
-        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
-        points: [...selectionPoints, { x: pos.x / zoomLevel, y: pos.y / zoomLevel }],
-      });
-    } else if (selectionTool === 'rectangle' && selectionRectangle) {
-      // Update rectangle size
-      dispatch({
-        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
-        rectangle: {
-          ...selectionRectangle,
-          width: (pos.x / zoomLevel) - selectionRectangle.x,
-          height: (pos.y / zoomLevel) - selectionRectangle.y,
-        },
-      });
-    }
-  };
-
-  const handleGenerativeFillMouseUp = (): void => {
-    setIsGenerativeFillDrawing(false);
-  };
-
-  const handleGenerativeFillDoubleClick = (): void => {
-    if (!drawingState.generativeFillMode?.isActive) return;
-    
-    const { selectionTool, selectionPoints } = drawingState.generativeFillMode;
-    
-    // Close polygon on double-click if we have at least 3 points
-    if (selectionTool === 'polygon' && selectionPoints.length >= 3) {
-      // TODO: Trigger polygon completion
-      setPolygonPreviewPoint(null);
-    }
-  };
-
   return (
     <Layer
       name="drawingLayer"
       scaleX={zoomLevel}
       scaleY={zoomLevel}
     >
-      {/* Invisible rect to capture mouse events for generative fill */}
-      {drawingState.generativeFillMode?.isActive && stageRef.current && (
-        <Rect
-          x={0}
-          y={0}
-          width={stageRef.current.width() / zoomLevel}
-          height={stageRef.current.height() / zoomLevel}
-          fill="transparent"
-          listening={true}
-          onMouseDown={handleGenerativeFillMouseDown}
-          onMouseMove={handleGenerativeFillMouseMove}
-          onMouseUp={handleGenerativeFillMouseUp}
-          onDblClick={handleGenerativeFillDoubleClick}
-        />
-      )}
+      {/* Generative fill overlay (event handling + selection + result) */}
+      <GenerativeFillOverlay
+        generativeFillMode={drawingState.generativeFillMode}
+        zoomLevel={zoomLevel}
+        stageRef={stageRef}
+        dispatch={dispatch}
+      />
 
       {/* Render all shapes in z-order */}
       {getSortedShapes().map(renderShape)}
@@ -2235,25 +2113,6 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         </Group>
       )}
 
-      {/* Render generative fill selection overlay */}
-      {drawingState.generativeFillMode?.isActive && (
-        <SelectionOverlay
-          selectionTool={drawingState.generativeFillMode.selectionTool}
-          selectionPoints={drawingState.generativeFillMode.selectionPoints}
-          selectionRectangle={drawingState.generativeFillMode.selectionRectangle}
-          brushWidth={drawingState.generativeFillMode.brushWidth}
-          polygonPreviewPoint={polygonPreviewPoint ?? undefined}
-        />
-      )}
-
-      {/* Render generative fill result preview */}
-      {drawingState.generativeFillMode?.generatedResult && (
-        <ResultOverlay
-          imageData={drawingState.generativeFillMode.generatedResult.imageData}
-          bounds={drawingState.generativeFillMode.generatedResult.bounds}
-        />
-      )}
-
       {/* AI thinking overlay now rendered in WorkspaceCanvas as HTML/CSS overlay */}
 
       {/* Render selection rectangle */}
@@ -2262,284 +2121,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         selectionBox={selectionBox}
       />
 
-      {/* Render transformer for selected shapes (hidden in AI Reference drawing mode) */}
-      {activeTool === DrawingTool.SELECT && drawingSelectedShapeIds.length > 0 &&
-       !(drawingState.aiReferenceMode && drawingState.aiReferenceSubTool !== AIReferenceSubTool.PIN) && (
-        <Transformer
-          key={drawingSelectedShapeIds.join(',')}
-          ref={transformerRef}
-          borderEnabled={true}
-          borderStroke={isSnapping ? "#00ff00" : "#4a90e2"}
-          borderStrokeWidth={1}
-          borderDash={[4, 4]}
-          anchorFill="white"
-          anchorStroke={isSnapping ? "#00ff00" : "#4a90e2"}
-          anchorStrokeWidth={2}
-          anchorSize={8}
-          rotateEnabled={true}
-          resizeEnabled={(() => {
-            // Check if we have a callout in whole mode
-            if (drawingSelectedShapeIds.length === 1) {
-              const shape = shapes.find(s => s.id === drawingSelectedShapeIds[0]);
-              if (shape?.type === DrawingTool.CALLOUT) {
-                const mode = calloutSelectionModes.get(shape.id) || 'whole';
-                // Disable resize in whole mode
-                return mode === 'text-only';
-              }
-            }
-            return true;
-          })()}
-          enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']}
-          ignoreStroke={false}
-          rotationSnaps={[]}
-          keepRatio={false}
-          rotationSnapTolerance={5}
-          boundBoxFunc={(oldBox, newBox) => {
-            // Check if any selected shape is a measurement line
-            const hasMeasurementLine = drawingSelectedShapeIds.some(id => {
-              const shape = shapes.find(s => s.id === id);
-              return shape?.type === DrawingTool.MEASURE;
-            });
-
-            // If it's a measurement line, prevent resize (only allow rotation/move)
-            if (hasMeasurementLine) {
-              return {
-                ...newBox,
-                width: oldBox.width,
-                height: oldBox.height
-              };
-            }
-
-            // For other shapes, allow resize but enforce minimum size
-            return {
-              ...newBox,
-              width: Math.max(10, newBox.width),
-              height: Math.max(10, newBox.height)
-            };
-          }}
-          onTransformStart={(e) => {
-            isTransformingRef.current = true;
-            startTransform();
-
-            // Disable dragging on nodes during transform
-            const nodes = transformerRef.current?.nodes();
-            if (nodes) {
-              nodes.forEach(node => {
-                node.draggable(false);
-              });
-            }
-
-            // Check if shift is pressed and update snaps
-            const shiftPressed = (e.evt as KeyboardEvent).shiftKey;
-            if (transformerRef.current) {
-              transformerRef.current.rotationSnaps(shiftPressed ? SNAP_ANGLES : []);
-            }
-            setIsSnapping(shiftPressed);
-          }}
-          onTransform={(e) => {
-            // Update snaps dynamically based on shift key
-            const shiftPressed = (e.evt as KeyboardEvent).shiftKey;
-            if (transformerRef.current) {
-              transformerRef.current.rotationSnaps(shiftPressed ? SNAP_ANGLES : []);
-              // Also maintain aspect ratio when shift is held during resize
-              transformerRef.current.keepRatio(shiftPressed);
-            }
-            setIsSnapping(shiftPressed);
-
-            // Live update during transform
-            const nodes = transformerRef.current?.nodes();
-            if (nodes) {
-              nodes.forEach(node => {
-                node.getLayer()?.batchDraw();
-              });
-            }
-          }}
-          onTransformEnd={() => {
-            // Reset snapping state
-            setIsSnapping(false);
-
-            // End transform state
-            setTimeout(() => {
-              isTransformingRef.current = false;
-              endTransform();
-            }, 50); // Small delay to ensure mouseup is processed first
-
-            // Get transformed nodes from the transformer
-            const nodes = transformerRef.current?.nodes();
-            if (!nodes || nodes.length === 0) return;
-
-            // Re-enable dragging on nodes after transform
-            nodes.forEach(node => {
-              node.draggable(true);
-            });
-
-
-            const batchUpdates: Array<{ id: string; updates: Partial<Shape> }> = [];
-
-            nodes.forEach(node => {
-              if (!node) return;
-
-              const rotation = node.rotation();
-              const scaleX = node.scaleX();
-              const scaleY = node.scaleY();
-              const x = node.x();
-              const y = node.y();
-
-              let shapeId = node.id();
-              if (!shapeId) return;
-
-              let shape;
-              let isCalloutTextbox = false;
-              if (shapeId.endsWith('_textbox')) {
-                shapeId = shapeId.replace('_textbox', '');
-                shape = shapes.find(s => s.id === shapeId);
-                isCalloutTextbox = shape?.type === DrawingTool.CALLOUT;
-              } else {
-                shape = shapes.find(s => s.id === shapeId);
-              }
-
-              if (isCalloutTextbox && shape?.type === DrawingTool.CALLOUT) {
-                const calloutShape = shape as CalloutShape;
-
-                const newWidth = Math.max(50, node.width() * scaleX);
-                const newHeight = Math.max(30, node.height() * scaleY);
-                const newX = x / zoomLevel;
-                const newY = y / zoomLevel;
-
-                node.scaleX(1);
-                node.scaleY(1);
-                node.position({ x: newX * zoomLevel, y: newY * zoomLevel });
-
-                const newTextBox = {
-                  x: newX,
-                  y: newY,
-                  width: newWidth,
-                  height: newHeight,
-                };
-
-                const newBasePoint = perimeterOffsetToPoint(newTextBox, calloutShape.perimeterOffset);
-                const newControlPoints = getOptimalControlPoints(
-                  newBasePoint,
-                  { x: calloutShape.arrowX, y: calloutShape.arrowY },
-                  newTextBox,
-                );
-
-                batchUpdates.push({
-                  id: shapeId,
-                  updates: {
-                    textX: newX,
-                    textY: newY,
-                    textWidth: newWidth,
-                    textHeight: newHeight,
-                    curveControl1X: newControlPoints.control1.x,
-                    curveControl1Y: newControlPoints.control1.y,
-                    curveControl2X: newControlPoints.control2.x,
-                    curveControl2Y: newControlPoints.control2.y,
-                  },
-                });
-                return;
-              }
-
-              if (!shape) return;
-
-              node.scaleX(1);
-              node.scaleY(1);
-
-              const updates: Partial<Record<string, unknown>> = {};
-
-              if (Math.abs(rotation - (('rotation' in shape ? shape.rotation : 0) || 0)) > 0.01) {
-                updates.rotation = rotation;
-              }
-
-              if (Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01) {
-                switch (shape.type) {
-                  case DrawingTool.RECTANGLE:
-                  case DrawingTool.IMAGE: {
-                    const rectShape = shape as RectShape | ImageShape;
-                    updates.x = x;
-                    updates.y = y;
-                    updates.width = Math.max(10, rectShape.width * scaleX);
-                    updates.height = Math.max(10, rectShape.height * scaleY);
-                    break;
-                  }
-                  case DrawingTool.CIRCLE: {
-                    const circleShape = shape as CircleShape;
-                    updates.x = x;
-                    updates.y = y;
-                    updates.radiusX = Math.max(5, circleShape.radiusX * scaleX);
-                    updates.radiusY = Math.max(5, circleShape.radiusY * scaleY);
-                    break;
-                  }
-                  case DrawingTool.STAR: {
-                    const starShape = shape as StarShape;
-                    updates.x = x;
-                    updates.y = y;
-                    updates.radius = Math.max(5, starShape.radius * Math.max(scaleX, scaleY));
-                    if (starShape.innerRadius) {
-                      updates.innerRadius = starShape.innerRadius * Math.max(scaleX, scaleY);
-                    }
-                    break;
-                  }
-                  case DrawingTool.TEXT: {
-                    const textShape = shape as TextShape;
-                    updates.x = x;
-                    updates.y = y;
-                    updates.width = textShape.width
-                      ? Math.max(50, textShape.width * scaleX)
-                      : Math.max(50, 100 * scaleX);
-                    updates.height = textShape.height
-                      ? Math.max(20, textShape.height * scaleY)
-                      : Math.max(20, 30 * scaleY);
-                    break;
-                  }
-                  case DrawingTool.CALLOUT:
-                    return;
-                  case DrawingTool.ARROW: {
-                    const arrowShape = shape as ArrowShape;
-                    const [x1, y1, x2, y2] = arrowShape.points;
-                    const dx = (x2 - x1) * scaleX;
-                    const dy = (y2 - y1) * scaleY;
-                    updates.points = [x1, y1, x1 + dx, y1 + dy];
-                    break;
-                  }
-                  case DrawingTool.PEN: {
-                    const penShape = shape as PenShape;
-                    const penPoints = [...penShape.points];
-                    const centerX = penPoints.filter((_, i) => i % 2 === 0).reduce((a, b) => a + b, 0) / (penPoints.length / 2);
-                    const centerY = penPoints.filter((_, i) => i % 2 === 1).reduce((a, b) => a + b, 0) / (penPoints.length / 2);
-
-                    const scaledPoints = penPoints.map((point, idx) => (
-                      idx % 2 === 0
-                        ? centerX + (point - centerX) * scaleX
-                        : centerY + (point - centerY) * scaleY
-                    ));
-                    updates.points = scaledPoints;
-                    break;
-                  }
-                  case DrawingTool.MEASURE:
-                    return;
-                }
-              }
-
-              if (Object.keys(updates).length > 0) {
-                batchUpdates.push({ id: shapeId, updates });
-              }
-            });
-
-            if (batchUpdates.length > 0) {
-              try {
-                updateShapes(batchUpdates);
-              } catch (error) {
-                console.error('Error updating shapes:', error);
-              }
-            }
-
-
-            // Force a redraw to ensure the updated dimensions are reflected
-            transformerRef.current?.getLayer()?.batchDraw();
-          }}
-          />
-        )}
+      {/* Render transformer for selected shapes */}
+      <TransformerWrapper
+        transformerRef={transformerRef}
+        selectedShapeIds={drawingSelectedShapeIds}
+        shapes={shapes}
+        activeTool={activeTool}
+        drawingState={drawingState}
+        calloutSelectionModes={calloutSelectionModes}
+        zoomLevel={zoomLevel}
+        updateShapes={updateShapes}
+        startTransform={startTransform}
+        endTransform={endTransform}
+        isTransformingRef={isTransformingRef}
+      />
 
       {/* Render arrow control points */}
       {renderArrowControlPoints()}

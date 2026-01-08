@@ -1,10 +1,10 @@
-import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { motion } from 'framer-motion';
 import Konva from 'konva';
 import { useOptionalAuth } from '@/contexts/AuthContext';
 import { useDrawing } from '@/hooks/useDrawing';
-import { useDrawingContext, DrawingActionType } from '@/contexts/DrawingContext';
+import { useDrawingContext } from '@/contexts/DrawingContext';
 import { useHistory } from '@/hooks/useHistory';
 import { useMeasurement } from '@/hooks/useMeasurement';
 import { useSharedProjectLoader } from '@/hooks/useSharedProjectLoader';
@@ -16,38 +16,23 @@ import { useClipboardPaste } from '@/hooks/useClipboardPaste';
 import { useMeasurementEffects } from '@/hooks/useMeasurementEffects';
 import { useFileImports } from '@/hooks/useFileImports';
 import { useExport } from '@/hooks/useExport';
-import { useAIProgress } from '@/contexts/AIProgressContext';
 import { captureCleanCanvas } from '@/utils/exportUtils';
-import { applySmartTransparencyMask } from '@/utils/aiImageRemask';
 import {
-  DrawingTool,
-  GenerativeFillSelectionTool,
-  getNextZIndex,
   type Point,
   type MeasurementLineShape,
-  type Shape,
 } from '@/types/drawing';
 
-import { isServerAIEnabled } from '@/config/apiConfig';
 import { AuthGate } from '@/components/App/AuthGate';
 import { WorkspaceHeader } from '@/components/App/WorkspaceHeader';
 import { WorkspaceToolbar } from '@/components/App/WorkspaceToolbar';
 import { WorkspaceCanvas } from '@/components/App/WorkspaceCanvas';
 
-import { LoadingOverlay } from '@/components/App/LoadingOverlay';
-import { GenerativeFillToolbar } from '@/components/GenerativeFill/GenerativeFillToolbar';
-import { GenerativeFillDialog } from '@/components/GenerativeFill/GenerativeFillDialog';
 import { AIProgressPanel } from '@/components/GenerativeFill/AIProgressPanel';
+import { GenerativeFillController } from '@/components/GenerativeFill/GenerativeFillController';
 import { SettingsDialog } from '@/components/Settings';
-import { createGenerativeService } from '@/services/generativeApi';
-import { AgenticPainterService, type MovePlan } from '@/services/agenticService';
-import { settingsManager } from '@/services/settingsManager';
-import { generateBrushMask, generateRectangleMask, generateLassoMask, imageDataToBase64, base64ToImageData } from '@/utils/maskRendering';
-import { createAPIClient } from '@/services/apiClient';
-import { annotateImage } from '@/utils/imageAnnotation';
+
 import { InlineTextPlayground } from '@/components/Test/InlineTextPlayground';
-import { ManipulationDialog, MoveConfirmationDialog } from '@/components/AIReference';
-import { downloadAiManipulationCase } from '@/utils/aiCaseRecorder';
+import { useAIReferenceController } from '@/components/AIReference';
 import { CalibrationController } from '@/components/Measurement/CalibrationController';
 import { TextEditController, type TextEditControllerRef } from '@/components/Text';
 
@@ -79,14 +64,9 @@ function MainApp(): React.ReactElement {
   const [pendingCalibrationLine, setPendingCalibrationLine] = useState<MeasurementLineShape | null>(null);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [aiDrawerVisible, setAIDrawerVisible] = useState(true);
-  const [manipulationDialogOpen, setManipulationDialogOpen] = useState(false);
-  const [manipulationPreviewImage, setManipulationPreviewImage] = useState<string | null>(null);
-  const [moveConfirmationOpen, setMoveConfirmationOpen] = useState(false);
-  const [movePlan, setMovePlan] = useState<MovePlan | null>(null);
-  const [isPlanningMove, setIsPlanningMove] = useState(false);
 
   const authContext = useOptionalAuth();
-  const { updateProgress, setExportData } = useAIProgress();
+
   const captureAiSourceAndMask = useCallback((stage: Konva.Stage) => {
     const sourceCanvas = captureCleanCanvas(stage);
     const sourceCtx = sourceCanvas.getContext('2d')!;
@@ -98,6 +78,7 @@ function MainApp(): React.ReactElement {
 
     return { sourceCanvas, sourceImageData, alphaMaskImageData };
   }, []);
+
   const {
     shapes,
     activeTool,
@@ -114,7 +95,8 @@ function MainApp(): React.ReactElement {
     deleteSelected,
     updateStyle,
   } = useDrawing();
-  const { state: drawingState, dispatch, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes, clearReferencePoints, setAiReferenceMode, clearAiMarkupShapes } = useDrawingContext();
+
+  const { state: drawingState, setShapes, setMeasurementCalibration, copySelectedShapes, pasteShapes, clearReferencePoints, setAiReferenceMode, clearAiMarkupShapes } = useDrawingContext();
   const { canUndo, canRedo, pushState, undo, redo, getCurrentState, currentIndex } = useHistory();
 
   const selectedShapes = useMemo(
@@ -311,698 +293,24 @@ function MainApp(): React.ReactElement {
     shapes,
   ]);
 
-  // Generative Fill handlers
-  const handleGenerativeFillSelectTool = useCallback(
-    (selectionTool: GenerativeFillSelectionTool) => {
-      dispatch({
-        type: DrawingActionType.SET_GENERATIVE_FILL_SELECTION_TOOL,
-        selectionTool,
-      });
-    },
-    [dispatch]
-  );
-
-  const handleGenerativeFillBrushWidthChange = useCallback(
-    (brushWidth: number) => {
-      dispatch({
-        type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
-        brushWidth,
-      });
-    },
-    [dispatch]
-  );
-
-  const handleGenerativeFillComplete = useCallback(() => {
-    // Selection complete - generate preview images and show dialog
-    if (!stageRef.current || !drawingState.generativeFillMode) return;
-
-    try {
-      const stage = stageRef.current;
-      const { selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
-
-      // Capture clean canvas (without grid, selection UI, overlays, etc.)
-      const canvas = captureCleanCanvas(stage);
-
-      console.log('🔍 DEBUG: Captured canvas size:', canvas.width, 'x', canvas.height);
-
-      // Generate mask based on selection tool
-      let maskExport;
-
-      if (selectionTool === GenerativeFillSelectionTool.BRUSH) {
-        maskExport = generateBrushMask(canvas, selectionPoints, brushWidth);
-      } else if (selectionTool === GenerativeFillSelectionTool.RECTANGLE && selectionRectangle) {
-        maskExport = generateRectangleMask(canvas, selectionRectangle);
-      } else if (selectionTool === GenerativeFillSelectionTool.LASSO || selectionTool === GenerativeFillSelectionTool.POLYGON) {
-        maskExport = generateLassoMask(canvas, selectionPoints);
-      } else {
-        console.error('Invalid selection tool or missing selection data');
-        return;
-      }
-
-      // Convert to base64 for preview
-      const sourceCanvas = document.createElement('canvas');
-      sourceCanvas.width = maskExport.sourceImageData.width;
-      sourceCanvas.height = maskExport.sourceImageData.height;
-      const sourceCtx = sourceCanvas.getContext('2d')!;
-      sourceCtx.putImageData(maskExport.sourceImageData, 0, 0);
-      const sourceBase64 = sourceCanvas.toDataURL('image/png');
-
-      const maskCanvas = document.createElement('canvas');
-      maskCanvas.width = maskExport.maskImageData.width;
-      maskCanvas.height = maskExport.maskImageData.height;
-      const maskCtx = maskCanvas.getContext('2d')!;
-      maskCtx.putImageData(maskExport.maskImageData, 0, 0);
-      const maskBase64 = maskCanvas.toDataURL('image/png');
-
-      dispatch({
-        type: DrawingActionType.COMPLETE_GENERATIVE_FILL_SELECTION,
-        sourceImage: sourceBase64,
-        maskImage: maskBase64,
-      });
-    } catch (error) {
-      console.error('Failed to generate preview images:', error);
-    }
-  }, [dispatch, drawingState.generativeFillMode]);
-
-  const handleGenerativeFillCancel = useCallback(() => {
-    dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-  }, [dispatch]);
-
-  const handleSkipToConversational = useCallback(() => {
-    // Switch to text-only mode and open dialog immediately
-    dispatch({ type: DrawingActionType.START_GENERATIVE_FILL, mode: 'text-only' });
-  }, [dispatch]);
-
-  const handleGenerativeFillPromptSubmit = useCallback(
-    async (prompt: string) => {
-      if (!stageRef.current || !drawingState.generativeFillMode) return;
-
-      dispatch({ type: DrawingActionType.SET_GENERATIVE_FILL_PROMPT, prompt });
-      dispatch({ type: DrawingActionType.START_GENERATIVE_FILL_GENERATION });
-
-      try {
-        const stage = stageRef.current;
-        const { mode, selectionTool, selectionPoints, selectionRectangle, brushWidth } = drawingState.generativeFillMode;
-
-        // Capture clean canvas and alpha mask for smart transparency remask
-        const { sourceCanvas, sourceImageData, alphaMaskImageData } = captureAiSourceAndMask(stage);
-
-        // Convert source to base64 for export
-        const sourceBase64ForExport = sourceCanvas.toDataURL('image/png');
-
-        // Generate mask only if in inpainting mode
-        let maskExport;
-        let maskBase64ForExport: string | undefined;
-        if (mode === 'inpainting') {
-          if (selectionTool === GenerativeFillSelectionTool.BRUSH) {
-            maskExport = generateBrushMask(sourceCanvas, selectionPoints, brushWidth);
-          } else if (selectionTool === GenerativeFillSelectionTool.RECTANGLE && selectionRectangle) {
-            maskExport = generateRectangleMask(sourceCanvas, selectionRectangle);
-          } else if (selectionTool === GenerativeFillSelectionTool.LASSO) {
-            maskExport = generateLassoMask(sourceCanvas, selectionPoints);
-          } else {
-            throw new Error('Invalid selection tool or missing selection data');
-          }
-
-          // Convert mask to base64 for export
-          const maskCanvas = document.createElement('canvas');
-          maskCanvas.width = maskExport.maskImageData.width;
-          maskCanvas.height = maskExport.maskImageData.height;
-          const maskCtx = maskCanvas.getContext('2d')!;
-          maskCtx.putImageData(maskExport.maskImageData, 0, 0);
-          maskBase64ForExport = maskCanvas.toDataURL('image/png');
-        }
-
-        // Get settings
-        let geminiApiKey: string | null = null;
-        let inpaintingModel: string | null = null;
-        let textOnlyModel: string | null = null;
-        let googleCloudProjectId: string | null = null;
-        let oauthAccessToken: string | null = null;
-        let useLangGraph = false;
-
-        if (authContext?.isAuthenticated && authContext?.getAccessToken) {
-          try {
-            const accessToken = authContext.getAccessToken();
-            oauthAccessToken = accessToken;
-            if (accessToken) {
-              await settingsManager.initialize(accessToken);
-              geminiApiKey = await settingsManager.getGeminiApiKey();
-              inpaintingModel = await settingsManager.getInpaintingModel();
-              textOnlyModel = await settingsManager.getTextOnlyModel();
-              googleCloudProjectId = await settingsManager.getGoogleCloudProjectId();
-              useLangGraph = await settingsManager.getUseLangGraph();
-            }
-          } catch (error) {
-            console.error('Failed to get settings:', error);
-          }
-        }
-
-        // Default to gemini for inpainting, gemini for text-only
-        const selectedInpaintingModel = (inpaintingModel || 'gemini') as 'gemini' | 'imagen';
-        const selectedTextOnlyModel = (textOnlyModel || 'gemini') as 'gemini' | 'imagen';
-
-        // Determine which model to validate based on mode
-        const modelToValidate = mode === 'inpainting' ? selectedInpaintingModel : selectedTextOnlyModel;
-
-        // Check authentication and API key based on model
-        // In server mode, Gemini API key is handled server-side
-        if (modelToValidate === 'gemini' && !isServerAIEnabled()) {
-          if (!geminiApiKey && !import.meta.env.VITE_GEMINI_API_KEY && !import.meta.env.VITE_GENERATIVE_API_KEY) {
-            dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-            alert('Please add your Gemini API key in Settings to use Generative Fill (or enable server mode).');
-            setSettingsDialogOpen(true);
-            return;
-          }
-        } else if (modelToValidate === 'imagen') {
-          if (!oauthAccessToken) {
-            dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-            alert('Please sign in with Google to use Imagen.');
-            return;
-          }
-          if (!googleCloudProjectId) {
-            dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-            alert('Please add your Google Cloud Project ID in Settings to use Imagen.');
-            setSettingsDialogOpen(true);
-            return;
-          }
-        }
-
-        // Call API service with both model preferences
-        // Resolve Gemini API Key for the Agent (and Nano Banana tool)
-        const effectiveGeminiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
-
-        let resultImageData: ImageData;
-
-        // Use SSE streaming for inpainting mode when server AI is enabled
-        if (isServerAIEnabled() && mode === 'inpainting' && maskExport && maskBase64ForExport) {
-          // Use new SSE streaming inpaint endpoint
-          console.log('🎨 App: Starting inpaintStream...');
-          const apiClient = createAPIClient();
-          const result = await apiClient.inpaintStream(
-            sourceBase64ForExport,
-            maskBase64ForExport,
-            prompt,
-            {
-              onProgress: updateProgress,
-            }
-          );
-          console.log('🎨 App: inpaintStream resolved!', { hasImageData: !!result.imageData, imageDataLength: result.imageData?.length || 0 });
-          resultImageData = await base64ToImageData(result.imageData);
-        } else {
-          // Create specific service for the Nano Banana tool (always Gemini)
-          const nanoBananaService = createGenerativeService(
-            effectiveGeminiKey,
-            'gemini',
-            undefined,
-            'gemini',
-            'gemini'
-          );
-
-          // Use Agentic Service for text-only mode or when server AI is disabled
-          const agenticService = new AgenticPainterService(effectiveGeminiKey, nanoBananaService);
-
-          // Call edit() method which handles both inpainting and text-only modes
-          resultImageData = mode === 'inpainting' && maskExport
-            ? await agenticService.edit(sourceImageData, prompt, maskExport.maskImageData, updateProgress, { useLangGraph })
-            : await agenticService.edit(sourceImageData, prompt, undefined, updateProgress, { useLangGraph });
-        }
-        const remaskedResult = applySmartTransparencyMask(
-          resultImageData,
-          sourceImageData,
-          alphaMaskImageData
-        );
-
-        // Convert result to base64
-        const resultCanvas = document.createElement('canvas');
-        resultCanvas.width = remaskedResult.width;
-        resultCanvas.height = remaskedResult.height;
-        const resultCtx = resultCanvas.getContext('2d')!;
-        resultCtx.putImageData(remaskedResult, 0, 0);
-        const resultBase64 = resultCanvas.toDataURL('image/png');
-
-        // Result is now full-size, so bounds should be full canvas
-        const fullCanvasBounds = {
-          x: 0,
-          y: 0,
-          width: sourceCanvas.width,
-          height: sourceCanvas.height,
-        };
-
-        // Create the image shape immediately and add it to canvas
-        const imageShape: Shape = {
-          id: `image-${Date.now()}`,
-          type: DrawingTool.IMAGE,
-          x: fullCanvasBounds.x,
-          y: fullCanvasBounds.y,
-          width: fullCanvasBounds.width,
-          height: fullCanvasBounds.height,
-          imageData: resultBase64,
-          style: {
-            stroke: 'transparent',
-            strokeWidth: 0,
-            fill: 'transparent',
-            opacity: 1,
-          },
-          rotation: 0,
-          zIndex: getNextZIndex(shapes),
-          visible: true,
-          locked: false,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-
-        // Add the shape and select it
-        addShape(imageShape);
-        selectShape(imageShape.id);
-
-        // Set export data for Save button in AI Progress Panel
-        setExportData({
-          sourceImage: sourceBase64ForExport,
-          resultImage: resultBase64,
-          prompt,
-          maskImage: maskBase64ForExport,
-          type: mode === 'inpainting' ? 'ai_fill' : 'ai_fill_text_only',
-          canvas: {
-            width: sourceCanvas.width,
-            height: sourceCanvas.height,
-          },
-        });
-
-        // Exit generative fill mode
-        dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-      } catch (error) {
-        console.error('Generative fill failed:', error);
-        alert(`Generative fill failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Reset to allow retry
-        dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-      }
-    },
-    [dispatch, drawingState.generativeFillMode, stageRef, shapes, addShape, selectShape, authContext, updateProgress, setExportData, captureAiSourceAndMask]
-  );
-
-  const handleGenerativeFillDialogCancel = useCallback(() => {
-    // Just close the dialog, keep the selection
-    if (!drawingState.generativeFillMode) return;
-    dispatch({
-      type: DrawingActionType.UPDATE_GENERATIVE_FILL_SELECTION,
-    });
-    // Need to close dialog - we'll dispatch a new action or handle via state
-    dispatch({ type: DrawingActionType.CANCEL_GENERATIVE_FILL });
-  }, [dispatch, drawingState.generativeFillMode]);
-
-  // Store reference points and canvas data for the confirmation flow
-  const pendingManipulationRef = useRef<{
-    referencePoints: Array<{label: string, x: number, y: number}>;
-    markupShapes: Shape[];
-    command: string;
-    imageDataUrl: string;
-    canvasWidth: number;
-    canvasHeight: number;
-    alphaMaskImageData: ImageData;
-    geminiApiKey: string;
-    useLangGraph: boolean;
-  } | null>(null);
-
-  // AI Reference Mode - Manipulation Handler (now with confirmation)
-  const handleManipulationSubmit = useCallback(async (command: string) => {
-    // Capture reference points and markup shapes BEFORE closing dialog
-    const referencePointsCopy = [...drawingState.referencePoints];
-    const markupShapesCopy = [...drawingState.aiMarkupShapes];
-
-    // Close the command dialog but keep reference mode active
-    setManipulationDialogOpen(false);
-
-    try {
-      const stage = stageRef.current;
-      if (!stage) return;
-
-      // Capture clean canvas (without grid, selection UI, overlays, etc.)
-      const canvas = captureCleanCanvas(stage);
-      const imageDataUrl = canvas.toDataURL('image/png');
-      const maskCanvas = captureCleanCanvas(stage, { hideBackground: true });
-      const maskCtx = maskCanvas.getContext('2d')!;
-      const alphaMaskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-
-      // Get API key and LangGraph preference
-      let geminiApiKey: string | null = null;
-      let useLangGraph = false;
-      if (authContext?.isAuthenticated && authContext?.getAccessToken) {
-        try {
-          const accessToken = authContext.getAccessToken();
-          if (accessToken) {
-            await settingsManager.initialize(accessToken);
-            geminiApiKey = await settingsManager.getGeminiApiKey();
-            useLangGraph = await settingsManager.getUseLangGraph();
-          }
-        } catch (error) {
-          console.error('Failed to get settings:', error);
-        }
-      }
-
-      const effectiveGeminiKey = geminiApiKey || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GENERATIVE_API_KEY || '';
-
-      if (!effectiveGeminiKey) {
-        console.error('No API key');
-        alert('Please add your Gemini API key in Settings to use AI Reference Mode.');
-        setSettingsDialogOpen(true);
-        return;
-      }
-
-      // Store data for confirmation flow
-      pendingManipulationRef.current = {
-        referencePoints: referencePointsCopy,
-        markupShapes: markupShapesCopy,
-        command,
-        imageDataUrl,
-        canvasWidth: canvas.width,
-        canvasHeight: canvas.height,
-        alphaMaskImageData,
-        geminiApiKey: effectiveGeminiKey,
-        useLangGraph,
-      };
-
-      // Open confirmation dialog and start planning
-      setMoveConfirmationOpen(true);
-      setIsPlanningMove(true);
-
-      // Create service and get plan
-      const nanoBananaService = createGenerativeService(
-        effectiveGeminiKey,
-        'gemini',
-        undefined,
-        'gemini',
-        'gemini'
-      );
-      const agenticService = new AgenticPainterService(effectiveGeminiKey, nanoBananaService);
-
-      // Get the plan with annotations and descriptions
-      // Pass markup shapes so the AI knows about circles, lines, etc. the user drew
-      const plan = await agenticService.planMoveOperation(
-        imageDataUrl,
-        referencePointsCopy,
-        command,
-        canvas.width,
-        canvas.height,
-        markupShapesCopy
-      );
-
-      setMovePlan(plan);
-      setIsPlanningMove(false);
-
-    } catch (error) {
-      console.error('Planning failed:', error);
-      setMoveConfirmationOpen(false);
-      setIsPlanningMove(false);
-      setMovePlan(null);
-      alert('Failed to plan operation: ' + (error instanceof Error ? error.message : 'Unknown error'));
-    }
-  }, [drawingState.referencePoints, drawingState.aiMarkupShapes, authContext]);
-
-  // Handler for confirming the move operation
-  const handleMoveConfirm = useCallback(async () => {
-    if (!movePlan || !pendingManipulationRef.current) return;
-
-    const {
-      imageDataUrl,
-      canvasWidth,
-      canvasHeight,
-      alphaMaskImageData,
-      geminiApiKey,
-      referencePoints,
-      markupShapes,
-      command,
-      useLangGraph,
-    } = pendingManipulationRef.current;
-
-    // Close confirmation and clear reference mode
-    setMoveConfirmationOpen(false);
-    clearReferencePoints();
-    setAiReferenceMode(false);
-
-    try {
-      // Create service
-      const nanoBananaService = createGenerativeService(
-        geminiApiKey,
-        'gemini',
-        undefined,
-        'gemini',
-        'gemini'
-      );
-      const agenticService = new AgenticPainterService(geminiApiKey, nanoBananaService);
-
-      // Convert to ImageData
-      const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = reject;
-        img.src = imageDataUrl;
-      });
-
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = canvasWidth;
-      tempCanvas.height = canvasHeight;
-      const tempCtx = tempCanvas.getContext('2d')!;
-      tempCtx.drawImage(img, 0, 0);
-      const sourceImageData = tempCtx.getImageData(0, 0, canvasWidth, canvasHeight);
-
-      // Build a rich prompt that includes all the learned context
-      const descriptionsContext = movePlan.descriptions
-        .map(d => `- "${d.description}" located at coordinates (${d.x}, ${d.y})`)
-        .join('\n');
-
-      // Check if there are any markup shapes that will be visible in the image
-      const hasMarkupShapes = (drawingState.aiMarkupShapes?.length || 0) > 0;
-
-      const markupRemovalNote = hasMarkupShapes
-        ? `\n\nCRITICAL - MARKUP REMOVAL: The image contains bright orange freehand annotations (lines, circles, or rectangles) drawn by the user to indicate areas of interest. You MUST:
-1. Remove ALL orange markup lines/shapes from the output
-2. Restore the underlying content naturally where the markups were
-3. Execute the user's edit request as described above`
-        : '';
-
-      const enrichedPrompt = `CONTEXT - Elements in this image that are relevant to the edit:
-${descriptionsContext}
-
-TASK:
-${movePlan.suggestedPrompt}
-
-IMPORTANT: Use the exact coordinates provided above to locate elements. The descriptions tell you precisely what each element looks like and where it is.${markupRemovalNote}`;
-
-      updateProgress({
-        step: 'processing',
-        message: 'Executing confirmed operation...',
-        thinkingText: `Executing:\n\n${movePlan.interpretation}\n\n**Full prompt with context:**\n${enrichedPrompt}`,
-      });
-
-      // Execute the edit with the enriched prompt (includes all learned context)
-      const resultImageData = await agenticService.edit(
-        sourceImageData,
-        enrichedPrompt,
-        undefined,
-        updateProgress,
-        { useLangGraph }
-      );
-      const remaskedResult = applySmartTransparencyMask(
-        resultImageData,
-        sourceImageData,
-        alphaMaskImageData
-      );
-
-      // Convert result to base64
-      const resultCanvas = document.createElement('canvas');
-      resultCanvas.width = remaskedResult.width;
-      resultCanvas.height = remaskedResult.height;
-      const resultCtx = resultCanvas.getContext('2d')!;
-      resultCtx.putImageData(remaskedResult, 0, 0);
-      const resultBase64 = resultCanvas.toDataURL('image/png');
-
-      if (localStorage.getItem('recordAiManipulationCases') === 'true') {
-        const alphaMaskBase64 = imageDataToBase64(alphaMaskImageData);
-        try {
-          await downloadAiManipulationCase({
-            id: `ai-manipulation-${new Date().toISOString()}`,
-            type: 'ai_reference_manipulation',
-            createdAt: new Date().toISOString(),
-            canvas: {
-              width: canvasWidth,
-              height: canvasHeight,
-            },
-            command,
-            enrichedPrompt,
-            movePlan,
-            referencePoints,
-            markupShapes,
-            sourceImageDataUrl: imageDataUrl,
-            alphaMaskDataUrl: alphaMaskBase64,
-            outputImageDataUrl: resultBase64,
-            models: {
-              planning: 'gemini',
-              generation: 'gemini',
-            },
-          });
-        } catch (error) {
-          console.warn('Failed to download AI manipulation bundle:', error);
-        }
-      }
-
-      // Create image shape and add to canvas
-      const imageShape: Shape = {
-        id: `image-${Date.now()}`,
-        type: DrawingTool.IMAGE,
-        x: 0,
-        y: 0,
-        width: canvasWidth,
-        height: canvasHeight,
-        imageData: resultBase64,
-        style: {
-          stroke: 'transparent',
-          strokeWidth: 0,
-          fill: 'transparent',
-          opacity: 1,
-        },
-        rotation: 0,
-        zIndex: getNextZIndex(shapes),
-        visible: true,
-        locked: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-
-      // Clear any markup shapes before adding the new image
-      clearAiMarkupShapes();
-
-      addShape(imageShape);
-      selectShape(imageShape.id);
-
-      updateProgress({
-        step: 'complete',
-        message: 'Image manipulation completed successfully!',
-        thinkingText: 'Your edited image has been added to the canvas.',
-      });
-
-    } catch (error) {
-      console.error('Manipulation failed:', error);
-      updateProgress({
-        step: 'error',
-        message: 'Failed to process manipulation',
-        error: {
-          message: error instanceof Error ? error.message : 'Unknown error',
-          details: error instanceof Error ? error.stack : undefined,
-        },
-      });
-      alert('Failed to process manipulation: ' + (error instanceof Error ? error.message : 'Unknown error'));
-    } finally {
-      setMovePlan(null);
-      pendingManipulationRef.current = null;
-    }
-  }, [movePlan, clearReferencePoints, setAiReferenceMode, updateProgress, shapes, addShape, selectShape, drawingState.aiMarkupShapes, clearAiMarkupShapes]);
-
-  // Handler for editing the command (go back to manipulation dialog)
-  const handleMoveEditCommand = useCallback(() => {
-    setMoveConfirmationOpen(false);
-    setMovePlan(null);
-    setManipulationDialogOpen(true);
-  }, []);
-
-  // Handler for replanning with edited command text
-  const handleReplan = useCallback(async (editedCommand: string) => {
-    if (!pendingManipulationRef.current) return;
-
-    try {
-      // Set loading state
-      setIsPlanningMove(true);
-
-      // Update the stored command with the edited version
-      pendingManipulationRef.current.command = editedCommand;
-
-      const {
-        imageDataUrl,
-        referencePoints,
-        canvasWidth,
-        canvasHeight,
-        markupShapes,
-        geminiApiKey,
-      } = pendingManipulationRef.current;
-
-      // Create service and regenerate plan with edited command
-      const nanoBananaService = createGenerativeService(
-        geminiApiKey,
-        'gemini',
-        undefined,
-        'gemini',
-        'gemini'
-      );
-      const agenticService = new AgenticPainterService(geminiApiKey, nanoBananaService);
-
-      // Get the new plan with the edited command
-      const plan = await agenticService.planMoveOperation(
-        imageDataUrl,
-        referencePoints,
-        editedCommand,
-        canvasWidth,
-        canvasHeight,
-        markupShapes
-      );
-
-      setMovePlan(plan);
-      setIsPlanningMove(false);
-
-    } catch (error) {
-      console.error('Replanning failed:', error);
-      setIsPlanningMove(false);
-      alert('Failed to replan operation: ' + (error instanceof Error ? error.message : 'Unknown error'));
-    }
-  }, []);
-
-  // Handler for closing the confirmation dialog
-  const handleMoveConfirmationClose = useCallback(() => {
-    setMoveConfirmationOpen(false);
-    setMovePlan(null);
-    setIsPlanningMove(false);
-    pendingManipulationRef.current = null;
-  }, []);
-
-  // Handler for opening the manipulation dialog with annotated preview
-  const handleOpenManipulationDialog = useCallback(async () => {
-    const stage = stageRef.current;
-    if (!stage) {
-      setManipulationDialogOpen(true);
-      return;
-    }
-
-    try {
-      // Capture clean canvas (without grid, selection UI, overlays, etc.)
-      const canvas = captureCleanCanvas(stage);
-      const imageDataUrl = canvas.toDataURL('image/png');
-
-      // Create annotated preview with pins
-      const annotationPoints = drawingState.referencePoints.map((p: { label: string; x: number; y: number }) => ({
-        label: p.label,
-        x: p.x * zoomLevel, // Scale to match captured canvas
-        y: p.y * zoomLevel,
-      }));
-
-      const annotatedPreview = await annotateImage(imageDataUrl, {
-        points: annotationPoints,
-      });
-
-      setManipulationPreviewImage(annotatedPreview);
-    } catch (error) {
-      console.error('Failed to capture preview:', error);
-      setManipulationPreviewImage(null);
-    }
-
-    setManipulationDialogOpen(true);
-  }, [drawingState.referencePoints, zoomLevel]);
-
-  // Activate generative fill mode when tool is selected
-  useEffect(() => {
-    if (activeTool === DrawingTool.GENERATIVE_FILL && !drawingState.generativeFillMode) {
-      // Default to inpainting mode - user can switch to text-only from toolbar
-      dispatch({ type: DrawingActionType.START_GENERATIVE_FILL, mode: 'inpainting' });
-    }
-  }, [activeTool, drawingState.generativeFillMode, dispatch]);
+  // AI Reference Controller - handles all AI reference mode functionality
+  const {
+    component: aiReferenceComponent,
+    openManipulationDialog,
+    clearReference,
+    isDialogOpen: isAIReferenceDialogOpen,
+  } = useAIReferenceController({
+    stageRef,
+    shapes,
+    zoomLevel,
+    authContext: authContext ? {
+      isAuthenticated: authContext.isAuthenticated,
+      getAccessToken: () => authContext.getAccessToken?.() ?? '',
+    } : null,
+    onAddShape: addShape,
+    onSelectShape: selectShape,
+    onSettingsOpen: () => setSettingsDialogOpen(true),
+  });
 
   const handleCanvasTextClick = useCallback(
     (position: Point) => {
@@ -1085,13 +393,14 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
             onTextClick={handleCanvasTextClick}
             onTextShapeEdit={handleTextShapeEdit}
             onImageToolComplete={handleImageToolComplete}
-            onReferenceManipulate={handleOpenManipulationDialog}
+            onReferenceManipulate={openManipulationDialog}
             onReferenceClear={() => {
               clearReferencePoints();
               clearAiMarkupShapes();
               setAiReferenceMode(false);
+              clearReference();
             }}
-            isManipulationDialogOpen={manipulationDialogOpen || moveConfirmationOpen}
+            isManipulationDialogOpen={isAIReferenceDialogOpen}
           />
 
           {/* AI Console - side panel for AI operation logs */}
@@ -1123,65 +432,20 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
           onClose={() => setSettingsDialogOpen(false)}
         />
 
-        {/* Generative Fill Toolbar - only show in inpainting mode when not showing dialog or generating */}
-        {drawingState.generativeFillMode?.isActive &&
-          drawingState.generativeFillMode.mode === 'inpainting' &&
-          !drawingState.generativeFillMode.showPromptDialog &&
-          !drawingState.generativeFillMode.isGenerating && (
-            <GenerativeFillToolbar
-              selectedTool={drawingState.generativeFillMode.selectionTool || GenerativeFillSelectionTool.BRUSH}
-              brushWidth={drawingState.generativeFillMode.brushWidth}
-              hasSelection={
-                drawingState.generativeFillMode.selectionPoints.length > 0 ||
-                drawingState.generativeFillMode.selectionRectangle !== null
-              }
-              onSelectTool={handleGenerativeFillSelectTool}
-              onBrushWidthChange={handleGenerativeFillBrushWidthChange}
-              onComplete={handleGenerativeFillComplete}
-              onCancel={handleGenerativeFillCancel}
-              onSkipToConversational={handleSkipToConversational}
-            />
-          )}
-
-        {/* Generative Fill Dialog */}
-        {drawingState.generativeFillMode && (
-          <GenerativeFillDialog
-            isOpen={drawingState.generativeFillMode.showPromptDialog}
-            isGenerating={drawingState.generativeFillMode.isGenerating}
-            mode={drawingState.generativeFillMode.mode}
-            onSubmit={handleGenerativeFillPromptSubmit}
-            onCancel={handleGenerativeFillDialogCancel}
-            sourceImagePreview={drawingState.generativeFillMode.previewImages?.sourceImage}
-            maskImagePreview={drawingState.generativeFillMode.previewImages?.maskImage}
-          />
-        )}
-
-        {/* Loading Overlay - block all interactions while generating */}
-        <LoadingOverlay isVisible={drawingState.generativeFillMode?.isGenerating ?? false} />
-
-
-        {/* AI Reference Mode - Manipulation Dialog only (overlay is in WorkspaceCanvas) */}
-        <ManipulationDialog
-          open={manipulationDialogOpen}
-          onClose={() => {
-            setManipulationDialogOpen(false);
-            setManipulationPreviewImage(null);
-          }}
-          onSubmit={handleManipulationSubmit}
-          referencePoints={drawingState.referencePoints}
-          previewImage={manipulationPreviewImage || undefined}
+        {/* Generative Fill Controller - manages all generative fill/AI inpainting functionality */}
+        <GenerativeFillController
+          stageRef={stageRef}
+          shapes={shapes}
+          activeTool={activeTool}
+          authContext={authContext}
+          onAddShape={addShape}
+          onSelectShape={selectShape}
+          onSettingsOpen={() => setSettingsDialogOpen(true)}
+          captureAiSourceAndMask={captureAiSourceAndMask}
         />
 
-        {/* AI Reference Mode - Move Confirmation Dialog */}
-        <MoveConfirmationDialog
-          open={moveConfirmationOpen}
-          onClose={handleMoveConfirmationClose}
-          onConfirm={handleMoveConfirm}
-          onEditCommand={handleMoveEditCommand}
-          onReplan={handleReplan}
-          plan={movePlan}
-          isLoading={isPlanningMove}
-        />
+        {/* AI Reference Controller - renders dialogs for AI reference mode */}
+        {aiReferenceComponent}
 
       </motion.div>
     </AuthGate>
