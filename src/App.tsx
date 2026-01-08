@@ -8,6 +8,7 @@ import { useDrawingContext, DrawingActionType } from '@/contexts/DrawingContext'
 import { useHistory } from '@/hooks/useHistory';
 import { useMeasurement } from '@/hooks/useMeasurement';
 import { useSharedProjectLoader } from '@/hooks/useSharedProjectLoader';
+import { useProjectController } from '@/hooks/useProjectController';
 import { useScreenshotCapture } from '@/hooks/useScreenshotCapture';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useHistorySync } from '@/hooks/useHistorySync';
@@ -23,19 +24,16 @@ import {
   GenerativeFillSelectionTool,
   getNextZIndex,
   type Point,
-  type TextShape,
-  type CalloutShape,
   type MeasurementLineShape,
   type Shape,
 } from '@/types/drawing';
-import { calculatePixelDistance, calculatePixelsPerUnit } from '@/utils/measurementUtils';
-import type { MeasurementUnit } from '@/utils/measurementUtils';
+
 import { isServerAIEnabled } from '@/config/apiConfig';
 import { AuthGate } from '@/components/App/AuthGate';
 import { WorkspaceHeader } from '@/components/App/WorkspaceHeader';
 import { WorkspaceToolbar } from '@/components/App/WorkspaceToolbar';
 import { WorkspaceCanvas } from '@/components/App/WorkspaceCanvas';
-import { WorkspaceDialogs } from '@/components/App/WorkspaceDialogs';
+
 import { LoadingOverlay } from '@/components/App/LoadingOverlay';
 import { GenerativeFillToolbar } from '@/components/GenerativeFill/GenerativeFillToolbar';
 import { GenerativeFillDialog } from '@/components/GenerativeFill/GenerativeFillDialog';
@@ -50,10 +48,10 @@ import { annotateImage } from '@/utils/imageAnnotation';
 import { InlineTextPlayground } from '@/components/Test/InlineTextPlayground';
 import { ManipulationDialog, MoveConfirmationDialog } from '@/components/AIReference';
 import { downloadAiManipulationCase } from '@/utils/aiCaseRecorder';
+import { CalibrationController } from '@/components/Measurement/CalibrationController';
+import { TextEditController, type TextEditControllerRef } from '@/components/Text';
 
 const CANVAS_PADDING = 100;
-
-type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
 
 // Wrapper component to handle test mode routing without violating hooks rules
 function App(): React.ReactElement {
@@ -67,6 +65,7 @@ function App(): React.ReactElement {
 function MainApp(): React.ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const textEditControllerRef = useRef<TextEditControllerRef>(null);
 
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null);
   const [isCanvasInitialized, setIsCanvasInitialized] = useState(false);
@@ -75,14 +74,8 @@ function MainApp(): React.ReactElement {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isLoadingSharedFile, setIsLoadingSharedFile] = useState(false);
   const [sharedFileError, setSharedFileError] = useState<string | null>(null);
-  const [loadedFileId, setLoadedFileId] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [documentName, setDocumentName] = useState('Untitled');
   const [isEditingName, setIsEditingName] = useState(false);
-  const [textDialogOpen, setTextDialogOpen] = useState(false);
-  const [textPosition, setTextPosition] = useState<Point | null>(null);
-  const [editingTextId, setEditingTextId] = useState<string | null>(null);
-  const [calibrationDialogOpen, setCalibrationDialogOpen] = useState(false);
   const [pendingCalibrationLine, setPendingCalibrationLine] = useState<MeasurementLineShape | null>(null);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [aiDrawerVisible, setAIDrawerVisible] = useState(true);
@@ -154,19 +147,32 @@ function MainApp(): React.ReactElement {
     canvasPadding: CANVAS_PADDING,
   });
 
-  const editingTextShape = useMemo(() => {
-    if (!editingTextId) {
-      return undefined;
-    }
-    const shape = shapes.find(item => item.id === editingTextId);
-    if (!shape) {
-      return undefined;
-    }
-    if (shape.type === DrawingTool.TEXT || shape.type === DrawingTool.CALLOUT) {
-      return shape as TextShape | CalloutShape;
-    }
-    return undefined;
-  }, [editingTextId, shapes]);
+  const { handleCopyToClipboard, handleDownloadImage, handleDownloadPdf } = useExport({ stageRef });
+
+  const {
+    loadedFileId,
+    setLoadedFileId,
+    saveStatus,
+    setSaveStatus: _setSaveStatus,
+    handleProjectLoad: _handleProjectLoad,
+    handleNewProject: _handleNewProject,
+    fileMenuProps,
+  } = useProjectController({
+    clearSelection,
+    setShapes,
+    clearPdfFile,
+    setDocumentName,
+    setCanvasSize,
+    setIsCanvasInitialized,
+    stageRef,
+    documentName,
+    handleDownloadImage,
+    handleDownloadPdf,
+    showGrid,
+    setShowGrid,
+    canvasBackground,
+    setCanvasBackground,
+  });
 
   useSharedProjectLoader({
     isEnabled: Boolean(authContext?.isAuthenticated && authContext?.getAccessToken),
@@ -201,21 +207,14 @@ function MainApp(): React.ReactElement {
     setActiveTool,
     onCalibrationLineDetected: line => {
       setPendingCalibrationLine(line);
-      setCalibrationDialogOpen(true);
     },
   });
 
-  const { handleCopyToClipboard, handleDownloadImage, handleDownloadPdf } = useExport({ stageRef });
-
   const handleTextShapeEdit = useCallback(
     (shapeId: string) => {
-      const shape = shapes.find(item => item.id === shapeId);
-      if (shape && (shape.type === DrawingTool.TEXT || shape.type === DrawingTool.CALLOUT)) {
-        setEditingTextId(shapeId);
-        setTextDialogOpen(true);
-      }
+      textEditControllerRef.current?.handleTextShapeEdit(shapeId);
     },
-    [shapes],
+    [],
   );
 
   useKeyboardShortcuts({
@@ -235,37 +234,9 @@ function MainApp(): React.ReactElement {
     zoomLevel,
   });
 
-  const handleCalibrationConfirm = useCallback(
-    (value: number, unit: MeasurementUnit) => {
-      if (pendingCalibrationLine) {
-        const [x1, y1, x2, y2] = pendingCalibrationLine.points;
-        const pixelDistance = calculatePixelDistance(x1, y1, x2, y2);
-        const pixelsPerUnit = calculatePixelsPerUnit(pixelDistance, value, unit);
-
-        setMeasurementCalibration({
-          pixelsPerUnit,
-          unit,
-          calibrationLineId: null,
-        });
-
-        measurement.setCalibration(pixelDistance, value, unit, '');
-        deleteShapes([pendingCalibrationLine.id]);
-      }
-
-      setCalibrationDialogOpen(false);
-      setPendingCalibrationLine(null);
-    },
-    [deleteShapes, measurement, pendingCalibrationLine, setMeasurementCalibration],
-  );
-
-  const handleCalibrationCancel = useCallback(() => {
-    if (pendingCalibrationLine) {
-      deleteShapes([pendingCalibrationLine.id]);
-    }
-
-    setCalibrationDialogOpen(false);
+  const handleCalibrationClose = useCallback(() => {
     setPendingCalibrationLine(null);
-  }, [deleteShapes, pendingCalibrationLine]);
+  }, []);
 
   const handleDismissSharedFileError = useCallback(() => {
     setSharedFileError(null);
@@ -304,88 +275,6 @@ function MainApp(): React.ReactElement {
     setIsEditingName(true);
   }, []);
 
-  const handleProjectLoad = useCallback(
-    (projectData: { shapes?: Shape[] }, fileName: string) => {
-      clearSelection();
-      setShapes(projectData.shapes || []);
-      setLoadedFileId(null);
-      setSaveStatus('saved');
-      setCanvasSize(null);
-      setIsCanvasInitialized(false);
-      clearPdfFile();
-      let displayName = fileName;
-      if (fileName.startsWith('Markup - ')) {
-        displayName = fileName.substring(9);
-      }
-      setDocumentName(displayName);
-
-      if (projectData.shapes && projectData.shapes.length > 0) {
-        let minX = Infinity;
-        let minY = Infinity;
-        let maxX = -Infinity;
-        let maxY = -Infinity;
-
-        projectData.shapes.forEach(shape => {
-          if ('x' in shape && 'y' in shape && 'width' in shape && 'height' in shape) {
-            const positionedShape = shape as Shape & { x: number; y: number; width: number; height: number };
-            minX = Math.min(minX, positionedShape.x);
-            minY = Math.min(minY, positionedShape.y);
-            maxX = Math.max(maxX, positionedShape.x + positionedShape.width);
-            maxY = Math.max(maxY, positionedShape.y + positionedShape.height);
-          }
-        });
-
-        if (isFinite(minX)) {
-          setCanvasSize({
-            width: Math.min(maxX + CANVAS_PADDING, 1400),
-            height: Math.min(maxY + CANVAS_PADDING, 900),
-          });
-          setIsCanvasInitialized(true);
-        }
-      }
-    },
-    [clearSelection, clearPdfFile, setShapes],
-  );
-
-  const handleNewProject = useCallback(() => {
-    clearSelection();
-    setShapes([]);
-    setLoadedFileId(null);
-    setSaveStatus('saved');
-    setCanvasSize(null);
-    setIsCanvasInitialized(false);
-    clearPdfFile();
-    setDocumentName('Untitled');
-  }, [clearSelection, clearPdfFile, setShapes]);
-
-  const fileMenuProps = useMemo(
-    () => ({
-      stageRef,
-      imageData: null,
-      initialFileId: loadedFileId,
-      documentName,
-      onSaveStatusChange: setSaveStatus,
-      onProjectLoad: handleProjectLoad,
-      onNew: handleNewProject,
-      onExport: handleDownloadImage,
-      onExportPdf: handleDownloadPdf,
-      showGrid,
-      onToggleGrid: () => setShowGrid(prev => !prev),
-      canvasBackground,
-      onChangeBackground: setCanvasBackground,
-    }),
-    [
-      loadedFileId,
-      documentName,
-      handleProjectLoad,
-      handleNewProject,
-      handleDownloadImage,
-      handleDownloadPdf,
-      showGrid,
-      canvasBackground,
-    ],
-  );
-
   const editMenuProps = useMemo(() => {
     if (!isCanvasInitialized) {
       return undefined;
@@ -421,83 +310,6 @@ function MainApp(): React.ReactElement {
     selectMultiple,
     shapes,
   ]);
-
-  const editingDialogText = editingTextShape?.text ?? '';
-  const editingDialogFontSize = editingTextShape?.fontSize ?? 16;
-  const editingDialogFontFamily = editingTextShape?.fontFamily ?? currentStyle.fontFamily ?? 'Arial';
-
-  const textDialogProps = useMemo(
-    () => ({
-      isOpen: textDialogOpen,
-      initialText: editingDialogText,
-      initialFontSize: editingDialogFontSize,
-      initialFontFamily: editingDialogFontFamily,
-      onSubmit: (text: string, fontSize: number, fontFamily: string) => {
-        if (editingTextId) {
-          updateShape(editingTextId, {
-            text,
-            fontSize,
-            fontFamily,
-            updatedAt: Date.now(),
-          });
-        } else if (textPosition) {
-          const textShape: Omit<TextShape, 'zIndex'> = {
-            id: `text_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            type: DrawingTool.TEXT,
-            x: textPosition.x,
-            y: textPosition.y,
-            text,
-            fontSize,
-            fontFamily,
-            style: {
-              stroke: currentStyle.stroke,
-              strokeWidth: 0,
-              opacity: currentStyle.opacity,
-            },
-            visible: true,
-            locked: false,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-          addShape(textShape);
-          setActiveTool(DrawingTool.SELECT);
-        }
-
-        setTextDialogOpen(false);
-        setTextPosition(null);
-        setEditingTextId(null);
-      },
-      onCancel: () => {
-        setTextDialogOpen(false);
-        setTextPosition(null);
-        setEditingTextId(null);
-      },
-    }),
-    [
-      textDialogOpen,
-      editingDialogText,
-      editingDialogFontSize,
-      editingDialogFontFamily,
-      currentStyle,
-      editingTextId,
-      updateShape,
-      textPosition,
-      addShape,
-      setActiveTool,
-    ],
-  );
-
-  const calibrationDialogProps = useMemo(
-    () => ({
-      isOpen: calibrationDialogOpen,
-      pixelDistance: pendingCalibrationLine
-        ? calculatePixelDistance(...pendingCalibrationLine.points)
-        : 0,
-      onConfirm: handleCalibrationConfirm,
-      onCancel: handleCalibrationCancel,
-    }),
-    [calibrationDialogOpen, pendingCalibrationLine, handleCalibrationConfirm, handleCalibrationCancel],
-  );
 
   // Generative Fill handlers
   const handleGenerativeFillSelectTool = useCallback(
@@ -1194,9 +1006,7 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
 
   const handleCanvasTextClick = useCallback(
     (position: Point) => {
-      setTextPosition(position);
-      setEditingTextId(null);
-      setTextDialogOpen(true);
+      textEditControllerRef.current?.handleCanvasTextClick(position);
     },
     [],
   );
@@ -1288,9 +1098,23 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
           {aiDrawerVisible && <AIProgressPanel />}
         </main>
 
-        <WorkspaceDialogs
-          textDialogProps={textDialogProps}
-          calibrationDialogProps={calibrationDialogProps}
+        {/* Text Edit Controller - manages text dialog state and rendering */}
+        <TextEditController
+          ref={textEditControllerRef}
+          shapes={shapes}
+          currentStyle={currentStyle}
+          onUpdateShape={updateShape}
+          onAddShape={addShape}
+          onSetActiveTool={setActiveTool}
+        />
+
+        {/* Calibration Controller - manages calibration dialog state */}
+        <CalibrationController
+          pendingCalibrationLine={pendingCalibrationLine}
+          measurement={measurement}
+          onDeleteShape={deleteShapes}
+          onClose={handleCalibrationClose}
+          onSetMeasurementCalibration={setMeasurementCalibration}
         />
 
         {/* Settings Dialog */}

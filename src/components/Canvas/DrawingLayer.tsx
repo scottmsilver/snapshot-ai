@@ -8,6 +8,9 @@ import { DrawingTool, AIReferenceSubTool } from '@/types/drawing';
 import { SelectionOverlay } from '@/components/GenerativeFill/SelectionOverlay';
 import { ResultOverlay } from '@/components/GenerativeFill/ResultOverlay';
 import { SelectionBoxRenderer } from '@/components/Canvas/SelectionBoxRenderer';
+import { ArrowControlPoints } from './ArrowControlPoints';
+import { MeasurementControlPoints } from './MeasurementControlPoints';
+import { CalloutControlPoints } from './CalloutControlPoints';
 import { MarkupPreview } from './MarkupPreview';
 import { TempDrawingPreview } from './TempDrawingPreview';
 import type { Shape, PenShape, RectShape, CircleShape, ArrowShape, TextShape, CalloutShape, StarShape, MeasurementLineShape, ImageShape, Point } from '@/types/drawing';
@@ -15,9 +18,7 @@ import {
   perimeterOffsetToPoint,
   getArrowPathString,
   calculateArrowHeadRotation,
-  pointToPerimeterOffset,
   calculateInitialPerimeterOffset,
-  isValidControlPoint,
   getOptimalControlPoints
 } from '@/utils/calloutGeometry';
 import { pixelsToMeasurement, formatMeasurement, type MeasurementUnit } from '@/utils/measurementUtils';
@@ -1977,162 +1978,23 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     const measureNode = selectedShapeRefs.current.get(measureShape.id);
     if (!measureNode) return null;
 
-    // Get the measurement line's current position (changes during drag)
-    const nodePos = measureNode.position();
-    const [x1, y1, x2, y2] = measureShape.points;
-
-    // Add the node's current position to get actual control point positions
-    const actualX1 = x1 + nodePos.x;
-    const actualY1 = y1 + nodePos.y;
-    const actualX2 = x2 + nodePos.x;
-    const actualY2 = y2 + nodePos.y;
-
-    const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
-      const pos = e.target.position();
-      const newPoints: [number, number, number, number] = [...measureShape.points];
-
-      // Subtract the measurement node's position to get relative coordinates
-      const relativeX = pos.x - nodePos.x;
-      const relativeY = pos.y - nodePos.y;
-
-      if (index === 0) {
-        // Update start point
-        newPoints[0] = relativeX;
-        newPoints[1] = relativeY;
-      } else {
-        // Update end point
-        newPoints[2] = relativeX;
-        newPoints[3] = relativeY;
-      }
-
-      // If calibrated, update the measurement value
-      if (drawingState.measurementCalibration.pixelsPerUnit) {
-        const pixelDistance = Math.sqrt(
-          Math.pow(newPoints[2] - newPoints[0], 2) +
-          Math.pow(newPoints[3] - newPoints[1], 2)
-        );
-        const value = pixelsToMeasurement(
-          pixelDistance,
-          drawingState.measurementCalibration.pixelsPerUnit,
-          drawingState.measurementCalibration.unit as MeasurementUnit
-        );
-
-        updateShape(measureShape.id, {
-          points: newPoints,
-          measurement: {
-            value,
-            unit: drawingState.measurementCalibration.unit,
-            pixelDistance
-          }
-        });
-      } else {
-        // Just update points if not calibrated
-        updateShape(measureShape.id, { points: newPoints });
-      }
-    };
-
-    const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
-      e.cancelBubble = true;
-      setTimeout(() => {
-        isDraggingControlPointRef.current = false;
-        endControlPointDrag();
-      }, 50);
-    };
-
     return (
-      <Group listening={true}>
-        {/* Visual guide line */}
-        <Line
-          points={[actualX1, actualY1, actualX2, actualY2]}
-          stroke="#4a90e2"
-          strokeWidth={1}
-          dash={[5, 5]}
-          opacity={0.5}
-          listening={false}
-        />
-
-        {/* Start point control (blue) */}
-        <Circle
-          name="measurement-control-point"
-          x={actualX1}
-          y={actualY1}
-          radius={10}
-          fill="#4a90e2"
-          stroke="#fff"
-          strokeWidth={3}
-          shadowColor="rgba(0,0,0,0.5)"
-          shadowBlur={10}
-          shadowOffset={{ x: 2, y: 2 }}
-          draggable={true}
-          onDragStart={(e) => {
-            e.cancelBubble = true;
-            startControlPointDrag();
-            isDraggingControlPointRef.current = true;
-            setDraggingControlPointIndex(0);
-          }}
-          onDragMove={(e) => handleControlPointDragMove(0, e)}
-          onDragEnd={(e) => handleControlPointDragEnd(0, e)}
-          onClick={(e) => {
-            e.cancelBubble = true;
-          }}
-          onMouseEnter={(e) => {
-            const container = e.target.getStage()?.container();
-            if (container) {
-              container.style.cursor = 'move';
-            }
-          }}
-          onMouseLeave={(e) => {
-            const container = e.target.getStage()?.container();
-            if (container) {
-              container.style.cursor = 'default';
-            }
-          }}
-        />
-
-        {/* End point control (red) */}
-        <Circle
-          name="measurement-control-point"
-          x={actualX2}
-          y={actualY2}
-          radius={10}
-          fill="#e24a4a"
-          stroke="#fff"
-          strokeWidth={3}
-          shadowColor="rgba(0,0,0,0.5)"
-          shadowBlur={10}
-          shadowOffset={{ x: 2, y: 2 }}
-          draggable={true}
-          onDragStart={(e) => {
-            e.cancelBubble = true;
-            startControlPointDrag();
-            isDraggingControlPointRef.current = true;
-            setDraggingControlPointIndex(1);
-          }}
-          onDragMove={(e) => handleControlPointDragMove(1, e)}
-          onDragEnd={(e) => handleControlPointDragEnd(1, e)}
-          onClick={(e) => {
-            e.cancelBubble = true;
-          }}
-          onMouseEnter={(e) => {
-            const container = e.target.getStage()?.container();
-            if (container) {
-              container.style.cursor = 'move';
-            }
-          }}
-          onMouseLeave={(e) => {
-            const container = e.target.getStage()?.container();
-            if (container) {
-              container.style.cursor = 'default';
-            }
-          }}
-        />
-      </Group>
+      <MeasurementControlPoints
+        measureShape={measureShape}
+        measurementCalibration={drawingState.measurementCalibration}
+        updateShape={updateShape}
+        startControlPointDrag={startControlPointDrag}
+        endControlPointDrag={endControlPointDrag}
+        zoomLevel={zoomLevel}
+        measureNode={measureNode}
+        isDraggingControlPointRef={isDraggingControlPointRef}
+        setDraggingControlPointIndex={setDraggingControlPointIndex}
+      />
     );
   };
 
   // Render arrow control points
   const renderArrowControlPoints = (): React.ReactNode => {
-
     if (activeTool !== DrawingTool.SELECT || drawingSelectedShapeIds.length !== 1) {
       return null;
     }
@@ -2171,151 +2033,18 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
     // Get the arrow's current position (changes during drag)
     const nodePos = arrowNode.position();
-    const [x1, y1, x2, y2] = arrowPoints;
-
-
-    // Add the node's current position to get actual control point positions
-    const actualX1 = x1 + nodePos.x;
-    const actualY1 = y1 + nodePos.y;
-    const actualX2 = x2 + nodePos.x;
-    const actualY2 = y2 + nodePos.y;
-
-    const handleControlPointDragMove = (index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
-      const pos = e.target.position();
-      const newPoints: [number, number, number, number] = [...arrowShape.points];
-
-      // Subtract the arrow node's position to get relative coordinates
-      const relativeX = pos.x - nodePos.x;
-      const relativeY = pos.y - nodePos.y;
-
-      if (index === 0) {
-        // Update start point
-        newPoints[0] = relativeX;
-        newPoints[1] = relativeY;
-      } else {
-        // Update end point
-        newPoints[2] = relativeX;
-        newPoints[3] = relativeY;
-      }
-
-      // Update the arrow shape immediately for real-time feedback
-      updateShape(arrowShape.id, { points: newPoints });
-    };
-
-    const handleControlPointDragEnd = (_index: number, e: Konva.KonvaEventObject<DragEvent>): void => {
-      e.cancelBubble = true;
-      setTimeout(() => {
-        isDraggingControlPointRef.current = false;
-        endControlPointDrag();
-      }, 50);
-    };
 
     return (
-      <>
-        {/* Visual guide line */}
-        <Line
-          points={[actualX1, actualY1, actualX2, actualY2]}
-          stroke="#4a90e2"
-          strokeWidth={1}
-          dash={[5, 5]}
-          opacity={0.5}
-          listening={false}
-        />
-
-        {/* Tail control point (blue - arrow start) */}
-        <Circle
-          x={actualX1}
-          y={actualY1}
-          radius={5}
-          fill="#4a90e2"
-          stroke="white"
-          strokeWidth={1.5}
-          opacity={0.8}
-          shadowColor="rgba(0,0,0,0.3)"
-          shadowBlur={5}
-          shadowOffset={{ x: 1, y: 1 }}
-          draggable={true}
-          onClick={(e) => {
-            e.cancelBubble = true;
-          }}
-          onDragStart={(e) => {
-            e.cancelBubble = true;
-            isDraggingControlPointRef.current = true;
-            setDraggingControlPointIndex(0);
-            startControlPointDrag();
-          }}
-          onDragEnd={(e) => {
-            e.cancelBubble = true;
-            handleControlPointDragEnd(0, e);
-          }}
-          onDragMove={(e) => handleControlPointDragMove(0, e)}
-          onMouseEnter={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'move';
-            }
-          }}
-          onMouseLeave={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'default';
-            }
-          }}
-        />
-
-        {/* Head control point (red - arrow head where pointer is) */}
-        {(() => {
-          // Offset from arrow head
-          const offsetDistance = 15;
-          const dx = actualX2 - actualX1;
-          const dy = actualY2 - actualY1;
-          const length = Math.sqrt(dx * dx + dy * dy);
-          const offsetX = length > 0 ? (dx / length) * offsetDistance : offsetDistance;
-          const offsetY = length > 0 ? (dy / length) * offsetDistance : 0;
-
-          return (
-            <Circle
-              x={actualX2 + offsetX}
-              y={actualY2 + offsetY}
-              radius={5}
-              fill="#e24a4a"
-              stroke="white"
-              strokeWidth={1.5}
-              opacity={0.8}
-          shadowColor="rgba(0,0,0,0.3)"
-          shadowBlur={5}
-          shadowOffset={{ x: 1, y: 1 }}
-          draggable={true}
-          onClick={(e) => {
-            e.cancelBubble = true;
-          }}
-          onDragStart={(e) => {
-            e.cancelBubble = true;
-            isDraggingControlPointRef.current = true;
-            setDraggingControlPointIndex(1);
-            startControlPointDrag();
-          }}
-          onDragEnd={(e) => {
-            e.cancelBubble = true;
-            handleControlPointDragEnd(1, e);
-          }}
-          onDragMove={(e) => handleControlPointDragMove(1, e)}
-          onMouseEnter={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'move';
-            }
-          }}
-          onMouseLeave={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'default';
-            }
-          }}
-        />
-          );
-        })()}
-      </>
+      <ArrowControlPoints
+        arrowShape={arrowShape}
+        arrowPoints={arrowPoints}
+        nodePosition={nodePos}
+        updateShape={updateShape}
+        startControlPointDrag={startControlPointDrag}
+        endControlPointDrag={endControlPointDrag}
+        isDraggingControlPointRef={isDraggingControlPointRef}
+        setDraggingControlPointIndex={setDraggingControlPointIndex}
+      />
     );
   };
 
@@ -2337,318 +2066,13 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     // Get current position
     const nodePos = calloutNode.position();
 
-    // Calculate actual positions
-    const textBox = {
-      x: calloutShape.textX + nodePos.x,
-      y: calloutShape.textY + nodePos.y,
-      width: calloutShape.textWidth || 120,
-      height: calloutShape.textHeight || 40
-    };
-
-    const arrowTip = {
-      x: calloutShape.arrowX,
-      y: calloutShape.arrowY
-    };
-
-    // Get base point from perimeter offset - always use stored value if available
-    const basePoint = perimeterOffsetToPoint(textBox, calloutShape.perimeterOffset);
-
-    // Get control points - always use stored values if available
-    let control1: Point, control2: Point;
-
-    if (calloutShape.curveControl1X !== undefined && calloutShape.curveControl1Y !== undefined &&
-        calloutShape.curveControl2X !== undefined && calloutShape.curveControl2Y !== undefined) {
-      // Use stored control points
-      control1 = { x: calloutShape.curveControl1X, y: calloutShape.curveControl1Y };
-      control2 = { x: calloutShape.curveControl2X, y: calloutShape.curveControl2Y };
-    } else {
-      // No control points stored, calculate optimal ones
-      const optimalPoints = getOptimalControlPoints(basePoint, arrowTip, textBox);
-      control1 = optimalPoints.control1;
-      control2 = optimalPoints.control2;
-    }
-
     return (
-      <>
-        {/* Arrow tip control (red) - offset from arrow head */}
-        {(() => {
-          // Calculate offset position to be tangent to arrow tip
-          const offsetDistance = 15; // Distance from arrow tip
-
-          // Direction from control point to arrow tip (for offset)
-          const dx = arrowTip.x - control2.x;
-          const dy = arrowTip.y - control2.y;
-          const length = Math.sqrt(dx * dx + dy * dy);
-
-          // Normalize and offset in the direction of the arrow
-          const offsetX = length > 0 ? (dx / length) * offsetDistance : offsetDistance;
-          const offsetY = length > 0 ? (dy / length) * offsetDistance : 0;
-
-          const handleX = arrowTip.x + offsetX;
-          const handleY = arrowTip.y + offsetY;
-
-          return (
-            <>
-              {/* Small line connecting handle to arrow tip */}
-              <Line
-                points={[handleX, handleY, arrowTip.x, arrowTip.y]}
-                stroke="#e74c3c"
-                strokeWidth={1}
-                opacity={0.3}
-                listening={false}
-              />
-
-              {/* Control handle */}
-              <Circle
-                x={handleX}
-                y={handleY}
-                radius={5}
-                fill="#e74c3c"
-                stroke="white"
-                strokeWidth={1.5}
-                opacity={0.8}
-                shadowColor="rgba(0,0,0,0.3)"
-                shadowBlur={5}
-                shadowOffset={{ x: 1, y: 1 }}
-                draggable={true}
-                onClick={(e) => {
-                  e.cancelBubble = true;
-                }}
-                onDragStart={(e) => {
-                  e.cancelBubble = true;
-                  isDraggingControlPointRef.current = true;
-                }}
-                onDragMove={(e) => {
-                  const pos = e.target.position();
-                  // Calculate offset back to arrow tip
-                  const dx = pos.x - handleX;
-                  const dy = pos.y - handleY;
-
-                  // Update arrow tip position
-                  const newArrowTip = { x: arrowTip.x + dx, y: arrowTip.y + dy };
-
-                  // Only update the arrow position, keep existing control points
-                  updateShape(calloutShape.id, {
-                    arrowX: newArrowTip.x,
-                    arrowY: newArrowTip.y
-                  });
-                }}
-                onDragEnd={(e) => {
-                  e.cancelBubble = true;
-                  setTimeout(() => {
-                    isDraggingControlPointRef.current = false;
-                  }, 50);
-                }}
-                onMouseEnter={(e) => {
-                  const stage = e.target.getStage();
-                  if (stage) {
-                    stage.container().style.cursor = 'move';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  const stage = e.target.getStage();
-                  if (stage) {
-                    stage.container().style.cursor = 'default';
-                  }
-                }}
-              />
-            </>
-          );
-        })()}
-
-        {/* Arrow base control point (green) - moves along perimeter */}
-        <Circle
-          x={basePoint.x}
-          y={basePoint.y}
-          radius={5}
-          fill="#27ae60"
-          stroke="white"
-          strokeWidth={1.5}
-          opacity={0.8}
-          shadowColor="rgba(0,0,0,0.3)"
-          shadowBlur={5}
-          shadowOffset={{ x: 1, y: 1 }}
-          draggable={true}
-          onClick={(e) => {
-            e.cancelBubble = true;
-          }}
-          onDragStart={(e) => {
-            e.cancelBubble = true;
-            isDraggingControlPointRef.current = true;
-          }}
-          onDragMove={(e) => {
-            const pos = e.target.position();
-            // Convert position to perimeter offset
-            const newOffset = pointToPerimeterOffset(textBox, pos);
-
-            // Get new base point position
-            const newBasePoint = perimeterOffsetToPoint(textBox, newOffset);
-
-            // Only update the perimeter offset
-            updateShape(calloutShape.id, {
-              perimeterOffset: newOffset
-            });
-
-            // Snap the control point to the perimeter
-            e.target.position(newBasePoint);
-          }}
-          onDragEnd={(e) => {
-            e.cancelBubble = true;
-            setTimeout(() => {
-              isDraggingControlPointRef.current = false;
-            }, 50);
-          }}
-          onMouseEnter={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'move';
-            }
-          }}
-          onMouseLeave={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'default';
-            }
-          }}
-        />
-
-        {/* Curve control point 1 (blue - closer to base) */}
-        <Circle
-          x={control1.x}
-          y={control1.y}
-          radius={5}
-          fill="#3498db"
-          stroke="white"
-          strokeWidth={1.5}
-          opacity={0.8}
-          shadowColor="rgba(0,0,0,0.3)"
-          shadowBlur={5}
-          shadowOffset={{ x: 1, y: 1 }}
-          draggable={true}
-          dragBoundFunc={(pos) => {
-            // Allow free movement
-            return pos;
-          }}
-          onClick={(e) => {
-            e.cancelBubble = true;
-          }}
-          onDragStart={(e) => {
-            e.cancelBubble = true;
-            isDraggingControlPointRef.current = true;
-          }}
-          onDragMove={() => {
-            // Don't update shape during drag to avoid double rendering
-            // The draggable circle will move on its own
-          }}
-          onDragEnd={(e) => {
-            e.cancelBubble = true;
-            const pos = e.target.position();
-            // Update shape only on drag end
-            updateShape(calloutShape.id, {
-              curveControl1X: pos.x,
-              curveControl1Y: pos.y
-            });
-            setTimeout(() => {
-              isDraggingControlPointRef.current = false;
-            }, 50);
-          }}
-          onMouseEnter={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'move';
-            }
-          }}
-          onMouseLeave={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'default';
-            }
-          }}
-        />
-
-        {/* Curve control point 2 (purple - closer to tip) */}
-        <Circle
-          x={control2.x}
-          y={control2.y}
-          radius={5}
-          fill="#9b59b6"
-          stroke="white"
-          strokeWidth={1.5}
-          opacity={0.8}
-          shadowColor="rgba(0,0,0,0.3)"
-          shadowBlur={5}
-          shadowOffset={{ x: 1, y: 1 }}
-          draggable={true}
-          onClick={(e) => {
-            e.cancelBubble = true;
-          }}
-          onDragStart={(e) => {
-            e.cancelBubble = true;
-            isDraggingControlPointRef.current = true;
-          }}
-          onDragMove={() => {
-            // Don't update shape during drag to avoid double rendering
-          }}
-          onDragEnd={(e) => {
-            e.cancelBubble = true;
-            const pos = e.target.position();
-            updateShape(calloutShape.id, {
-              curveControl2X: pos.x,
-              curveControl2Y: pos.y
-            });
-            setTimeout(() => {
-              isDraggingControlPointRef.current = false;
-            }, 50);
-          }}
-          onMouseEnter={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'move';
-            }
-          }}
-          onMouseLeave={(e) => {
-            const stage = e.target.getStage();
-            if (stage) {
-              stage.container().style.cursor = 'default';
-            }
-          }}
-        />
-
-        {/* Visual guides */}
-        {(() => {
-          const isValid = isValidControlPoint(basePoint, control1, control2, arrowTip, textBox);
-          const guideColor = isValid ? "#3498db" : "#e74c3c";
-
-          return (
-            <>
-              <Line
-                points={[basePoint.x, basePoint.y, control1.x, control1.y]}
-                stroke={guideColor}
-                strokeWidth={1}
-                dash={[5, 5]}
-                opacity={0.5}
-                listening={false}
-              />
-              <Line
-                points={[control1.x, control1.y, control2.x, control2.y]}
-                stroke={guideColor}
-                strokeWidth={1}
-                dash={[5, 5]}
-                opacity={0.5}
-                listening={false}
-              />
-              <Line
-                points={[control2.x, control2.y, arrowTip.x, arrowTip.y]}
-                stroke={guideColor}
-                strokeWidth={1}
-                dash={[5, 5]}
-                opacity={0.5}
-                listening={false}
-              />
-            </>
-          );
-        })()}
-      </>
+      <CalloutControlPoints
+        calloutShape={calloutShape}
+        calloutNodePosition={nodePos}
+        updateShape={updateShape}
+        isDraggingControlPointRef={isDraggingControlPointRef}
+      />
     );
   };
 
