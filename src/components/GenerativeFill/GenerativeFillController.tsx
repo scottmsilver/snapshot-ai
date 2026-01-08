@@ -186,7 +186,6 @@ export const GenerativeFillController: React.FC<GenerativeFillControllerProps> =
         let textOnlyModel: string | null = null;
         let googleCloudProjectId: string | null = null;
         let oauthAccessToken: string | null = null;
-        let useLangGraph = false;
 
         if (authContext?.isAuthenticated && authContext?.getAccessToken) {
           try {
@@ -198,7 +197,6 @@ export const GenerativeFillController: React.FC<GenerativeFillControllerProps> =
               inpaintingModel = await settingsManager.getInpaintingModel();
               textOnlyModel = await settingsManager.getTextOnlyModel();
               googleCloudProjectId = await settingsManager.getGoogleCloudProjectId();
-              useLangGraph = await settingsManager.getUseLangGraph();
             }
           } catch (error) {
             console.error('Failed to get settings:', error);
@@ -271,8 +269,8 @@ export const GenerativeFillController: React.FC<GenerativeFillControllerProps> =
 
           // Call edit() method which handles both inpainting and text-only modes
           resultImageData = mode === 'inpainting' && maskExport
-            ? await agenticService.edit(sourceImageData, prompt, maskExport.maskImageData, updateProgress, { useLangGraph })
-            : await agenticService.edit(sourceImageData, prompt, undefined, updateProgress, { useLangGraph });
+            ? await agenticService.edit(sourceImageData, prompt, maskExport.maskImageData, updateProgress)
+            : await agenticService.edit(sourceImageData, prompt, undefined, updateProgress);
         }
         const remaskedResult = applySmartTransparencyMask(
           resultImageData,

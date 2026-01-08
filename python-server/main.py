@@ -124,10 +124,46 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS configuration
+# CORS configuration - include localhost:3001 for Express transition
 _allowed_origins = os.getenv(
-    "ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3001"
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,http://localhost:3001,http://localhost:8001",
 ).split(",")
+
+
+# =============================================================================
+# Shadow Testing Metrics (for Express -> Python migration)
+# =============================================================================
+
+# Only enabled when SHADOW_TEST_ENABLED=true
+_shadow_test_enabled = os.getenv("SHADOW_TEST_ENABLED", "false").lower() == "true"
+
+
+class ShadowEndpointMetrics(BaseModel):
+    """Metrics for a single endpoint."""
+
+    total: int = 0
+    matches: int = 0
+    mismatches: int = 0
+    errors: int = 0
+
+
+class ShadowMetrics(BaseModel):
+    """Shadow testing metrics matching Express implementation."""
+
+    totalRequests: int = 0
+    matchCount: int = 0
+    mismatchCount: int = 0
+    pythonErrorCount: int = 0
+    avgExpressLatencyMs: float = 0.0
+    avgPythonLatencyMs: float = 0.0
+    byEndpoint: dict[str, ShadowEndpointMetrics] = {}
+
+
+# Global metrics state
+_shadow_metrics = ShadowMetrics()
+_total_express_latency: float = 0.0
+_total_python_latency: float = 0.0
 
 app.add_middleware(
     CORSMiddleware,
@@ -186,6 +222,70 @@ class RootResponse(BaseModel):
     endpoints: dict[str, str]
 
 
+# =============================================================================
+# Shadow Metrics Endpoints (for migration monitoring)
+# =============================================================================
+
+
+class ShadowMetricsResponse(BaseModel):
+    """Response for shadow metrics endpoint."""
+
+    enabled: bool
+    metrics: ShadowMetrics
+
+
+@app.get("/shadow/metrics", response_model=ShadowMetricsResponse)
+async def get_shadow_metrics() -> ShadowMetricsResponse:
+    """
+    Return shadow testing metrics.
+
+    Gated by SHADOW_TEST_ENABLED env var.
+    Matches Express endpoint at GET /shadow/metrics.
+    """
+    if not _shadow_test_enabled:
+        return ShadowMetricsResponse(
+            enabled=False,
+            metrics=ShadowMetrics(),
+        )
+
+    return ShadowMetricsResponse(
+        enabled=True,
+        metrics=_shadow_metrics,
+    )
+
+
+class ResetResponse(BaseModel):
+    """Response for reset endpoint."""
+
+    reset: bool
+    message: str
+
+
+@app.post("/shadow/metrics/reset", response_model=ResetResponse)
+async def reset_shadow_metrics() -> ResetResponse:
+    """
+    Reset shadow testing metrics.
+
+    Matches Express endpoint at POST /shadow/metrics/reset.
+    """
+    global _shadow_metrics, _total_express_latency, _total_python_latency
+
+    if not _shadow_test_enabled:
+        return ResetResponse(
+            reset=False,
+            message="Shadow testing is not enabled",
+        )
+
+    _shadow_metrics = ShadowMetrics()
+    _total_express_latency = 0.0
+    _total_python_latency = 0.0
+
+    return ResetResponse(
+        reset=True,
+        message="Shadow metrics reset successfully",
+    )
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """Return server health status."""
@@ -204,7 +304,7 @@ async def root() -> RootResponse:
     """Return API information."""
     return RootResponse(
         name="Image Markup AI Server",
-        version="0.4.0",
+        version="0.5.0",
         status="running",
         endpoints={
             "health": "GET /health",
@@ -213,6 +313,14 @@ async def root() -> RootResponse:
             "images_generate": "POST /api/images/generate",
             "images_inpaint": "POST /api/images/inpaint",
             "agentic_edit": "POST /api/agentic/edit",
+            # Shadow testing (gated by SHADOW_TEST_ENABLED)
+            "shadow_metrics": "GET /shadow/metrics",
+            "shadow_metrics_reset": "POST /shadow/metrics/reset",
+            # Express path compatibility redirects
+            "ai_generate_image": "POST /api/ai/generate-image",
+            "ai_inpaint": "POST /api/ai/inpaint",
+            "ai_agentic_edit": "POST /api/ai/agentic/edit",
+            "ai_inpaint_stream": "POST /api/ai/inpaint-stream",
         },
     )
 
@@ -611,6 +719,182 @@ async def inpaint(request: InpaintRequest, api_key: GeminiApiKey) -> StreamingRe
 
         except Exception as e:
             logger.exception("Inpaint error: %s", e)
+            yield format_error_event(str(e), traceback.format_exc())
+
+    return create_sse_response(generate_events())
+
+
+# =============================================================================
+# Redirect Endpoints (Express path compatibility)
+# =============================================================================
+
+
+@app.post("/api/ai/generate-image")
+async def ai_generate_image(
+    request: GenerateImageRequest,
+    api_key: GeminiApiKey,
+) -> GenerateImageResponse:
+    """
+    Redirect to /api/images/generate for Express path compatibility.
+
+    Express uses /api/ai/generate-image, Python uses /api/images/generate.
+    This redirect ensures both paths work.
+    """
+    return await generate_image(request, api_key)
+
+
+@app.post("/api/ai/inpaint")
+async def ai_inpaint(
+    request: InpaintRequest,
+    api_key: GeminiApiKey,
+) -> StreamingResponse:
+    """
+    Redirect to /api/images/inpaint for Express path compatibility.
+
+    Express uses /api/ai/inpaint, Python uses /api/images/inpaint.
+    This redirect ensures both paths work.
+    """
+    return await inpaint(request, api_key)
+
+
+@app.post("/api/ai/agentic/edit")
+async def ai_agentic_edit(
+    request: AgenticEditRequest,
+    api_key: GeminiApiKey,
+) -> StreamingResponse:
+    """
+    Redirect to /api/agentic/edit for Express path compatibility.
+
+    Express uses /api/ai/agentic/edit, Python uses /api/agentic/edit.
+    This redirect ensures both paths work.
+    """
+    return await agentic_edit(request, api_key)
+
+
+# =============================================================================
+# SSE Streaming Inpaint Endpoint (Express compatibility)
+# =============================================================================
+
+
+@app.post("/api/ai/inpaint-stream")
+async def inpaint_stream(
+    request: InpaintRequest,
+    api_key: GeminiApiKey,
+) -> StreamingResponse:
+    """
+    SSE streaming inpaint endpoint that wraps /api/images/inpaint.
+
+    This matches the Express endpoint at POST /api/ai/inpaint-stream.
+    Express wraps the Python /api/images/inpaint endpoint with SSE progress events.
+
+    Since /api/images/inpaint already returns SSE events, this endpoint:
+    1. Sends an initial progress event with input data (for frontend log entry creation)
+    2. Forwards the response from /api/images/inpaint
+
+    This provides Express parity while the frontend transitions to direct Python calls.
+    """
+    max_iterations = 3
+
+    async def generate_events():
+        """Async generator yielding SSE events."""
+        try:
+            # Send initial progress event with input data (matches Express behavior)
+            # This is used by frontend for log entry creation
+            # Using dict format since these fields are Express-specific for the transition
+            yield format_sse_event(
+                "progress",
+                {
+                    "step": "processing",
+                    "message": "Starting AI operation",
+                    "sourceImage": request.sourceImage,
+                    "maskImage": request.maskImage,
+                    "prompt": request.prompt,
+                    "newLogEntry": True,
+                    "hasSourceImage": bool(request.sourceImage),
+                    "hasMaskImage": bool(request.maskImage),
+                },
+            )
+
+            # Initialize state with mask_image (required for inpaint)
+            state = GraphState(
+                source_image=request.sourceImage,
+                mask_image=request.maskImage,
+                user_prompt=request.prompt,
+                max_iterations=max_iterations,
+            )
+
+            # Planning progress event
+            from graphs.agentic_edit import build_planning_prompt
+
+            planning_prompt = build_planning_prompt(
+                request.prompt,
+                has_mask=True,
+            )
+            yield format_progress_event(
+                AIProgressEvent(
+                    step="planning",
+                    message="Sending planning request to AI...",
+                    prompt=planning_prompt,
+                    iteration=IterationInfo(
+                        current=0,
+                        max=max_iterations,
+                    ),
+                )
+            )
+
+            # Stream graph execution
+            final_state = None
+
+            async for mode, data in agentic_edit_graph.astream(
+                state.model_dump(),
+                stream_mode=["custom", "values"],
+            ):
+                if mode == "custom":
+                    yield format_sse_event("progress", data)
+                elif mode == "values":
+                    final_state = data
+
+            # Send completion
+            if final_state:
+                image = final_state.get("current_result") or final_state.get(
+                    "source_image"
+                )
+                prompt = final_state.get("refined_prompt") or final_state.get(
+                    "user_prompt", ""
+                )
+                iterations = final_state.get("current_iteration", 1)
+
+                if image:
+                    yield format_progress_event(
+                        AIProgressEvent(
+                            step="complete",
+                            message="Inpaint completed successfully!",
+                            iteration=IterationInfo(
+                                current=iterations,
+                                max=max_iterations,
+                            ),
+                        )
+                    )
+                    yield format_complete_event(
+                        AgenticEditResponse(
+                            imageData=image,
+                            iterations=iterations,
+                            finalPrompt=prompt,
+                        )
+                    )
+                else:
+                    yield format_error_event(
+                        "No image generated",
+                        "The workflow completed but did not produce an image",
+                    )
+            else:
+                yield format_error_event(
+                    "No result from workflow",
+                    "The graph did not return a final state",
+                )
+
+        except Exception as e:
+            logger.exception("Inpaint-stream error: %s", e)
             yield format_error_event(str(e), traceback.format_exc())
 
     return create_sse_response(generate_events())

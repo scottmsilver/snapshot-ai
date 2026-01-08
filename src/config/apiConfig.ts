@@ -2,10 +2,10 @@
  * Server API configuration
  * 
  * Reads server URL from VITE_API_URL environment variable.
- * Defaults to localhost:3001 for local development.
+ * Defaults to localhost:8001 for local development (Python FastAPI server).
  */
 
-const DEFAULT_API_URL = 'http://localhost:3001';
+const DEFAULT_API_URL = 'http://localhost:8001';
 
 /**
  * Check if server-side AI is enabled (default: true)
@@ -27,28 +27,32 @@ export function getApiUrl(): string {
 
 
 /**
- * API endpoint paths
+ * API endpoint paths (Python FastAPI server)
  * Note: No leading slashes - ky uses these with prefixUrl
+ * 
+ * Python server has redirects for backward compatibility:
+ * - /api/ai/agentic/edit -> /api/agentic/edit
+ * - /api/ai/generate-image -> /api/images/generate
+ * - /api/ai/inpaint -> /api/images/inpaint
  */
 export const API_ENDPOINTS = {
   /** POST /api/ai/generate - Text generation */
   GENERATE_TEXT: 'api/ai/generate',
   
-  /** POST /api/ai/generate-image - Image editing with Gemini */
-  GENERATE_IMAGE: 'api/ai/generate-image',
+  /** POST /api/images/generate - Image editing with Gemini (Python native route) */
+  GENERATE_IMAGE: 'api/images/generate',
   
-  /** POST /api/ai/inpaint - Two-step inpainting process */
-  INPAINT: 'api/ai/inpaint',
+  /** POST /api/images/inpaint - Two-step inpainting process (Python native route) */
+  INPAINT: 'api/images/inpaint',
   
-  /** POST /api/ai/inpaint-stream - SSE streaming inpaint (wraps Python backend) */
+  /** POST /api/ai/inpaint-stream - SSE streaming inpaint */
   INPAINT_STREAM: 'api/ai/inpaint-stream',
   
-  /** POST /api/ai/agentic/edit - SSE streaming agentic edit with iterations (Express) */
-  AGENTIC_EDIT: 'api/ai/agentic/edit',
+  /** POST /api/agentic/edit - SSE streaming agentic edit with LangGraph (Python native route) */
+  AGENTIC_EDIT: 'api/agentic/edit',
   
-  /** POST /api/python/agentic/edit - SSE streaming agentic edit with LangGraph (proxied to Python) */
-  AGENTIC_EDIT_LANGGRAPH: 'api/python/agentic/edit',
-  
+  /** @deprecated Alias for AGENTIC_EDIT - both now use Python LangGraph backend */
+  AGENTIC_EDIT_LANGGRAPH: 'api/agentic/edit',
 
 } as const;
 

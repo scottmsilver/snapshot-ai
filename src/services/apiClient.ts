@@ -1,7 +1,7 @@
 /**
- * Client-side API adapter that calls Express endpoints instead of Gemini directly.
+ * Client-side API adapter that calls Python FastAPI server endpoints.
  * 
- * Provides the same interface as aiClient.ts but uses fetch to call /api/ai/* endpoints.
+ * Provides the same interface as aiClient.ts but uses fetch to call /api/* endpoints.
  * This allows for a drop-in replacement when wiring up the server integration.
  */
 
@@ -27,7 +27,7 @@ import type {
   AgenticEditResponse,
   AIProgressEvent,
   ErrorResponse,
-} from '../../server/src/types/api.js';
+} from '@/types/api';
 import type { AICallOptions, AICallResult } from './aiClient';
 
 /**
@@ -238,9 +238,9 @@ export function createAPIClient() {
   }
 
   /**
-   * Perform SSE streaming inpaint via the server
+   * Perform SSE streaming inpaint via the Python FastAPI server
    * 
-   * Uses the /api/ai/inpaint-stream endpoint which wraps the Python backend.
+   * Uses the /api/ai/inpaint-stream endpoint for SSE streaming.
    * Sends SSE events: progress (analyzing, generating) and complete (with imageData).
    * 
    * @param sourceImage - Base64 encoded source image
@@ -286,14 +286,13 @@ export function createAPIClient() {
   }
 
   /**
-   * Perform agentic edit with SSE streaming
+   * Perform agentic edit with SSE streaming via Python/LangGraph backend
    * 
    * @param sourceImage - Base64 encoded source image
    * @param prompt - User's edit prompt
    * @param options.maskImage - Optional mask for inpainting
    * @param options.maxIterations - Max self-check iterations (default: 3)
    * @param options.onProgress - Callback for SSE progress events
-   * @param options.useLangGraph - If true, routes to Python/LangGraph backend
    */
   async function agenticEdit(
     sourceImage: string,
@@ -302,7 +301,6 @@ export function createAPIClient() {
       maskImage?: string;
       maxIterations?: number;
       onProgress?: (event: AIProgressEvent) => void;
-      useLangGraph?: boolean;
     } = {}
   ): Promise<AgenticEditResponse> {
     const request: AgenticEditRequest = {
@@ -312,12 +310,8 @@ export function createAPIClient() {
       maxIterations: options.maxIterations,
     };
 
-    // Choose endpoint based on useLangGraph setting
-    const endpoint = options.useLangGraph 
-      ? API_ENDPOINTS.AGENTIC_EDIT_LANGGRAPH 
-      : API_ENDPOINTS.AGENTIC_EDIT;
-    const url = buildApiUrl(endpoint);
-    debugLog('Agentic edit', { backend: options.useLangGraph ? 'LangGraph' : 'Express', url });
+    const url = buildApiUrl(API_ENDPOINTS.AGENTIC_EDIT);
+    debugLog('Agentic edit', { url });
 
     try {
       return await ssePostRequest<AgenticEditResponse, AIProgressEvent>(

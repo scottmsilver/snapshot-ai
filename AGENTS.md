@@ -39,8 +39,6 @@ cd python-server && source .venv/bin/activate && pip install -r requirements.txt
 - `python-server/schemas/` - Pydantic models
 - `python-server/graphs/` - LangGraph workflows
 
-### Python/Express Dual Backend
-- Express server: port 3001 (primary)
-- Python server: port 8001 (shadow/migration target)
-- Shadow testing compares responses between both backends
-- Set `SHADOW_TEST_ENABLED=true` in server/.env to enable comparison
+### Backend
+- Python FastAPI server: port 8001 (primary backend)
+- Set `SHADOW_TEST_ENABLED=true` in python-server/.env to enable metrics collection

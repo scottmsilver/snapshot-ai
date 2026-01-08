@@ -65,7 +65,6 @@ export const AIReferenceController: React.FC<AIReferenceControllerProps> = ({
     canvasHeight: number;
     alphaMaskImageData: ImageData;
     geminiApiKey: string;
-    useLangGraph: boolean;
   } | null>(null);
 
   // AI Reference Mode - Manipulation Handler (now with confirmation)
@@ -90,14 +89,12 @@ export const AIReferenceController: React.FC<AIReferenceControllerProps> = ({
 
       // Get API key and LangGraph preference
       let geminiApiKey: string | null = null;
-      let useLangGraph = false;
       if (authContext?.isAuthenticated && authContext?.getAccessToken) {
         try {
           const accessToken = authContext.getAccessToken();
           if (accessToken) {
             await settingsManager.initialize(accessToken);
             geminiApiKey = await settingsManager.getGeminiApiKey();
-            useLangGraph = await settingsManager.getUseLangGraph();
           }
         } catch (error) {
           console.error('Failed to get settings:', error);
@@ -123,7 +120,6 @@ export const AIReferenceController: React.FC<AIReferenceControllerProps> = ({
         canvasHeight: canvas.height,
         alphaMaskImageData,
         geminiApiKey: effectiveGeminiKey,
-        useLangGraph,
       };
 
       // Open confirmation dialog and start planning
@@ -176,7 +172,6 @@ export const AIReferenceController: React.FC<AIReferenceControllerProps> = ({
       referencePoints,
       markupShapes,
       command,
-      useLangGraph,
     } = pendingManipulationRef.current;
 
     // Close confirmation and clear reference mode
@@ -244,8 +239,7 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
         sourceImageData,
         enrichedPrompt,
         undefined,
-        updateProgress,
-        { useLangGraph }
+        updateProgress
       );
       const remaskedResult = applySmartTransparencyMask(
         resultImageData,
@@ -512,7 +506,6 @@ export function useAIReferenceController(props: AIReferenceControllerProps): {
     canvasHeight: number;
     alphaMaskImageData: ImageData;
     geminiApiKey: string;
-    useLangGraph: boolean;
   } | null>(null);
 
   // AI Reference Mode - Manipulation Handler (now with confirmation)
@@ -537,14 +530,12 @@ export function useAIReferenceController(props: AIReferenceControllerProps): {
 
       // Get API key and LangGraph preference
       let geminiApiKey: string | null = null;
-      let useLangGraph = false;
       if (authContext?.isAuthenticated && authContext?.getAccessToken) {
         try {
           const accessToken = authContext.getAccessToken();
           if (accessToken) {
             await settingsManager.initialize(accessToken);
             geminiApiKey = await settingsManager.getGeminiApiKey();
-            useLangGraph = await settingsManager.getUseLangGraph();
           }
         } catch (error) {
           console.error('Failed to get settings:', error);
@@ -570,7 +561,6 @@ export function useAIReferenceController(props: AIReferenceControllerProps): {
         canvasHeight: canvas.height,
         alphaMaskImageData,
         geminiApiKey: effectiveGeminiKey,
-        useLangGraph,
       };
 
       // Open confirmation dialog and start planning
@@ -623,7 +613,6 @@ export function useAIReferenceController(props: AIReferenceControllerProps): {
       referencePoints,
       markupShapes,
       command,
-      useLangGraph,
     } = pendingManipulationRef.current;
 
     // Close confirmation and clear reference mode
@@ -691,8 +680,7 @@ IMPORTANT: Use the exact coordinates provided above to locate elements. The desc
         sourceImageData,
         enrichedPrompt,
         undefined,
-        updateProgress,
-        { useLangGraph }
+        updateProgress
       );
       const remaskedResult = applySmartTransparencyMask(
         resultImageData,
