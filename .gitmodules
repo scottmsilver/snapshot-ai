@@ -1,0 +1,3 @@
+[submodule "excalidraw-ui"]
+	path = excalidraw-ui
+	url = https://github.com/scottmsilver/excalidraw-ai.git

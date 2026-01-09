@@ -9,7 +9,6 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import AfterValidator, BaseModel, Field
 
-
 # =============================================================================
 # Custom Types
 # =============================================================================
@@ -102,6 +101,19 @@ class AIProgressEvent(BaseModel):
 
 
 # =============================================================================
+# Reference Point Schema
+# =============================================================================
+
+
+class ReferencePoint(BaseModel):
+    """A labeled reference point placed on the image for spatial commands."""
+
+    label: str = Field(..., description="Label for this point (e.g., 'A', 'B', 'C')")
+    x: float = Field(..., description="X coordinate in pixels")
+    y: float = Field(..., description="Y coordinate in pixels")
+
+
+# =============================================================================
 # Request/Response Schemas (matches TypeScript AgenticEditRequest/Response)
 # =============================================================================
 
@@ -114,22 +126,21 @@ class AgenticEditRequest(BaseModel):
     """
 
     # Source image (base64 data URL)
-    sourceImage: Base64ImageUrl = Field(
-        ..., description="Source image as base64 data URL"
-    )
+    sourceImage: Base64ImageUrl = Field(..., description="Source image as base64 data URL")
 
     # Edit prompt from user
     prompt: str = Field(..., description="User's edit prompt")
 
     # Optional mask image for inpainting (base64 data URL)
-    maskImage: Optional[Base64ImageUrl] = Field(
-        None, description="Mask image as base64 data URL (white = edit area)"
+    maskImage: Optional[Base64ImageUrl] = Field(None, description="Mask image as base64 data URL (white = edit area)")
+
+    # Reference points for spatial commands (e.g., "Move A to B")
+    referencePoints: Optional[list[ReferencePoint]] = Field(
+        None, description="Reference points placed on the image for spatial commands"
     )
 
     # Maximum iterations for self-check loop
-    maxIterations: Optional[int] = Field(
-        3, ge=1, le=5, description="Maximum iterations (1-5, default 3)"
-    )
+    maxIterations: Optional[int] = Field(3, ge=1, le=5, description="Maximum iterations (1-5, default 3)")
 
 
 class AgenticEditResponse(BaseModel):
@@ -202,14 +213,10 @@ class GenerateTextRequest(BaseModel):
 
     model: str = Field(..., min_length=1, description="The model to use")
     contents: list = Field(..., min_length=1, description="The content/prompt to send")
-    tools: Optional[list] = Field(
-        None, description="Optional tools (function declarations)"
-    )
+    tools: Optional[list] = Field(None, description="Optional tools (function declarations)")
     generationConfig: Optional[dict] = Field(None, description="Generation config")
     thinkingBudget: Optional[int] = Field(None, description="Thinking budget")
-    includeThoughts: Optional[bool] = Field(
-        True, description="Whether to include thoughts"
-    )
+    includeThoughts: Optional[bool] = Field(True, description="Whether to include thoughts")
     logLabel: Optional[str] = Field(None, description="Label for this call in the log")
 
 
@@ -230,6 +237,4 @@ class GenerateTextResponse(BaseModel):
     raw: dict = Field(..., description="The raw result from the API")
     text: str = Field(..., description="Extracted text response (non-thinking parts)")
     thinking: str = Field(..., description="Extracted thinking text")
-    functionCall: Optional[FunctionCall] = Field(
-        None, description="Function call if present"
-    )
+    functionCall: Optional[FunctionCall] = Field(None, description="Function call if present")

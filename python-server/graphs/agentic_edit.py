@@ -23,9 +23,8 @@ from google.genai import types
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
-
 from schemas import AI_MODELS, MAX_ITERATIONS, THINKING_BUDGETS
-from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo
+from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo, ReferencePoint
 from services.gemini_client import get_gemini_client
 from services.image_utils import encode_data_url, parse_data_url
 
@@ -45,6 +44,7 @@ class GraphState(BaseModel):
         source_image: Input image as base64 data URL.
         mask_image: Optional mask for targeted edits.
         user_prompt: User's edit request.
+        reference_points: Labeled points for spatial commands (e.g., "Move A to B").
         max_iterations: Maximum retry attempts.
         refined_prompt: AI-improved version of user prompt.
         current_iteration: Current attempt number (0-indexed internally).
@@ -58,6 +58,7 @@ class GraphState(BaseModel):
     source_image: str
     mask_image: str | None = None
     user_prompt: str
+    reference_points: list[ReferencePoint] = []
     max_iterations: int = MAX_ITERATIONS
 
     # Planning outputs
@@ -100,7 +101,37 @@ def emit_progress(event: AIProgressEvent) -> None:
 # =============================================================================
 
 
-def build_planning_prompt(user_prompt: str, has_mask: bool) -> str:
+def build_reference_points_context(reference_points: list[ReferencePoint]) -> str:
+    """Build context string describing reference points placed on the image."""
+    if not reference_points:
+        return ""
+
+    points_desc = []
+    for point in reference_points:
+        points_desc.append(f"- **Point {point.label}** at pixel coordinates ({int(point.x)}, {int(point.y)})")
+
+    return f"""
+## REFERENCE POINTS
+
+The user has placed labeled reference markers on the image to indicate specific locations:
+
+{chr(10).join(points_desc)}
+
+IMPORTANT: When the user's command references these labels (e.g., "Move A to B", "Make A look like B", "Put C next to A"):
+- Identify what visual element is at each labeled coordinate
+- Translate the letter references into descriptions of the actual elements
+- Include the pixel coordinates in your editing prompt so the edit is applied to the correct location
+- The final editing prompt should NOT use letters like "A" or "B" - describe the actual elements instead
+
+Example translations:
+- "Move A to B" where A is at a button and B is at a sidebar → "Move the blue Submit button at (150, 200) to the sidebar area at (50, 300)"
+- "Make A look like B" where A is a heading and B is styled text → "Style the heading at (100, 50) to match the font and color of the styled text at (200, 150)"
+"""
+
+
+def build_planning_prompt(
+    user_prompt: str, has_mask: bool, reference_points: list[ReferencePoint] | None = None
+) -> str:
     """Build the system prompt for the planning phase."""
     if has_mask:
         mask_context = """The user has selected a specific area of the image using a mask (white = edit area, black = preserve).
@@ -136,12 +167,15 @@ CRITICAL INPAINTING GUIDELINES:
     else:
         mask_context = "The user wants to edit the entire image."
 
+    # Build reference points context if provided
+    ref_points_context = build_reference_points_context(reference_points or [])
+
     return f"""You are an expert image editing assistant working on a SCREENSHOT MODIFICATION task.
 
 USER'S REQUEST: "{user_prompt}"
 
 {mask_context}
-
+{ref_points_context}
 Your goal is to create an edit that:
 1. Accomplishes exactly what the user wants
 2. FITS NATURALLY into the existing image - the modification should look like it belongs there
@@ -153,10 +187,12 @@ Think deeply about:
 - What visual details would make this edit look natural and integrated?
 - How should lighting, shadows, and style match the surroundings?
 - What would make someone looking at the final image NOT notice it was edited?
+{f"- Look at the reference points and identify what elements are at those coordinates" if reference_points else ""}
 
 You have one powerful tool: gemini_image_painter, which uses Gemini 3 Pro to edit images.
 
 Call gemini_image_painter with a detailed prompt that achieves the goal while ensuring visual coherence.
+{f"Remember: Do NOT use letter labels (A, B, C) in the prompt - describe the actual visual elements at those coordinates instead." if reference_points else ""}
 
 You MUST call the gemini_image_painter tool."""
 
@@ -229,8 +265,10 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
     - The final response
     """
     logger.info("Planning: Starting...")
+    if state.reference_points:
+        logger.info("Planning: %d reference points provided", len(state.reference_points))
 
-    prompt = build_planning_prompt(state.user_prompt, bool(state.mask_image))
+    prompt = build_planning_prompt(state.user_prompt, bool(state.mask_image), state.reference_points)
     iteration_info = IterationInfo(current=0, max=state.max_iterations)
 
     # Decode images with labels for transparency logging
@@ -261,9 +299,7 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
             refined_prompt = result.function_call["args"]["prompt"]
         elif result.text:
             # Fallback: try to extract from text
-            match = re.search(
-                r'gemini_image_painter\s*\(\s*prompt\s*=\s*"([^"]+)"', result.text
-            )
+            match = re.search(r'gemini_image_painter\s*\(\s*prompt\s*=\s*"([^"]+)"', result.text)
             if match:
                 refined_prompt = match.group(1)
 
@@ -443,11 +479,8 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
         return {
             "satisfied": satisfied,
             "check_reasoning": reasoning,
-            "refined_prompt": revised
-            if revised and not satisfied
-            else state.refined_prompt,
-            "steps": state.steps
-            + [f"check_{iteration}_{'ok' if satisfied else 'revise'}"],
+            "refined_prompt": revised if revised and not satisfied else state.refined_prompt,
+            "steps": state.steps + [f"check_{iteration}_{'ok' if satisfied else 'revise'}"],
         }
 
     except Exception as e:

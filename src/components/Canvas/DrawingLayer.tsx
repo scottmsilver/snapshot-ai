@@ -116,11 +116,22 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
   const { state: drawingState, dispatch, addReferencePoint, addAiMarkupShape } = useDrawingContext();
 
   // Track markup drawing state for AI Reference mode
+  // State is kept for React's rendering cycle, but refs are used in event handlers
+  // to avoid stale closure issues
   const [isMarkupDrawing, setIsMarkupDrawing] = useState(false);
-  const [markupStartPoint, setMarkupStartPoint] = useState<Point | null>(null);
+  const [_markupStartPoint, setMarkupStartPoint] = useState<Point | null>(null);
   const [markupTempPoints, setMarkupTempPoints] = useState<Point[]>([]);
   const [isPolygonMarkupDrawing, setIsPolygonMarkupDrawing] = useState(false);
   const [polygonMarkupPreviewPoint, setPolygonMarkupPreviewPoint] = useState<Point | null>(null);
+
+  // Refs to track immediate values for event handlers (avoids closure stale state issues)
+  const isMarkupDrawingRef = useRef(false);
+  const markupTempPointsRef = useRef<Point[]>([]);
+  const markupStartPointRef = useRef<Point | null>(null);
+  
+  // Ref to track current drawingState for event handlers (context values have same stale closure issue)
+  const drawingStateRef = useRef(drawingState);
+  drawingStateRef.current = drawingState;
 
   const {
     context: selectionContext,
@@ -372,6 +383,14 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       if (!pos) return;
 
+      // Use ref to get current state (avoids stale closure)
+      const currentDrawingState = drawingStateRef.current;
+
+      // Early exit: let GenerativeFillOverlay handle events when active
+      if (currentDrawingState.generativeFillMode?.isActive) {
+        return;
+      }
+
       // Adjust for layer scale
       const adjustedPos = {
         x: pos.x / zoomLevel,
@@ -379,27 +398,31 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       };
 
       // Early check: if AI Reference Mode is active, handle pin drops or markup drawing
-      if (drawingState.aiReferenceMode) {
-        if (drawingState.aiReferenceSubTool === AIReferenceSubTool.PIN) {
+      console.log('[DrawingLayer] handleMouseDown - aiReferenceMode:', currentDrawingState.aiReferenceMode, 'subTool:', currentDrawingState.aiReferenceSubTool);
+      if (currentDrawingState.aiReferenceMode) {
+        console.log('[DrawingLayer] In AI Reference mode, handling sub-tool:', currentDrawingState.aiReferenceSubTool);
+        if (currentDrawingState.aiReferenceSubTool === AIReferenceSubTool.PIN) {
           // Drop a pin at the click location
           addReferencePoint(adjustedPos);
-        } else if (drawingState.aiReferenceSubTool === AIReferenceSubTool.POLYGON) {
+        } else if (currentDrawingState.aiReferenceSubTool === AIReferenceSubTool.POLYGON) {
           // Handle polygon click-based drawing
           if (!isPolygonMarkupDrawing) {
             // First click: start polygon
             setIsPolygonMarkupDrawing(true);
             setMarkupTempPoints([adjustedPos]);
+            markupTempPointsRef.current = [adjustedPos];
           } else {
             // Subsequent clicks: add point or close polygon
-            const firstPoint = markupTempPoints[0];
+            const currentPoints = markupTempPointsRef.current;
+            const firstPoint = currentPoints[0];
             const dx = adjustedPos.x - firstPoint.x;
             const dy = adjustedPos.y - firstPoint.y;
             const distanceToFirst = Math.sqrt(dx * dx + dy * dy);
             
             // If clicked near first point (within 10px) and have at least 3 points, close polygon
-            if (distanceToFirst < 10 && markupTempPoints.length >= 3) {
+            if (distanceToFirst < 10 && currentPoints.length >= 3) {
               // Close the polygon
-              const flatPoints = markupTempPoints.flatMap(p => [p.x, p.y]);
+              const flatPoints = currentPoints.flatMap(p => [p.x, p.y]);
               const timestamp = Date.now();
               const newShape: PenShape = {
                 id: `markup-polygon-${timestamp}`,
@@ -418,17 +441,24 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
               // Reset polygon drawing state
               setIsPolygonMarkupDrawing(false);
               setMarkupTempPoints([]);
+              markupTempPointsRef.current = [];
               setPolygonMarkupPreviewPoint(null);
             } else {
               // Add point to polygon
-              setMarkupTempPoints(prev => [...prev, adjustedPos]);
+              const newPoints = [...currentPoints, adjustedPos];
+              markupTempPointsRef.current = newPoints;
+              setMarkupTempPoints(newPoints);
             }
           }
         } else {
           // Start markup drawing for pen/circle/rectangle sub-tools
+          console.log('[DrawingLayer] Starting markup drawing for sub-tool:', currentDrawingState.aiReferenceSubTool, 'at position:', adjustedPos);
           setIsMarkupDrawing(true);
+          isMarkupDrawingRef.current = true;
           setMarkupStartPoint(adjustedPos);
+          markupStartPointRef.current = adjustedPos;
           setMarkupTempPoints([adjustedPos]);
+          markupTempPointsRef.current = [adjustedPos];
         }
         return; // Bypass all normal drawing behavior
       }
@@ -490,6 +520,11 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
 
       if (!pos) return;
 
+      // Early exit: let GenerativeFillOverlay handle events when active
+      if (drawingStateRef.current.generativeFillMode?.isActive) {
+        return;
+      }
+
       // Adjust for layer scale
       const adjustedPos = {
         x: pos.x / zoomLevel,
@@ -506,14 +541,20 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
           return;
         }
         
-        // Handle other markup tools
-        if (isMarkupDrawing) {
+        // Handle other markup tools - use ref for immediate state access
+        if (isMarkupDrawingRef.current) {
           if (subTool === AIReferenceSubTool.PEN) {
             // For pen, accumulate points
-            setMarkupTempPoints(prev => [...prev, adjustedPos]);
+            const newPoints = [...markupTempPointsRef.current, adjustedPos];
+            markupTempPointsRef.current = newPoints;
+            setMarkupTempPoints(newPoints);
           } else {
             // For line/circle/rectangle, just update the end point
-            setMarkupTempPoints(prev => prev.length > 0 ? [prev[0], adjustedPos] : [adjustedPos]);
+            const newPoints = markupTempPointsRef.current.length > 0 
+              ? [markupTempPointsRef.current[0], adjustedPos] 
+              : [adjustedPos];
+            markupTempPointsRef.current = newPoints;
+            setMarkupTempPoints(newPoints);
           }
           return;
         }
@@ -539,6 +580,10 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     };
 
     const handleMouseUp = (e: Konva.KonvaEventObject<MouseEvent>): void => {
+      // Early exit: let GenerativeFillOverlay handle events when active
+      if (drawingStateRef.current.generativeFillMode?.isActive) {
+        return;
+      }
 
       // Check if we clicked on transformer anchors or control points
       const target = e.target;
@@ -558,16 +603,19 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         return;
       }
 
-      // Handle markup drawing completion for AI Reference mode
-      if (isMarkupDrawing && drawingState.aiReferenceMode) {
+      // Handle markup drawing completion for AI Reference mode - use ref for immediate state access
+      if (isMarkupDrawingRef.current && drawingState.aiReferenceMode) {
         const subTool = drawingState.aiReferenceSubTool;
-        const startPt = markupStartPoint;
-        const points = markupTempPoints;
+        const startPt = markupStartPointRef.current;
+        const points = markupTempPointsRef.current;
 
         // Reset markup drawing state
         setIsMarkupDrawing(false);
+        isMarkupDrawingRef.current = false;
         setMarkupStartPoint(null);
+        markupStartPointRef.current = null;
         setMarkupTempPoints([]);
+        markupTempPointsRef.current = [];
 
         if (!startPt || points.length === 0) return;
 
@@ -737,14 +785,15 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
       // Control point dragging is handled by state machine
     };
 
-    // Double-click handler to close polygon
+    // Double-click handler to close polygon - use ref for immediate state access
     const handleDoubleClick = (_e: Konva.KonvaEventObject<MouseEvent>): void => {
+      const currentPoints = markupTempPointsRef.current;
       if (drawingState.aiReferenceMode && 
           drawingState.aiReferenceSubTool === AIReferenceSubTool.POLYGON && 
           isPolygonMarkupDrawing && 
-          markupTempPoints.length >= 3) {
+          currentPoints.length >= 3) {
         // Close the polygon
-        const flatPoints = markupTempPoints.flatMap(p => [p.x, p.y]);
+        const flatPoints = currentPoints.flatMap(p => [p.x, p.y]);
         const timestamp = Date.now();
         const newShape: PenShape = {
           id: `markup-polygon-${timestamp}`,
@@ -763,6 +812,7 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
         // Reset polygon drawing state
         setIsPolygonMarkupDrawing(false);
         setMarkupTempPoints([]);
+        markupTempPointsRef.current = [];
         setPolygonMarkupPreviewPoint(null);
       }
     };
@@ -840,9 +890,8 @@ export const DrawingLayer: React.FC<DrawingLayerProps> = ({ stageRef, zoomLevel 
     selectedShapeIds,
     selectMultiple,
     zoomLevel,
-    isMarkupDrawing,
-    markupStartPoint,
-    markupTempPoints,
+    // Note: isMarkupDrawing, markupStartPoint, markupTempPoints are accessed via refs
+    // to avoid stale closure issues in mouse event handlers
     isPolygonMarkupDrawing,
     polygonMarkupPreviewPoint,
     drawingState.aiReferenceMode,

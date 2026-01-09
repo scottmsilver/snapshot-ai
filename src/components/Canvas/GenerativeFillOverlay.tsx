@@ -52,9 +52,11 @@ export const GenerativeFillOverlay: React.FC<GenerativeFillOverlayProps> = ({
   const [polygonPreviewPoint, setPolygonPreviewPoint] = useState<Point | null>(null);
 
   // Return null if not active
+  console.log('[GenerativeFillOverlay] render check - isActive:', generativeFillMode?.isActive, 'stageRef:', !!stageRef.current);
   if (!generativeFillMode?.isActive || !stageRef.current) {
     return null;
   }
+  console.log('[GenerativeFillOverlay] ACTIVE - selectionTool:', generativeFillMode.selectionTool);
 
   // Helper function to check if a point is near the first point of the polygon
   const isNearFirstPoint = (currentPos: Point, firstPoint: Point, threshold: number = 10): boolean => {
@@ -65,10 +67,15 @@ export const GenerativeFillOverlay: React.FC<GenerativeFillOverlayProps> = ({
 
   // Mouse event handlers
   const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>): void => {
+    console.log('[GenerativeFillOverlay] handleMouseDown triggered');
     const pos = e.target.getStage()?.getPointerPosition();
-    if (!pos) return;
+    if (!pos) {
+      console.log('[GenerativeFillOverlay] handleMouseDown - no pos');
+      return;
+    }
 
     const { selectionTool, selectionPoints } = generativeFillMode;
+    console.log('[GenerativeFillOverlay] handleMouseDown - tool:', selectionTool, 'pos:', pos);
 
     if (selectionTool === 'polygon') {
       // Polygon is click-based, not drag-based

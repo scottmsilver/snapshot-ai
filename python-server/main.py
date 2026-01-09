@@ -35,28 +35,24 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-
 from graphs.agentic_edit import GraphState, agentic_edit_graph
-from schemas import AgenticEditRequest, AgenticEditResponse, AIProgressEvent
-from schemas import GenerateTextRequest, GenerateTextResponse, FunctionCall
-from schemas import GenerateImageRequest, GenerateImageResponse
-from schemas import InpaintRequest, InpaintResponse
+from pydantic import BaseModel
+from schemas import (
+    AgenticEditRequest,
+    AgenticEditResponse,
+    AIProgressEvent,
+    FunctionCall,
+    GenerateImageRequest,
+    GenerateImageResponse,
+    GenerateTextRequest,
+    GenerateTextResponse,
+    InpaintRequest,
+    InpaintResponse,
+)
 from schemas.agentic import IterationInfo
-from schemas.config import AI_MODELS
-from schemas.config import THINKING_BUDGETS
-from utils.sse import (
-    format_complete_event,
-    format_error_event,
-    format_progress_event,
-    format_sse_event,
-)
-from utils.ai_logging import (
-    log_image_inputs,
-    log_contents_images,
-    extract_base64_data,
-    extract_mime_type,
-)
+from schemas.config import AI_MODELS, THINKING_BUDGETS
+from utils.ai_logging import extract_base64_data, extract_mime_type, log_contents_images, log_image_inputs
+from utils.sse import format_complete_event, format_error_event, format_progress_event, format_sse_event
 
 # Load environment variables
 load_dotenv()
@@ -434,15 +430,17 @@ async def generate_text(
 
         # Build raw response (simplified - full response is not JSON serializable)
         raw = {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [{"text": text}] if text else [],
+            "candidates": (
+                [
+                    {
+                        "content": {
+                            "parts": [{"text": text}] if text else [],
+                        }
                     }
-                }
-            ]
-            if response.candidates
-            else [],
+                ]
+                if response.candidates
+                else []
+            ),
         }
 
         return GenerateTextResponse(
@@ -582,19 +580,17 @@ Make SIGNIFICANT, VISIBLE changes to create the requested modification. The resu
 
         # Build raw response (simplified - full response is not JSON serializable)
         raw = {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {"inlineData": {"mimeType": "image/png", "data": "..."}}
-                        ]
-                        if image_data
-                        else [],
+            "candidates": (
+                [
+                    {
+                        "content": {
+                            "parts": [{"inlineData": {"mimeType": "image/png", "data": "..."}}] if image_data else [],
+                        }
                     }
-                }
-            ]
-            if response.candidates
-            else [],
+                ]
+                if response.candidates
+                else []
+            ),
         }
 
         return GenerateImageResponse(
@@ -680,12 +676,8 @@ async def inpaint(request: InpaintRequest, api_key: GeminiApiKey) -> StreamingRe
 
             # Send completion
             if final_state:
-                image = final_state.get("current_result") or final_state.get(
-                    "source_image"
-                )
-                prompt = final_state.get("refined_prompt") or final_state.get(
-                    "user_prompt", ""
-                )
+                image = final_state.get("current_result") or final_state.get("source_image")
+                prompt = final_state.get("refined_prompt") or final_state.get("user_prompt", "")
                 iterations = final_state.get("current_iteration", 1)
 
                 if image:
@@ -856,12 +848,8 @@ async def inpaint_stream(
 
             # Send completion
             if final_state:
-                image = final_state.get("current_result") or final_state.get(
-                    "source_image"
-                )
-                prompt = final_state.get("refined_prompt") or final_state.get(
-                    "user_prompt", ""
-                )
+                image = final_state.get("current_result") or final_state.get("source_image")
+                prompt = final_state.get("refined_prompt") or final_state.get("user_prompt", "")
                 iterations = final_state.get("current_iteration", 1)
 
                 if image:
@@ -906,9 +894,7 @@ async def inpaint_stream(
 
 
 @app.post("/api/agentic/edit")
-async def agentic_edit(
-    request: AgenticEditRequest, api_key: GeminiApiKey
-) -> StreamingResponse:
+async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> StreamingResponse:
     """
     Perform agentic image editing with SSE progress streaming.
 
@@ -924,11 +910,19 @@ async def agentic_edit(
     async def generate_events():
         """Async generator yielding SSE events."""
         try:
+            # Convert reference points from request to schema format
+            from schemas.agentic import ReferencePoint
+
+            ref_points = []
+            if request.referencePoints:
+                ref_points = [ReferencePoint(label=rp.label, x=rp.x, y=rp.y) for rp in request.referencePoints]
+
             # Initialize state
             state = GraphState(
                 source_image=request.sourceImage,
                 mask_image=request.maskImage,
                 user_prompt=request.prompt,
+                reference_points=ref_points,
                 max_iterations=request.maxIterations or 3,
             )
 
@@ -936,9 +930,7 @@ async def agentic_edit(
             # Express sends "Sending planning request to AI..." before calling the API
             from graphs.agentic_edit import build_planning_prompt
 
-            planning_prompt = build_planning_prompt(
-                request.prompt, bool(request.maskImage)
-            )
+            planning_prompt = build_planning_prompt(request.prompt, bool(request.maskImage), ref_points)
             yield format_progress_event(
                 AIProgressEvent(
                     step="planning",
@@ -967,12 +959,8 @@ async def agentic_edit(
 
             # Send completion
             if final_state:
-                image = final_state.get("current_result") or final_state.get(
-                    "source_image"
-                )
-                prompt = final_state.get("refined_prompt") or final_state.get(
-                    "user_prompt", ""
-                )
+                image = final_state.get("current_result") or final_state.get("source_image")
+                prompt = final_state.get("refined_prompt") or final_state.get("user_prompt", "")
                 iterations = final_state.get("current_iteration", 1)
 
                 if image:
