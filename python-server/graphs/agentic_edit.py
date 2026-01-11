@@ -24,7 +24,6 @@ from google.genai import types
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
-
 from schemas import AI_MODELS, MAX_ITERATIONS, THINKING_BUDGETS
 from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo, ReferencePoint, ShapeMetadata
 from services.gemini_client import get_gemini_client
@@ -49,7 +48,8 @@ class GraphState(BaseModel):
     State passed between nodes in the agentic edit graph.
 
     Attributes:
-        source_image: Input image as base64 data URL.
+        source_image: Clean input image as base64 data URL (no annotations).
+        annotated_image: Optional image with user's annotations visible (for AI reference).
         mask_image: Optional mask for targeted edits.
         user_prompt: User's edit request.
         reference_points: Labeled points for spatial commands (e.g., "Move A to B").
@@ -63,7 +63,8 @@ class GraphState(BaseModel):
     """
 
     # Inputs
-    source_image: str
+    source_image: str  # Clean original image (no annotations)
+    annotated_image: str | None = None  # Image with user annotations visible
     mask_image: str | None = None
     user_prompt: str
     reference_points: list[ReferencePoint] = []
@@ -141,10 +142,28 @@ Example translations:
 def build_planning_prompt(
     user_prompt: str,
     has_mask: bool,
+    has_annotated_image: bool = False,
     reference_points: list[ReferencePoint] | None = None,
     shapes: list[ShapeMetadata] | None = None,
 ) -> str:
     """Build the system prompt for the planning phase."""
+    # Build annotated image context if provided
+    if has_annotated_image:
+        annotated_context = """## TWO IMAGES PROVIDED
+
+You are receiving TWO images:
+1. **CLEAN IMAGE** - The original image WITHOUT any annotations. This is the image that will be edited.
+2. **ANNOTATED IMAGE** - The same image WITH the user's visual markings (arrows, circles, rectangles, text, etc.) drawn on it. This shows you EXACTLY what the user wants.
+
+IMPORTANT:
+- Use the ANNOTATED IMAGE to understand the user's intent - see where arrows point, what areas are circled, where text labels are placed
+- The actual edits will be applied to the CLEAN IMAGE
+- The annotations will NOT appear in the final result - they are just guidance for you
+
+"""
+    else:
+        annotated_context = ""
+
     if has_mask:
         mask_context = """The user has selected a specific area of the image using a mask (white = edit area, black = preserve).
 This is an INPAINTING task - you must fill/modify ONLY the masked region.
@@ -189,7 +208,7 @@ CRITICAL INPAINTING GUIDELINES:
 
 USER'S REQUEST: "{user_prompt}"
 
-{mask_context}
+{annotated_context}{mask_context}
 {ref_points_context}
 {shapes_context}
 Your goal is to create an edit that:
@@ -366,13 +385,27 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
         logger.info("Planning: %d reference points provided", len(state.reference_points))
     if state.shapes:
         logger.info("Planning: %d shapes/annotations provided", len(state.shapes))
+    if state.annotated_image:
+        logger.info("Planning: Annotated image provided for visual reference")
 
-    prompt = build_planning_prompt(state.user_prompt, bool(state.mask_image), state.reference_points, state.shapes)
+    prompt = build_planning_prompt(
+        state.user_prompt,
+        bool(state.mask_image),
+        has_annotated_image=bool(state.annotated_image),
+        reference_points=state.reference_points,
+        shapes=state.shapes,
+    )
     iteration_info = IterationInfo(current=0, max=state.max_iterations)
 
     # Decode images with labels for transparency logging
+    # When annotated image is provided, send BOTH images so AI can see the annotations
     source = parse_data_url(state.source_image)
-    images = [(source.data, source.mime_type, "Source Image")]
+    images = [(source.data, source.mime_type, "Clean Image (to be edited)")]
+
+    if state.annotated_image:
+        annotated = parse_data_url(state.annotated_image)
+        images.append((annotated.data, annotated.mime_type, "Annotated Image (user's visual guidance)"))
+
     if state.mask_image:
         mask = parse_data_url(state.mask_image)
         images.append((mask.data, mask.mime_type, "Mask (white = edit area)"))
@@ -447,15 +480,35 @@ async def generate_node(state: GraphState) -> dict[str, Any]:
 
     # Decode images
     source = parse_data_url(state.source_image)
+    annotated = parse_data_url(state.annotated_image) if state.annotated_image else None
     mask = parse_data_url(state.mask_image) if state.mask_image else None
+
+    # Build the generation prompt - add context about two images if annotated image is provided
+    if annotated:
+        generation_prompt = f"""You are receiving TWO images:
+1. FIRST IMAGE (Clean): The original image WITHOUT any annotations - edit THIS image
+2. SECOND IMAGE (Annotated): The same image WITH the user's visual markings (lines, arrows, circles, etc.) showing WHERE they want changes
+
+IMPORTANT:
+- Apply your edits to the FIRST (clean) image
+- Use the SECOND (annotated) image to understand exactly WHERE the user wants changes
+- The annotations show the user's intent - follow the lines, arrows, and markings
+- DO NOT include any of the annotations in your output - they are just guidance
+
+EDIT INSTRUCTION:
+{state.refined_prompt}"""
+    else:
+        generation_prompt = state.refined_prompt
 
     try:
         client = get_gemini_client()
 
         # This call automatically emits progress
+        # Send both clean and annotated images so the model can see user's visual guidance
         result = await client.generate_image(
-            prompt=state.refined_prompt,
+            prompt=generation_prompt,
             source_image=(source.data, source.mime_type),
+            annotated_image=(annotated.data, annotated.mime_type) if annotated else None,
             mask_image=(mask.data, mask.mime_type) if mask else None,
             step="calling_api",
             iteration=iteration_info,

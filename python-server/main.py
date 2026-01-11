@@ -35,10 +35,8 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from starlette.middleware.base import BaseHTTPMiddleware
-
 from graphs.agentic_edit import GraphState, agentic_edit_graph
+from pydantic import BaseModel
 from schemas import (
     AgenticEditRequest,
     AgenticEditResponse,
@@ -53,6 +51,7 @@ from schemas import (
 )
 from schemas.agentic import IterationInfo
 from schemas.config import AI_MODELS, THINKING_BUDGETS
+from starlette.middleware.base import BaseHTTPMiddleware
 from utils.ai_logging import extract_base64_data, extract_mime_type, log_contents_images, log_image_inputs
 from utils.sse import format_complete_event, format_error_event, format_progress_event, format_sse_event
 
@@ -991,6 +990,7 @@ async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> St
             # Initialize state
             state = GraphState(
                 source_image=request.sourceImage,
+                annotated_image=request.annotatedImage,  # Image with user annotations visible
                 mask_image=request.maskImage,
                 user_prompt=request.prompt,
                 reference_points=ref_points,
@@ -1002,7 +1002,13 @@ async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> St
             # Express sends "Sending planning request to AI..." before calling the API
             from graphs.agentic_edit import build_planning_prompt
 
-            planning_prompt = build_planning_prompt(request.prompt, bool(request.maskImage), ref_points, shapes)
+            planning_prompt = build_planning_prompt(
+                request.prompt,
+                bool(request.maskImage),
+                has_annotated_image=bool(request.annotatedImage),
+                reference_points=ref_points,
+                shapes=shapes,
+            )
             yield format_progress_event(
                 AIProgressEvent(
                     step="planning",

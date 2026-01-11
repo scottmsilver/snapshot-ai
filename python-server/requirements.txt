@@ -17,7 +17,7 @@ httpx==0.28.1
 
 # Image processing
 Pillow==11.3.0
-opencv-python==4.10.0.84
+opencv-python-headless==4.10.0.84
 numpy>=1.24.0
 
 # Perceptual image comparison (LPIPS)

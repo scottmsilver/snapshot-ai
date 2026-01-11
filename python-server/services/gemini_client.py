@@ -75,9 +75,7 @@ class TransparentGeminiClient:
 
     def __init__(self, api_key: str | None = None):
         """Initialize the client with an API key."""
-        self._api_key = (
-            api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        )
+        self._api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not self._api_key:
             raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY must be set")
         self._client = genai.Client(api_key=self._api_key)
@@ -171,11 +169,7 @@ class TransparentGeminiClient:
                     continue
 
                 for part in content.parts or []:
-                    if (
-                        hasattr(part, "thought")
-                        and part.thought
-                        and hasattr(part, "text")
-                    ):
+                    if hasattr(part, "thought") and part.thought and hasattr(part, "text"):
                         accumulated_thinking += part.text or ""
                     elif hasattr(part, "function_call") and part.function_call:
                         fc = part.function_call
@@ -202,9 +196,7 @@ class TransparentGeminiClient:
             # Emit: RAW OUTPUT
             output_text = accumulated_text
             if function_call:
-                output_text = (
-                    f"Function call: {function_call['name']}({function_call['args']})"
-                )
+                output_text = f"Function call: {function_call['name']}({function_call['args']})"
 
             self._emit(
                 AIProgressEvent(
@@ -238,6 +230,7 @@ class TransparentGeminiClient:
         *,
         prompt: str,
         source_image: tuple[bytes, str],
+        annotated_image: tuple[bytes, str] | None = None,
         mask_image: tuple[bytes, str] | None = None,
         step: AIProgressStep,
         iteration: IterationInfo,
@@ -248,7 +241,8 @@ class TransparentGeminiClient:
 
         Args:
             prompt: The edit prompt
-            source_image: (bytes, mime_type) of source image
+            source_image: (bytes, mime_type) of source image (clean, to be edited)
+            annotated_image: Optional (bytes, mime_type) of annotated image (with user's markings for guidance)
             mask_image: Optional (bytes, mime_type) of mask
             step: Current workflow step (for progress events)
             iteration: Current iteration info (for progress events)
@@ -262,15 +256,27 @@ class TransparentGeminiClient:
         # Build input images for logging
         input_images: list[AIInputImage] = [
             AIInputImage(
-                label="Source Image",
+                label="Clean Image (to be edited)",
                 dataUrl=encode_data_url(source_data, source_mime),
             )
         ]
 
-        # Build parts
+        # Build parts - source image first
         parts: list[types.Part] = [
             types.Part.from_bytes(data=source_data, mime_type=source_mime),
         ]
+
+        # Add annotated image if provided (for AI to see user's visual guidance)
+        if annotated_image:
+            annotated_data, annotated_mime = annotated_image
+            parts.append(types.Part.from_bytes(data=annotated_data, mime_type=annotated_mime))
+            input_images.append(
+                AIInputImage(
+                    label="Annotated Image (user's visual guidance)",
+                    dataUrl=encode_data_url(annotated_data, annotated_mime),
+                )
+            )
+
         if mask_image:
             mask_data, mask_mime = mask_image
             parts.append(types.Part.from_bytes(data=mask_data, mime_type=mask_mime))
@@ -297,9 +303,7 @@ class TransparentGeminiClient:
             response = await self._client.aio.models.generate_content(
                 model=model,
                 contents=types.Content(role="user", parts=parts),
-                config=types.GenerateContentConfig(
-                    response_modalities=["image", "text"]
-                ),
+                config=types.GenerateContentConfig(response_modalities=["image", "text"]),
             )
 
             image_bytes = None
@@ -433,11 +437,7 @@ class TransparentGeminiClient:
                     continue
 
                 for part in content.parts or []:
-                    if (
-                        hasattr(part, "thought")
-                        and part.thought
-                        and hasattr(part, "text")
-                    ):
+                    if hasattr(part, "thought") and part.thought and hasattr(part, "text"):
                         accumulated_thinking += part.text or ""
                     elif hasattr(part, "text") and part.text:
                         accumulated_text += part.text

@@ -157,6 +157,9 @@ class ShapeMetadata(BaseModel):
     # Line/Arrow specific
     startPoint: Optional[Point2D] = Field(None, description="Start point for lines/arrows")
     endPoint: Optional[Point2D] = Field(None, description="End point for lines/arrows")
+    points: Optional[list[Point2D]] = Field(None, description="All points in multi-segment lines/polylines")
+    isClosed: Optional[bool] = Field(None, description="Whether line forms a closed polygon")
+    isCurved: Optional[bool] = Field(None, description="Whether line uses bezier curves")
     hasStartArrowhead: Optional[bool] = Field(None, description="Whether line has start arrowhead")
     hasEndArrowhead: Optional[bool] = Field(None, description="Whether line has end arrowhead")
 
@@ -180,8 +183,13 @@ class AgenticEditRequest(BaseModel):
     Matches the TypeScript AgenticEditRequest interface.
     """
 
-    # Source image (base64 data URL)
-    sourceImage: Base64ImageUrl = Field(..., description="Source image as base64 data URL")
+    # Source image (base64 data URL) - the CLEAN original image to edit
+    sourceImage: Base64ImageUrl = Field(..., description="Clean source image as base64 data URL (no annotations)")
+
+    # Annotated image (optional) - image with user's annotations visible for AI reference
+    annotatedImage: Optional[Base64ImageUrl] = Field(
+        None, description="Image with user annotations drawn on it (for AI to see what user marked)"
+    )
 
     # Edit prompt from user
     prompt: str = Field(..., description="User's edit prompt")
@@ -231,7 +239,8 @@ class AgenticEditState(BaseModel):
     """
 
     # Inputs (from request)
-    source_image: Base64ImageUrl
+    source_image: Base64ImageUrl  # Clean original image (no annotations)
+    annotated_image: Optional[Base64ImageUrl] = None  # Image with user annotations visible
     mask_image: Optional[Base64ImageUrl] = None
     user_prompt: str
     max_iterations: int = 3

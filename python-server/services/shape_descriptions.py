@@ -1,8 +1,13 @@
 """
 Shape description generator for AI prompts.
 
-Converts shape metadata from the canvas into human-readable descriptions
-that help the AI understand user-drawn annotations.
+Converts shape metadata from the canvas into structured, exhaustive descriptions
+that allow the AI to understand and potentially recreate user-drawn annotations.
+
+Uses a simple "shape language" format:
+  LINE #1: red polyline, 3 segments
+    Path: (100, 200) -> (150, 300) -> (200, 250)
+    Stroke: 2px
 """
 
 from __future__ import annotations
@@ -48,121 +53,241 @@ def _color_name(hex_color: str) -> str:
     return color_names.get(color, color)
 
 
-def describe_shape(shape: ShapeMetadata) -> str:
+def _format_point(x: float, y: float) -> str:
+    """Format a point as (x, y) with integer coordinates."""
+    return f"({int(x)}, {int(y)})"
+
+
+def _format_path(points: list, start_point=None, end_point=None) -> str:
     """
-    Generate a human-readable description of a single shape.
+    Format a path as a series of points connected by arrows.
+
+    Uses points array if available, otherwise falls back to start/end points.
+    """
+    if points and len(points) >= 2:
+        path_parts = [_format_point(p.x, p.y) for p in points]
+        return " -> ".join(path_parts)
+    elif start_point and end_point:
+        return f"{_format_point(start_point.x, start_point.y)} -> {_format_point(end_point.x, end_point.y)}"
+    return "(no path)"
+
+
+def describe_shape(shape: ShapeMetadata, index: int = 1) -> str:
+    """
+    Generate an exhaustive, structured description of a single shape.
+
+    The description includes all coordinates and properties needed to
+    understand or recreate the shape.
 
     Args:
         shape: The shape metadata to describe.
+        index: The shape number for labeling.
 
     Returns:
-        A natural language description of the shape.
-
-    Examples:
-        >>> shape = ShapeMetadata(type="arrow", strokeColor="#ff0000", ...)
-        >>> describe_shape(shape)
-        "A red arrow from (100, 200) to (300, 400)"
+        A multi-line structured description of the shape.
     """
     color = _color_name(shape.strokeColor)
     bg_color = _color_name(shape.backgroundColor) if shape.backgroundColor else None
+    has_fill = bg_color and bg_color != "transparent"
     bbox = shape.boundingBox
+    stroke_width = int(shape.strokeWidth) if shape.strokeWidth else 1
 
-    # Calculate center for shapes that use it
+    # Calculate useful derived values
     center_x = int(bbox.x + bbox.width / 2)
     center_y = int(bbox.y + bbox.height / 2)
 
+    lines = []
+
     if shape.type == "line":
-        if shape.startPoint and shape.endPoint:
-            start = f"({int(shape.startPoint.x)}, {int(shape.startPoint.y)})"
-            end = f"({int(shape.endPoint.x)}, {int(shape.endPoint.y)})"
-            return f"A {color} line from {start} to {end}"
-        return f"A {color} line at ({int(bbox.x)}, {int(bbox.y)}), {int(bbox.width)}x{int(bbox.height)}px"
+        # Determine line characteristics
+        characteristics = []
+
+        # Count segments
+        if shape.points and len(shape.points) > 2:
+            num_segments = len(shape.points) - 1
+            if shape.isClosed:
+                characteristics.append("closed polygon")
+                characteristics.append(f"{len(shape.points)} vertices")
+            else:
+                characteristics.append("polyline")
+                characteristics.append(f"{num_segments} segments")
+        else:
+            characteristics.append("line segment")
+
+        if shape.isCurved:
+            characteristics.append("curved")
+
+        if has_fill:
+            characteristics.append(f"{bg_color}-filled")
+
+        char_str = ", ".join(characteristics)
+        lines.append(f"LINE #{index}: {color} {char_str}")
+
+        # Path with all points
+        path = _format_path(shape.points, shape.startPoint, shape.endPoint)
+        if shape.isClosed:
+            path += " -> [closed]"
+        lines.append(f"  Path: {path}")
+
+        # Style
+        style_parts = [f"Stroke: {stroke_width}px"]
+        if has_fill:
+            style_parts.append(f"Fill: {bg_color}")
+        lines.append(f"  {', '.join(style_parts)}")
 
     elif shape.type == "arrow":
-        if shape.startPoint and shape.endPoint:
-            start = f"({int(shape.startPoint.x)}, {int(shape.startPoint.y)})"
-            end = f"({int(shape.endPoint.x)}, {int(shape.endPoint.y)})"
+        # Determine arrow characteristics
+        characteristics = []
 
-            # Describe arrowhead placement
-            if shape.hasStartArrowhead and shape.hasEndArrowhead:
-                arrow_type = "double-headed arrow"
-            elif shape.hasStartArrowhead:
-                # Arrow points from end to start
-                arrow_type = "arrow"
-                start, end = end, start  # Swap for natural description
-            else:
-                arrow_type = "arrow"
+        if shape.points and len(shape.points) > 2:
+            num_segments = len(shape.points) - 1
+            characteristics.append(f"{num_segments}-segment")
 
-            return f"A {color} {arrow_type} from {start} to {end}"
-        return f"A {color} arrow at ({int(bbox.x)}, {int(bbox.y)}), {int(bbox.width)}x{int(bbox.height)}px"
+        if shape.isCurved:
+            characteristics.append("curved")
+
+        # Arrowhead description
+        if shape.hasStartArrowhead and shape.hasEndArrowhead:
+            characteristics.append("double-headed")
+        elif shape.hasStartArrowhead:
+            characteristics.append("start-headed")
+        # Default is end-headed, don't need to mention
+
+        char_str = ", ".join(characteristics) if characteristics else "straight"
+        lines.append(f"ARROW #{index}: {color} {char_str}")
+
+        # Path with all points
+        path = _format_path(shape.points, shape.startPoint, shape.endPoint)
+        lines.append(f"  Path: {path}")
+
+        # Style and arrowhead info
+        arrowhead_pos = []
+        if shape.hasStartArrowhead:
+            arrowhead_pos.append("start")
+        if shape.hasEndArrowhead or (not shape.hasStartArrowhead):
+            arrowhead_pos.append("end")
+
+        lines.append(f"  Stroke: {stroke_width}px, Arrowhead: {' & '.join(arrowhead_pos)}")
 
     elif shape.type == "rectangle":
-        fill_desc = f"{bg_color}-filled " if bg_color and bg_color != "transparent" else ""
-        return f"A {fill_desc}{color} rectangle at ({int(bbox.x)}, {int(bbox.y)}), size {int(bbox.width)}x{int(bbox.height)}px"
+        fill_str = f"{bg_color}-filled" if has_fill else "outline"
+        lines.append(f"RECTANGLE #{index}: {color} {fill_str}")
+
+        # Bounds as corner coordinates
+        top_left = _format_point(bbox.x, bbox.y)
+        bottom_right = _format_point(bbox.x + bbox.width, bbox.y + bbox.height)
+        lines.append(f"  Bounds: {top_left} to {bottom_right}, {int(bbox.width)}x{int(bbox.height)}px")
+
+        # Style
+        style_parts = [f"Stroke: {stroke_width}px"]
+        if has_fill:
+            style_parts.append(f"Fill: {bg_color}")
+        lines.append(f"  {', '.join(style_parts)}")
 
     elif shape.type == "diamond":
-        fill_desc = f"{bg_color}-filled " if bg_color and bg_color != "transparent" else ""
-        return f"A {fill_desc}{color} diamond at ({int(bbox.x)}, {int(bbox.y)}), size {int(bbox.width)}x{int(bbox.height)}px"
+        fill_str = f"{bg_color}-filled" if has_fill else "outline"
+        lines.append(f"DIAMOND #{index}: {color} {fill_str}")
+
+        # Bounds
+        top_left = _format_point(bbox.x, bbox.y)
+        bottom_right = _format_point(bbox.x + bbox.width, bbox.y + bbox.height)
+        lines.append(f"  Bounds: {top_left} to {bottom_right}, {int(bbox.width)}x{int(bbox.height)}px")
+
+        # Style
+        style_parts = [f"Stroke: {stroke_width}px"]
+        if has_fill:
+            style_parts.append(f"Fill: {bg_color}")
+        lines.append(f"  {', '.join(style_parts)}")
 
     elif shape.type == "ellipse":
-        fill_desc = f"{bg_color}-filled " if bg_color and bg_color != "transparent" else ""
+        # Check if it's a circle
+        is_circle = abs(bbox.width - bbox.height) < 5
+        shape_name = "CIRCLE" if is_circle else "ELLIPSE"
+        fill_str = f"{bg_color}-filled" if has_fill else "outline"
 
-        # Check if it's a circle (roughly equal width/height)
-        if abs(bbox.width - bbox.height) < 5:
+        lines.append(f"{shape_name} #{index}: {color} {fill_str}")
+
+        if is_circle:
             radius = int(bbox.width / 2)
-            return f"A {fill_desc}{color} circle centered at ({center_x}, {center_y}), radius {radius}px"
+            lines.append(f"  Center: {_format_point(center_x, center_y)}, Radius: {radius}px")
         else:
-            return f"A {fill_desc}{color} ellipse centered at ({center_x}, {center_y}), {int(bbox.width)}x{int(bbox.height)}px"
+            lines.append(f"  Center: {_format_point(center_x, center_y)}, Size: {int(bbox.width)}x{int(bbox.height)}px")
+
+        # Style
+        style_parts = [f"Stroke: {stroke_width}px"]
+        if has_fill:
+            style_parts.append(f"Fill: {bg_color}")
+        lines.append(f"  {', '.join(style_parts)}")
 
     elif shape.type == "freedraw":
-        point_info = f" ({shape.pointCount} points)" if shape.pointCount else ""
-        return f"A {color} freehand drawing near ({center_x}, {center_y}), spanning {int(bbox.width)}x{int(bbox.height)}px{point_info}"
+        lines.append(f"FREEDRAW #{index}: {color} sketch")
+
+        # Bounds
+        top_left = _format_point(bbox.x, bbox.y)
+        bottom_right = _format_point(bbox.x + bbox.width, bbox.y + bbox.height)
+        point_info = f", {shape.pointCount} points" if shape.pointCount else ""
+        lines.append(f"  Bounds: {top_left} to {bottom_right}{point_info}")
+
+        lines.append(f"  Stroke: {stroke_width}px")
 
     elif shape.type == "text":
         text_content = shape.textContent or "(empty)"
-        size_info = f", {int(shape.fontSize)}px" if shape.fontSize else ""
-        return f'Text "{text_content}" at ({int(bbox.x)}, {int(bbox.y)}) ({color}{size_info})'
+        # Escape quotes and truncate if too long
+        if len(text_content) > 50:
+            text_content = text_content[:47] + "..."
+        text_content = text_content.replace('"', '\\"')
+
+        lines.append(f'TEXT #{index}: "{text_content}"')
+        lines.append(f"  Position: {_format_point(bbox.x, bbox.y)}")
+
+        size_info = f", Size: {int(shape.fontSize)}px" if shape.fontSize else ""
+        lines.append(f"  Color: {color}{size_info}")
 
     else:
         # Fallback for unknown types
-        return f"A {color} {shape.type} at ({int(bbox.x)}, {int(bbox.y)}), size {int(bbox.width)}x{int(bbox.height)}px"
+        lines.append(f"{shape.type.upper()} #{index}: {color}")
+        lines.append(f"  Bounds: {_format_point(bbox.x, bbox.y)}, {int(bbox.width)}x{int(bbox.height)}px")
+
+    return "\n".join(lines)
 
 
 def build_shapes_context(shapes: list[ShapeMetadata] | None) -> str:
     """
     Build a prompt section describing all user-drawn shapes.
 
+    Uses an exhaustive, structured format that includes all coordinates
+    and properties needed to understand or recreate each shape.
+
     Args:
         shapes: List of shape metadata from the canvas, or None.
 
     Returns:
         A formatted prompt section with shape descriptions, or empty string if no shapes.
-
-    Examples:
-        >>> shapes = [arrow_shape, rect_shape, text_shape]
-        >>> context = build_shapes_context(shapes)
-        >>> print(context)
-        ## USER-DRAWN ANNOTATIONS
-        ...
     """
     if not shapes:
         return ""
 
-    descriptions = [f"- {describe_shape(shape)}" for shape in shapes]
+    # Group shapes by type for better organization
+    descriptions = []
+    for i, shape in enumerate(shapes, 1):
+        descriptions.append(describe_shape(shape, i))
 
     return f"""
 ## USER-DRAWN ANNOTATIONS
 
-The user has drawn the following shapes/annotations on the canvas to guide the edit:
+The user has drawn the following shapes on the canvas. Each shape is described
+with exact coordinates and properties:
 
 {chr(10).join(descriptions)}
 
-IMPORTANT: Interpret these visual annotations alongside the user's text command:
-- **Arrows** indicate direction, movement, or point to specific elements
-- **Rectangles/Circles** highlight areas to modify or focus on
-- **Text annotations** contain explicit instructions or labels
-- **Lines** may indicate connections, boundaries, or cut/crop lines
-- **Freehand drawings** often circle or underline important areas
+---
+INTERPRETATION GUIDE:
+- ARROW: Points to or indicates direction/movement. Follow the path from start to end.
+- LINE/POLYLINE: May indicate boundaries, connections, or areas to modify.
+- POLYGON (closed line): Outlines a specific region or area.
+- RECTANGLE/ELLIPSE/CIRCLE: Highlights or frames an area of interest.
+- TEXT: Contains explicit instructions or labels.
+- FREEDRAW: Freehand marking, often circling or underlining important areas.
 
-The annotations are visual guides - incorporate their meaning into your edit.
+Use these annotations to understand exactly WHERE and WHAT the user wants edited.
 """

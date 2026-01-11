@@ -6,6 +6,7 @@ Tests cover:
 2. Individual shape descriptions for each type
 3. Full context builder
 4. Edge cases (empty, missing fields)
+5. New polyline/polygon features
 """
 
 import pytest
@@ -73,8 +74,8 @@ class TestColorName:
 class TestLineDescription:
     """Tests for line shape descriptions."""
 
-    def test_line_with_endpoints(self, basic_bbox: BoundingBox):
-        """Test line description with start/end points."""
+    def test_simple_line_with_endpoints(self, basic_bbox: BoundingBox):
+        """Test simple line description with start/end points."""
         shape = ShapeMetadata(
             type="line",
             strokeColor="#ff0000",
@@ -83,20 +84,89 @@ class TestLineDescription:
             endPoint=Point2D(x=250, y=300),
         )
         desc = describe_shape(shape)
-        assert "red line" in desc
+        assert "LINE #1" in desc
+        assert "red" in desc
         assert "(100, 200)" in desc
         assert "(250, 300)" in desc
+        assert "Path:" in desc
 
-    def test_line_without_endpoints(self, basic_bbox: BoundingBox):
-        """Test line description fallback without endpoints."""
+    def test_polyline_with_multiple_points(self, basic_bbox: BoundingBox):
+        """Test polyline with multiple points."""
         shape = ShapeMetadata(
             type="line",
             strokeColor="#0000ff",
             boundingBox=basic_bbox,
+            startPoint=Point2D(x=100, y=200),
+            endPoint=Point2D(x=300, y=400),
+            points=[
+                Point2D(x=100, y=200),
+                Point2D(x=150, y=250),
+                Point2D(x=200, y=300),
+                Point2D(x=300, y=400),
+            ],
         )
         desc = describe_shape(shape)
-        assert "blue line" in desc
-        assert "150x100px" in desc
+        assert "polyline" in desc
+        assert "3 segments" in desc
+        # All points should be in the path
+        assert "(100, 200)" in desc
+        assert "(150, 250)" in desc
+        assert "(200, 300)" in desc
+        assert "(300, 400)" in desc
+
+    def test_closed_polygon(self, basic_bbox: BoundingBox):
+        """Test closed polygon description."""
+        shape = ShapeMetadata(
+            type="line",
+            strokeColor="#00ff00",
+            boundingBox=basic_bbox,
+            startPoint=Point2D(x=100, y=100),
+            endPoint=Point2D(x=100, y=100),
+            points=[
+                Point2D(x=100, y=100),
+                Point2D(x=200, y=100),
+                Point2D(x=200, y=200),
+                Point2D(x=100, y=200),
+            ],
+            isClosed=True,
+        )
+        desc = describe_shape(shape)
+        assert "closed polygon" in desc
+        assert "4 vertices" in desc
+        assert "[closed]" in desc
+
+    def test_curved_line(self, basic_bbox: BoundingBox):
+        """Test curved line description."""
+        shape = ShapeMetadata(
+            type="line",
+            strokeColor="#ff0000",
+            boundingBox=basic_bbox,
+            startPoint=Point2D(x=100, y=200),
+            endPoint=Point2D(x=250, y=300),
+            isCurved=True,
+        )
+        desc = describe_shape(shape)
+        assert "curved" in desc
+
+    def test_curved_closed_polygon(self, basic_bbox: BoundingBox):
+        """Test curved closed polygon (like a smooth shape)."""
+        shape = ShapeMetadata(
+            type="line",
+            strokeColor="#ff0000",
+            boundingBox=basic_bbox,
+            points=[
+                Point2D(x=100, y=100),
+                Point2D(x=200, y=50),
+                Point2D(x=300, y=100),
+                Point2D(x=200, y=150),
+            ],
+            isClosed=True,
+            isCurved=True,
+        )
+        desc = describe_shape(shape)
+        assert "closed polygon" in desc
+        assert "curved" in desc
+        assert "[closed]" in desc
 
 
 # =============================================================================
@@ -118,9 +188,11 @@ class TestArrowDescription:
             hasEndArrowhead=True,
         )
         desc = describe_shape(shape)
-        assert "green arrow" in desc
+        assert "ARROW #1" in desc
+        assert "green" in desc
         assert "(50, 50)" in desc
         assert "(200, 150)" in desc
+        assert "Arrowhead:" in desc
 
     def test_double_headed_arrow(self, basic_bbox: BoundingBox):
         """Test double-headed arrow description."""
@@ -134,24 +206,34 @@ class TestArrowDescription:
             hasEndArrowhead=True,
         )
         desc = describe_shape(shape)
-        assert "double-headed arrow" in desc
+        assert "double-headed" in desc
+        assert "start & end" in desc
 
-    def test_reverse_arrow(self, basic_bbox: BoundingBox):
-        """Test arrow with only start arrowhead (reverse direction)."""
+    def test_curved_multi_segment_arrow(self, basic_bbox: BoundingBox):
+        """Test curved multi-segment arrow."""
         shape = ShapeMetadata(
             type="arrow",
-            strokeColor="#ff0000",
+            strokeColor="#0000ff",
             boundingBox=basic_bbox,
             startPoint=Point2D(x=100, y=100),
-            endPoint=Point2D(x=300, y=100),
-            hasStartArrowhead=True,
-            hasEndArrowhead=False,
+            endPoint=Point2D(x=300, y=300),
+            points=[
+                Point2D(x=100, y=100),
+                Point2D(x=150, y=200),
+                Point2D(x=250, y=250),
+                Point2D(x=300, y=300),
+            ],
+            isCurved=True,
+            hasEndArrowhead=True,
         )
         desc = describe_shape(shape)
-        assert "arrow" in desc
-        # Direction should be swapped (points from end to start)
-        assert "(300, 100)" in desc  # This should be first (from)
+        assert "3-segment" in desc
+        assert "curved" in desc
+        # All points should be in the path
         assert "(100, 100)" in desc
+        assert "(150, 200)" in desc
+        assert "(250, 250)" in desc
+        assert "(300, 300)" in desc
 
 
 # =============================================================================
@@ -170,8 +252,11 @@ class TestRectangleDescription:
             boundingBox=basic_bbox,
         )
         desc = describe_shape(shape)
-        assert "black rectangle" in desc
+        assert "RECTANGLE #1" in desc
+        assert "black" in desc
+        assert "outline" in desc
         assert "(100, 200)" in desc
+        assert "(250, 300)" in desc  # Bottom-right
         assert "150x100px" in desc
 
     def test_filled_rectangle(self, basic_bbox: BoundingBox):
@@ -184,10 +269,10 @@ class TestRectangleDescription:
         )
         desc = describe_shape(shape)
         assert "green-filled" in desc
-        assert "black rectangle" in desc
+        assert "Fill: green" in desc
 
     def test_transparent_fill_rectangle(self, basic_bbox: BoundingBox):
-        """Test rectangle with transparent fill (should not mention fill)."""
+        """Test rectangle with transparent fill (should show outline)."""
         shape = ShapeMetadata(
             type="rectangle",
             strokeColor="#ff0000",
@@ -195,7 +280,7 @@ class TestRectangleDescription:
             boundingBox=basic_bbox,
         )
         desc = describe_shape(shape)
-        assert "filled" not in desc
+        assert "outline" in desc
 
 
 # =============================================================================
@@ -214,8 +299,8 @@ class TestEllipseDescription:
             boundingBox=square_bbox,
         )
         desc = describe_shape(shape)
-        assert "circle" in desc
-        assert "radius 50px" in desc
+        assert "CIRCLE #1" in desc
+        assert "Radius: 50px" in desc
         assert "(250, 250)" in desc  # Center
 
     def test_ellipse(self, basic_bbox: BoundingBox):
@@ -226,7 +311,7 @@ class TestEllipseDescription:
             boundingBox=basic_bbox,
         )
         desc = describe_shape(shape)
-        assert "ellipse" in desc
+        assert "ELLIPSE #1" in desc
         assert "150x100px" in desc
 
     def test_filled_circle(self, square_bbox: BoundingBox):
@@ -239,7 +324,8 @@ class TestEllipseDescription:
         )
         desc = describe_shape(shape)
         assert "yellow-filled" in desc
-        assert "circle" in desc
+        assert "CIRCLE" in desc
+        assert "Fill: yellow" in desc
 
 
 # =============================================================================
@@ -258,7 +344,7 @@ class TestDiamondDescription:
             boundingBox=basic_bbox,
         )
         desc = describe_shape(shape)
-        assert "diamond" in desc
+        assert "DIAMOND #1" in desc
         assert "(100, 200)" in desc
 
 
@@ -279,10 +365,9 @@ class TestFreedrawDescription:
             pointCount=42,
         )
         desc = describe_shape(shape)
-        assert "freehand drawing" in desc
-        assert "(42 points)" in desc
-        # Should show center, not top-left
-        assert "(175, 250)" in desc  # Center of bbox
+        assert "FREEDRAW #1" in desc
+        assert "sketch" in desc
+        assert "42 points" in desc
 
     def test_freedraw_without_point_count(self, basic_bbox: BoundingBox):
         """Test freedraw description without point count."""
@@ -292,7 +377,7 @@ class TestFreedrawDescription:
             boundingBox=basic_bbox,
         )
         desc = describe_shape(shape)
-        assert "freehand drawing" in desc
+        assert "FREEDRAW #1" in desc
         assert "points" not in desc
 
 
@@ -314,14 +399,14 @@ class TestTextDescription:
             fontSize=16,
         )
         desc = describe_shape(shape)
-        assert 'Text "Click here"' in desc
+        assert 'TEXT #1: "Click here"' in desc
         assert "(100, 200)" in desc
         assert "red" in desc
         assert "16px" in desc
 
-    def test_long_text_preserved(self, basic_bbox: BoundingBox):
-        """Test that long text is preserved without truncation."""
-        long_text = "This is a very long text annotation that contains important instructions for the AI"
+    def test_long_text_truncated(self, basic_bbox: BoundingBox):
+        """Test that very long text is truncated."""
+        long_text = "This is a very long text annotation that contains important instructions for the AI and should be truncated"
         shape = ShapeMetadata(
             type="text",
             strokeColor="#000000",
@@ -329,8 +414,8 @@ class TestTextDescription:
             textContent=long_text,
         )
         desc = describe_shape(shape)
-        assert long_text in desc
-        assert "..." not in desc
+        assert "..." in desc
+        assert len(desc) < len(long_text) + 100  # Reasonable length
 
     def test_empty_text(self, basic_bbox: BoundingBox):
         """Test text without content."""
@@ -369,8 +454,8 @@ class TestBuildShapesContext:
         ]
         context = build_shapes_context(shapes)
         assert "USER-DRAWN ANNOTATIONS" in context
-        assert "arrow" in context
-        assert "IMPORTANT" in context
+        assert "ARROW" in context
+        assert "INTERPRETATION GUIDE" in context
 
     def test_multiple_shapes(self, basic_bbox: BoundingBox, square_bbox: BoundingBox):
         """Test context with multiple shapes."""
@@ -396,13 +481,11 @@ class TestBuildShapesContext:
         ]
         context = build_shapes_context(shapes)
 
-        # All shapes should be listed
-        assert "arrow" in context
-        assert "rectangle" in context
+        # All shapes should be listed with numbering
+        assert "ARROW #1" in context
+        assert "RECTANGLE #2" in context
+        assert "TEXT #3" in context
         assert "Move here" in context
-
-        # Should have bullet points
-        assert context.count("- ") >= 3
 
     def test_context_includes_guidance(self, basic_bbox: BoundingBox):
         """Test that context includes interpretation guidance."""
@@ -414,6 +497,36 @@ class TestBuildShapesContext:
             )
         ]
         context = build_shapes_context(shapes)
-        assert "Arrows" in context
-        assert "Rectangles" in context
+        assert "ARROW:" in context
+        assert "POLYGON" in context
         assert "direction" in context.lower() or "movement" in context.lower()
+
+    def test_shapes_numbered_sequentially(self, basic_bbox: BoundingBox):
+        """Test that shapes are numbered 1, 2, 3, etc."""
+        shapes = [
+            ShapeMetadata(
+                type="line",
+                strokeColor="#ff0000",
+                boundingBox=basic_bbox,
+                startPoint=Point2D(x=0, y=0),
+                endPoint=Point2D(x=100, y=100),
+            ),
+            ShapeMetadata(
+                type="line",
+                strokeColor="#00ff00",
+                boundingBox=basic_bbox,
+                startPoint=Point2D(x=0, y=0),
+                endPoint=Point2D(x=100, y=100),
+            ),
+            ShapeMetadata(
+                type="line",
+                strokeColor="#0000ff",
+                boundingBox=basic_bbox,
+                startPoint=Point2D(x=0, y=0),
+                endPoint=Point2D(x=100, y=100),
+            ),
+        ]
+        context = build_shapes_context(shapes)
+        assert "LINE #1:" in context
+        assert "LINE #2:" in context
+        assert "LINE #3:" in context
