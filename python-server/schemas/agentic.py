@@ -114,6 +114,61 @@ class ReferencePoint(BaseModel):
 
 
 # =============================================================================
+# Shape Metadata Schema (for user-drawn annotations)
+# =============================================================================
+
+# Supported shape types for AI context
+SHAPE_TYPES = ("line", "arrow", "rectangle", "ellipse", "freedraw", "text", "diamond")
+"""Shape types that can be extracted from the canvas and sent to the AI."""
+
+ShapeType = Literal["line", "arrow", "rectangle", "ellipse", "freedraw", "text", "diamond"]
+"""Type alias for shape type literals."""
+
+
+class Point2D(BaseModel):
+    """A 2D point coordinate."""
+
+    x: float
+    y: float
+
+
+class BoundingBox(BaseModel):
+    """Bounding box for a shape."""
+
+    x: float = Field(..., description="Top-left X coordinate")
+    y: float = Field(..., description="Top-left Y coordinate")
+    width: float = Field(..., description="Width in pixels")
+    height: float = Field(..., description="Height in pixels")
+
+
+class ShapeMetadata(BaseModel):
+    """
+    Metadata for a user-drawn shape/annotation on the canvas.
+
+    Includes position, appearance, and type-specific properties.
+    """
+
+    type: ShapeType = Field(..., description="Shape type")
+    strokeColor: str = Field(..., description="Stroke color (e.g., '#ff0000')")
+    strokeWidth: float = Field(1, description="Stroke width in pixels")
+    backgroundColor: Optional[str] = Field(None, description="Fill color if any")
+    boundingBox: BoundingBox = Field(..., description="Bounding box of the shape")
+
+    # Line/Arrow specific
+    startPoint: Optional[Point2D] = Field(None, description="Start point for lines/arrows")
+    endPoint: Optional[Point2D] = Field(None, description="End point for lines/arrows")
+    hasStartArrowhead: Optional[bool] = Field(None, description="Whether line has start arrowhead")
+    hasEndArrowhead: Optional[bool] = Field(None, description="Whether line has end arrowhead")
+
+    # Text specific
+    textContent: Optional[str] = Field(None, description="Text content for text elements")
+    fontSize: Optional[float] = Field(None, description="Font size for text elements")
+
+    # Freedraw specific
+    pointCount: Optional[int] = Field(None, description="Number of points in freedraw path")
+
+
+# =============================================================================
 # Request/Response Schemas (matches TypeScript AgenticEditRequest/Response)
 # =============================================================================
 
@@ -138,6 +193,9 @@ class AgenticEditRequest(BaseModel):
     referencePoints: Optional[list[ReferencePoint]] = Field(
         None, description="Reference points placed on the image for spatial commands"
     )
+
+    # User-drawn shapes/annotations for context
+    shapes: Optional[list[ShapeMetadata]] = Field(None, description="User-drawn shapes and annotations on the canvas")
 
     # Maximum iterations for self-check loop
     maxIterations: Optional[int] = Field(3, ge=1, le=5, description="Maximum iterations (1-5, default 3)")

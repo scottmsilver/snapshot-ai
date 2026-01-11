@@ -22,14 +22,13 @@ from graphs.agentic_edit import (
     agentic_edit_graph,
     build_evaluation_prompt,
     build_planning_prompt,
-    planning_node,
     generate_node,
+    planning_node,
     self_check_node,
     should_continue,
 )
 from schemas.agentic import AIProgressEvent, IterationInfo
 from services.image_utils import decode_data_url, encode_data_url, get_mime_type
-
 
 # =============================================================================
 # Fixtures
@@ -287,9 +286,7 @@ class TestPlanningNode:
     async def test_planning_falls_back_on_error(self, basic_state: GraphState):
         """Test that planning falls back to user prompt on error."""
         mock_client = MagicMock()
-        mock_client.generate_with_thinking = AsyncMock(
-            side_effect=Exception("API Error")
-        )
+        mock_client.generate_with_thinking = AsyncMock(side_effect=Exception("API Error"))
 
         with patch("graphs.agentic_edit.get_gemini_client", return_value=mock_client):
             result = await planning_node(basic_state)
@@ -309,9 +306,7 @@ class TestGenerateNode:
         basic_state.refined_prompt = "Create a red button"
 
         mock_client = MagicMock()
-        mock_client.generate_image = AsyncMock(
-            return_value=GeminiImageResult(image_bytes=b"fake image data", text="")
-        )
+        mock_client.generate_image = AsyncMock(return_value=GeminiImageResult(image_bytes=b"fake image data", text=""))
 
         with patch("graphs.agentic_edit.get_gemini_client", return_value=mock_client):
             result = await generate_node(basic_state)
@@ -326,9 +321,7 @@ class TestGenerateNode:
         basic_state.refined_prompt = "Create a red button"
 
         mock_client = MagicMock()
-        mock_client.generate_image = AsyncMock(
-            side_effect=Exception("Generation failed")
-        )
+        mock_client.generate_image = AsyncMock(side_effect=Exception("Generation failed"))
 
         with patch("graphs.agentic_edit.get_gemini_client", return_value=mock_client):
             result = await generate_node(basic_state)
@@ -456,10 +449,7 @@ class TestWithManipulationCases:
             pytest.skip("No manipulation cases available")
 
         assert "source_image" in sample_manipulation_case
-        assert (
-            "command" in sample_manipulation_case
-            or "enriched_prompt" in sample_manipulation_case
-        )
+        assert "command" in sample_manipulation_case or "enriched_prompt" in sample_manipulation_case
         assert sample_manipulation_case["source_image"].startswith("data:image")
 
     @pytest.mark.asyncio
@@ -474,8 +464,7 @@ class TestWithManipulationCases:
 
         state = GraphState(
             source_image=sample_manipulation_case["source_image"],
-            user_prompt=sample_manipulation_case.get("enriched_prompt")
-            or sample_manipulation_case.get("command", ""),
+            user_prompt=sample_manipulation_case.get("enriched_prompt") or sample_manipulation_case.get("command", ""),
             max_iterations=2,
         )
 

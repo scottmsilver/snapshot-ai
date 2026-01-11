@@ -19,14 +19,18 @@ import logging
 import re
 from typing import Any, Literal
 
+import numpy as np
 from google.genai import types
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
+
 from schemas import AI_MODELS, MAX_ITERATIONS, THINKING_BUDGETS
-from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo, ReferencePoint
+from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo, ReferencePoint, ShapeMetadata
 from services.gemini_client import get_gemini_client
-from services.image_utils import encode_data_url, parse_data_url
+from services.image_compare import EditDetectionOptions, detect_edit_regions, format_edit_regions_for_prompt
+from services.image_utils import encode_data_url, image_bytes_to_array, parse_data_url
+from services.shape_descriptions import build_shapes_context
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,7 @@ class GraphState(BaseModel):
     mask_image: str | None = None
     user_prompt: str
     reference_points: list[ReferencePoint] = []
+    shapes: list[ShapeMetadata] = []
     max_iterations: int = MAX_ITERATIONS
 
     # Planning outputs
@@ -111,9 +116,9 @@ def build_reference_points_context(reference_points: list[ReferencePoint]) -> st
         points_desc.append(f"- **Point {point.label}** at pixel coordinates ({int(point.x)}, {int(point.y)})")
 
     return f"""
-## REFERENCE POINTS
+## USER-IDENTIFIED LOCATIONS
 
-The user has placed labeled reference markers on the image to indicate specific locations:
+The user has placed labeled pins on the image to identify specific locations:
 
 {chr(10).join(points_desc)}
 
@@ -130,7 +135,10 @@ Example translations:
 
 
 def build_planning_prompt(
-    user_prompt: str, has_mask: bool, reference_points: list[ReferencePoint] | None = None
+    user_prompt: str,
+    has_mask: bool,
+    reference_points: list[ReferencePoint] | None = None,
+    shapes: list[ShapeMetadata] | None = None,
 ) -> str:
     """Build the system prompt for the planning phase."""
     if has_mask:
@@ -170,12 +178,16 @@ CRITICAL INPAINTING GUIDELINES:
     # Build reference points context if provided
     ref_points_context = build_reference_points_context(reference_points or [])
 
+    # Build shapes context if provided
+    shapes_context = build_shapes_context(shapes or [])
+
     return f"""You are an expert image editing assistant working on a SCREENSHOT MODIFICATION task.
 
 USER'S REQUEST: "{user_prompt}"
 
 {mask_context}
 {ref_points_context}
+{shapes_context}
 Your goal is to create an edit that:
 1. Accomplishes exactly what the user wants
 2. FITS NATURALLY into the existing image - the modification should look like it belongs there
@@ -188,6 +200,7 @@ Think deeply about:
 - How should lighting, shadows, and style match the surroundings?
 - What would make someone looking at the final image NOT notice it was edited?
 {f"- Look at the reference points and identify what elements are at those coordinates" if reference_points else ""}
+{f"- Consider the user's annotations (shapes, arrows, text) as visual guidance for what they want" if shapes else ""}
 
 You have one powerful tool: gemini_image_painter, which uses Gemini 3 Pro to edit images.
 
@@ -197,30 +210,105 @@ Call gemini_image_painter with a detailed prompt that achieves the goal while en
 You MUST call the gemini_image_painter tool."""
 
 
-def build_evaluation_prompt(user_prompt: str, edit_prompt: str) -> str:
+def build_evaluation_prompt(
+    user_prompt: str,
+    edit_prompt: str,
+    has_mask: bool = False,
+    edit_regions_text: str | None = None,
+    shapes: list[ShapeMetadata] | None = None,
+) -> str:
     """Build the prompt for self-check evaluation."""
-    return f"""Evaluate whether this image edit meets the user's request.
+    mask_context = (
+        "You will also see a MASK IMAGE showing which area the user selected for editing (white = selected area)."
+        if has_mask
+        else "The user wanted to edit the entire image (no specific area selected)."
+    )
 
-**User's request:** "{user_prompt}"
-**Edit prompt used:** "{edit_prompt}"
+    # Build shapes context for evaluator
+    shapes_context = build_shapes_context(shapes or [])
 
-You will see the original image (BEFORE) and edited result (AFTER).
+    mask_quality_point = (
+        "- Was the edit applied to the correct area (as shown by the white region in the mask)?" if has_mask else ""
+    )
 
-Evaluate:
-1. Does the edit match the user's request?
-2. Is the edit visible and significant enough?
-3. Does it look natural and coherent?
-4. Are there quality issues or artifacts?
+    # Build the automatically detected changes section
+    if edit_regions_text:
+        detected_changes_section = f"""## Automatically Detected Changes
 
-Respond with JSON in this exact format:
+The following regions were detected as changed by comparing the original and result images pixel-by-pixel:
 
+{edit_regions_text}
+
+Use this information to verify the edit was applied to the CORRECT location.
+
+"""
+    else:
+        detected_changes_section = ""
+
+    return f"""You are reviewing an image edit to determine if it successfully accomplished the user's goal.
+
+ORIGINAL USER REQUEST: "{user_prompt}"
+
+EDIT THAT WAS ATTEMPTED: "{edit_prompt}"
+
+{mask_context}
+{shapes_context}
+{detected_changes_section}## Evaluation Criteria
+
+### 1. Location Accuracy
+Think carefully: WHERE did the user want changes to happen?
+- Compare the DETECTED EDIT LOCATIONS above with where the edit SHOULD have been applied
+- If the edit prompt contains COORDINATES (e.g., "at (150, 200)", "move to (300, 400)"), verify the detected regions are at or near those pixel locations
+- If the user referenced specific elements (e.g., "the button", "the header", "the red car"), verify the detected changes are in the region of THAT element
+- If a mask was provided, verify the detected changes are within the masked area
+
+### 2. Unintended Substantial Changes (CRITICAL)
+CAREFULLY examine the detected edit regions. Are there SUBSTANTIAL changes OUTSIDE the intended edit area?
+- If the user wanted to edit region X, but regions Y and Z also changed significantly, that's a PROBLEM
+- Look for large changes on the edges of the image, far from the target area, or in unrelated parts
+- Focus on substantial changes - major artifacts, missing elements, structural distortions, large color shifts
+- Ignore minor pixel-level noise or subtle compression artifacts - only flag changes that are visually noticeable
+
+**If there are substantial unintended changes outside the target area (high significance score, large region, or visually obvious), the edit should be marked as UNSATISFACTORY and revised with a prompt that explicitly instructs the model to preserve unchanged areas.**
+
+### 3. Cardinality Check
+Think carefully: Did the user's request imply ADDING, REMOVING, or REPLACING elements?
+- **REPLACE/MODIFY**: "Change X to Y", "Make X look like Y", "Update the color" → The COUNT of elements should stay the SAME
+- **ADD**: "Add a button", "Put text here", "Insert an icon" → There should be MORE elements than before
+- **REMOVE/DELETE**: "Remove the logo", "Delete the text", "Clear this area" → There should be FEWER elements than before
+
+Does the result match the expected cardinality? If the user said "remove" but the element is still there (or replaced with something else), that's wrong.
+
+### 4. Visual Quality
+{mask_quality_point}
+- Does the edited area look NATURAL and FIT SEAMLESSLY into the image?
+- Is the edit clearly visible and significant enough?
+- Does it match the style, lighting, and aesthetic of the surroundings?
+
+## Your Response
+
+Think through each criterion carefully, then provide your evaluation as a JSON object in a code fence.
+
+If the edit is SATISFACTORY:
 ```json
 {{
-  "satisfied": true or false,
-  "reasoning": "explanation",
-  "revised_prompt": "improved prompt if not satisfied"
+  "satisfied": true,
+  "reasoning": "Explain why the edit meets all criteria: location accuracy, no substantial unintended changes, cardinality, and visual quality."
 }}
-```"""
+```
+
+If the edit NEEDS REVISION:
+```json
+{{
+  "satisfied": false,
+  "reasoning": "Explain what is wrong - which criteria failed and why. Be specific about any substantial unintended changes detected.",
+  "revised_prompt": "A better, more specific prompt that addresses the issues. If there were unintended changes, add explicit instructions like 'DO NOT modify any other part of the image' or 'Preserve all areas outside of [target region]'."
+}}
+```
+
+Be thoughtful - only flag substantial unintended changes that are visually noticeable, not minor noise.
+
+IMPORTANT: You MUST output exactly one JSON code block with your evaluation."""
 
 
 # =============================================================================
@@ -267,8 +355,10 @@ async def planning_node(state: GraphState) -> dict[str, Any]:
     logger.info("Planning: Starting...")
     if state.reference_points:
         logger.info("Planning: %d reference points provided", len(state.reference_points))
+    if state.shapes:
+        logger.info("Planning: %d shapes/annotations provided", len(state.shapes))
 
-    prompt = build_planning_prompt(state.user_prompt, bool(state.mask_image), state.reference_points)
+    prompt = build_planning_prompt(state.user_prompt, bool(state.mask_image), state.reference_points, state.shapes)
     iteration_info = IterationInfo(current=0, max=state.max_iterations)
 
     # Decode images with labels for transparency logging
@@ -437,9 +527,90 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
         }
 
     try:
-        prompt = build_evaluation_prompt(state.user_prompt, state.refined_prompt)
         source = parse_data_url(state.source_image)
         result = parse_data_url(state.current_result)
+
+        # Detect edit regions by comparing original and result images
+        edit_regions_text = None
+        try:
+            logger.info("Self-check: Starting image comparison...")
+            source_array = image_bytes_to_array(source.data)
+            result_array = image_bytes_to_array(result.data)
+            logger.info(
+                "Self-check: Image arrays created - source: %s, result: %s",
+                source_array.shape,
+                result_array.shape,
+            )
+
+            # Use block-based comparison with same settings as old TS implementation
+            # Note: detect_edit_regions handles dimension mismatches by resizing
+            edit_result = detect_edit_regions(
+                source_array,
+                result_array,
+                EditDetectionOptions(
+                    use_block_comparison=True,
+                    block_size=8,
+                    min_block_density=0.25,
+                    min_block_count=2,
+                    color_threshold=12.0,
+                ),
+            )
+
+            logger.info(
+                "Self-check: Raw detection found %d regions, %d total pixels changed (%.1f%%)",
+                len(edit_result.regions),
+                edit_result.total_changed_pixels,
+                edit_result.percent_changed,
+            )
+
+            # Log all regions before filtering for debugging
+            for i, r in enumerate(edit_result.regions[:5]):  # Show first 5
+                logger.info(
+                    "Self-check: Region %d: (%d,%d) %dx%d, significance=%d, pixels=%d",
+                    i + 1,
+                    r.x,
+                    r.y,
+                    r.width,
+                    r.height,
+                    r.significance,
+                    r.pixel_count,
+                )
+
+            # Filter to significant regions (significance >= 70)
+            # Higher threshold to focus on the most significant edits
+            MIN_SIGNIFICANCE_THRESHOLD = 70
+            significant_regions = [r for r in edit_result.regions if r.significance >= MIN_SIGNIFICANCE_THRESHOLD]
+
+            if significant_regions:
+                # Create filtered result for formatting
+                from dataclasses import replace
+
+                filtered_result = replace(edit_result, regions=significant_regions)
+                edit_regions_text = format_edit_regions_for_prompt(filtered_result)
+
+                logger.info(
+                    "Self-check: %d significant regions passed threshold (>=%d)",
+                    len(significant_regions),
+                    MIN_SIGNIFICANCE_THRESHOLD,
+                )
+            else:
+                logger.info(
+                    "Self-check: No regions passed significance threshold (%d). " "Max significance was %d",
+                    MIN_SIGNIFICANCE_THRESHOLD,
+                    max((r.significance for r in edit_result.regions), default=0),
+                )
+
+        except Exception as e:
+            logger.exception("Self-check: Failed to detect edit regions: %s", e)
+            # Continue without edit regions - the AI can still evaluate visually
+
+        prompt = build_evaluation_prompt(
+            state.user_prompt,
+            state.refined_prompt,
+            has_mask=bool(state.mask_image),
+            edit_regions_text=edit_regions_text,
+            shapes=state.shapes,
+        )
 
         client = get_gemini_client()
 

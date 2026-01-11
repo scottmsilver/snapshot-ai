@@ -1,8 +1,15 @@
 """Image utility functions for data URL handling."""
 
+from __future__ import annotations
+
 import base64
+import io
 import re
 from typing import NamedTuple
+
+import numpy as np
+from numpy.typing import NDArray
+from PIL import Image
 
 
 class DataURL(NamedTuple):
@@ -102,3 +109,29 @@ def parse_data_url(data_url: str) -> DataURL:
         mime_type=get_mime_type(data_url),
         data=decode_data_url(data_url),
     )
+
+
+def image_bytes_to_array(data: bytes) -> NDArray[np.uint8]:
+    """
+    Convert image bytes to a numpy array.
+
+    Args:
+        data: Raw image bytes (PNG, JPEG, etc.)
+
+    Returns:
+        Numpy array of shape (H, W, 3) with RGB values.
+        Alpha channel is discarded if present.
+
+    Examples:
+        >>> # Assuming valid PNG bytes
+        >>> arr = image_bytes_to_array(png_bytes)
+        >>> arr.shape
+        (100, 100, 3)
+    """
+    img = Image.open(io.BytesIO(data))
+
+    # Convert to RGB if necessary (handles RGBA, grayscale, palette, etc.)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    return np.array(img, dtype=np.uint8)
