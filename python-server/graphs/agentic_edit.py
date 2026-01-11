@@ -28,7 +28,11 @@ from pydantic import BaseModel
 from schemas import AI_MODELS, MAX_ITERATIONS, THINKING_BUDGETS
 from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo, ReferencePoint, ShapeMetadata
 from services.gemini_client import get_gemini_client
-from services.image_compare import EditDetectionOptions, detect_edit_regions, format_edit_regions_for_prompt
+from services.image_compare_lpips import (
+    LPIPSDetectionOptions,
+    detect_edit_regions_lpips,
+    format_edit_regions_for_prompt,
+)
 from services.image_utils import encode_data_url, image_bytes_to_array, parse_data_url
 from services.shape_descriptions import build_shapes_context
 
@@ -215,6 +219,7 @@ def build_evaluation_prompt(
     edit_prompt: str,
     has_mask: bool = False,
     edit_regions_text: str | None = None,
+    reference_points: list[ReferencePoint] | None = None,
     shapes: list[ShapeMetadata] | None = None,
 ) -> str:
     """Build the prompt for self-check evaluation."""
@@ -223,6 +228,9 @@ def build_evaluation_prompt(
         if has_mask
         else "The user wanted to edit the entire image (no specific area selected)."
     )
+
+    # Build reference points context for evaluator
+    ref_points_context = build_reference_points_context(reference_points or [])
 
     # Build shapes context for evaluator
     shapes_context = build_shapes_context(shapes or [])
@@ -252,6 +260,7 @@ ORIGINAL USER REQUEST: "{user_prompt}"
 EDIT THAT WAS ATTEMPTED: "{edit_prompt}"
 
 {mask_context}
+{ref_points_context}
 {shapes_context}
 {detected_changes_section}## Evaluation Criteria
 
@@ -530,10 +539,11 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
         source = parse_data_url(state.source_image)
         result = parse_data_url(state.current_result)
 
-        # Detect edit regions by comparing original and result images
+        # Detect edit regions by comparing original and result images using LPIPS
+        # LPIPS (Learned Perceptual Image Patch Similarity) is robust to diffusion noise
         edit_regions_text = None
         try:
-            logger.info("Self-check: Starting image comparison...")
+            logger.info("Self-check: Starting LPIPS image comparison...")
             source_array = image_bytes_to_array(source.data)
             result_array = image_bytes_to_array(result.data)
             logger.info(
@@ -542,63 +552,45 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
                 result_array.shape,
             )
 
-            # Use block-based comparison with same settings as old TS implementation
-            # Note: detect_edit_regions handles dimension mismatches by resizing
-            edit_result = detect_edit_regions(
+            # Use LPIPS-based detection (handles diffusion noise better than Delta E)
+            edit_result = detect_edit_regions_lpips(
                 source_array,
                 result_array,
-                EditDetectionOptions(
-                    use_block_comparison=True,
-                    block_size=8,
-                    min_block_density=0.25,
-                    min_block_count=2,
-                    color_threshold=12.0,
+                LPIPSDetectionOptions(
+                    threshold=0.1,  # LPIPS threshold (0-1)
+                    min_area=100,  # Minimum contour area
+                    patch_size=64,  # Patch size for LPIPS
+                    stride=32,  # Stride between patches
                 ),
             )
 
             logger.info(
-                "Self-check: Raw detection found %d regions, %d total pixels changed (%.1f%%)",
+                "Self-check: LPIPS detection found %d regions, %d total pixels changed (%.1f%%)",
                 len(edit_result.regions),
-                edit_result.total_changed_pixels,
+                edit_result.total_changed_area,
                 edit_result.percent_changed,
             )
 
-            # Log all regions before filtering for debugging
+            # Log detected regions for debugging
             for i, r in enumerate(edit_result.regions[:5]):  # Show first 5
+                x, y, w, h = r.bounding_box
                 logger.info(
-                    "Self-check: Region %d: (%d,%d) %dx%d, significance=%d, pixels=%d",
+                    "Self-check: Region %d: center=(%d,%d) bbox=(%d,%d,%d,%d) area=%d significance=%.1f",
                     i + 1,
-                    r.x,
-                    r.y,
-                    r.width,
-                    r.height,
+                    r.center[0],
+                    r.center[1],
+                    x,
+                    y,
+                    w,
+                    h,
+                    r.area,
                     r.significance,
-                    r.pixel_count,
                 )
 
-            # Filter to significant regions (significance >= 70)
-            # Higher threshold to focus on the most significant edits
-            MIN_SIGNIFICANCE_THRESHOLD = 70
-            significant_regions = [r for r in edit_result.regions if r.significance >= MIN_SIGNIFICANCE_THRESHOLD]
-
-            if significant_regions:
-                # Create filtered result for formatting
-                from dataclasses import replace
-
-                filtered_result = replace(edit_result, regions=significant_regions)
-                edit_regions_text = format_edit_regions_for_prompt(filtered_result)
-
-                logger.info(
-                    "Self-check: %d significant regions passed threshold (>=%d)",
-                    len(significant_regions),
-                    MIN_SIGNIFICANCE_THRESHOLD,
-                )
+            if edit_result.regions:
+                edit_regions_text = format_edit_regions_for_prompt(edit_result)
             else:
-                logger.info(
-                    "Self-check: No regions passed significance threshold (%d). " "Max significance was %d",
-                    MIN_SIGNIFICANCE_THRESHOLD,
-                    max((r.significance for r in edit_result.regions), default=0),
-                )
+                logger.info("Self-check: No significant edit regions detected by LPIPS")
 
         except Exception as e:
             logger.exception("Self-check: Failed to detect edit regions: %s", e)
@@ -609,6 +601,7 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
             state.refined_prompt,
             has_mask=bool(state.mask_image),
             edit_regions_text=edit_regions_text,
+            reference_points=state.reference_points,
             shapes=state.shapes,
         )
 
