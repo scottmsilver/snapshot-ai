@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from graphs.agentic_edit import GraphState, agentic_edit_graph
@@ -51,6 +51,7 @@ from schemas import (
 )
 from schemas.agentic import IterationInfo
 from schemas.config import AI_MODELS, THINKING_BUDGETS
+from starlette.middleware.base import BaseHTTPMiddleware
 from utils.ai_logging import extract_base64_data, extract_mime_type, log_contents_images, log_image_inputs
 from utils.sse import format_complete_event, format_error_event, format_progress_event, format_sse_event
 
@@ -168,6 +169,72 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# =============================================================================
+# Cloudflare Secret Header Middleware
+# =============================================================================
+
+# Secret header for Cloudflare Access protection
+# Set CF_ACCESS_SECRET env var in production, leave empty to disable
+_cf_access_secret = os.getenv("CF_ACCESS_SECRET", "")
+
+
+class CloudflareAccessMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to verify requests come through Cloudflare.
+
+    When CF_ACCESS_SECRET is set, all requests must include the
+    X-Proxy-Secret header with the matching value.
+
+    Exceptions:
+    - /health endpoint (for Fly.io health checks)
+    - OPTIONS requests (CORS preflight - handled by CORSMiddleware)
+    - When CF_ACCESS_SECRET is not set (disabled)
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip if not configured (development mode)
+        if not _cf_access_secret:
+            return await call_next(request)
+
+        # Allow health checks without auth (for Fly.io)
+        if request.url.path == "/health":
+            return await call_next(request)
+
+        # Allow OPTIONS requests (CORS preflight) - they don't include custom headers
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        # Verify the secret header
+        provided_secret = request.headers.get("X-Proxy-Secret", "")
+
+        # Debug: log all headers that start with x-
+        x_headers = {k: v for k, v in request.headers.items() if k.lower().startswith("x-")}
+        logger.info("X-* headers received: %s", x_headers)
+        logger.info("Looking for secret starting with: %s...", _cf_access_secret[:8] if _cf_access_secret else "None")
+        logger.info("Got secret starting with: %s...", provided_secret[:8] if provided_secret else "None")
+
+        if provided_secret != _cf_access_secret:
+            logger.warning(
+                "Blocked request without valid CF_ACCESS_SECRET: %s %s",
+                request.method,
+                request.url.path,
+            )
+            return Response(
+                content="Forbidden: Invalid or missing access token",
+                status_code=403,
+            )
+
+        return await call_next(request)
+
+
+# Add Cloudflare middleware (runs after CORS)
+if _cf_access_secret:
+    app.add_middleware(CloudflareAccessMiddleware)
+    logger.info("Cloudflare Access protection enabled")
+else:
+    logger.info("Cloudflare Access protection disabled (no CF_ACCESS_SECRET)")
 
 
 # =============================================================================
