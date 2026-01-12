@@ -15,6 +15,7 @@ Design Principles:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, Literal
@@ -24,6 +25,7 @@ from google.genai import types
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel
+
 from schemas import AI_MODELS, MAX_ITERATIONS, THINKING_BUDGETS
 from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo, ReferencePoint, ShapeMetadata
 from services.gemini_client import get_gemini_client
@@ -606,15 +608,18 @@ async def self_check_node(state: GraphState) -> dict[str, Any]:
             )
 
             # Use LPIPS-based detection (handles diffusion noise better than Delta E)
-            edit_result = detect_edit_regions_lpips(
+            # Run in thread pool to avoid blocking health checks during computation
+            lpips_options = LPIPSDetectionOptions(
+                threshold=0.1,  # LPIPS threshold (0-1)
+                min_area=100,  # Minimum contour area
+                patch_size=64,  # Patch size for LPIPS
+                stride=32,  # Stride between patches
+            )
+            edit_result = await asyncio.to_thread(
+                detect_edit_regions_lpips,
                 source_array,
                 result_array,
-                LPIPSDetectionOptions(
-                    threshold=0.1,  # LPIPS threshold (0-1)
-                    min_area=100,  # Minimum contour area
-                    patch_size=64,  # Patch size for LPIPS
-                    stride=32,  # Stride between patches
-                ),
+                lpips_options,
             )
 
             logger.info(

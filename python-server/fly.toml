@@ -19,8 +19,15 @@ primary_region = 'ord'
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ['app']
+
+  # Health check with extended grace period for LPIPS model loading (~2 min startup)
+  [[http_service.checks]]
+    grace_period = "180s"
+    interval = "30s"
+    timeout = "10s"
+    path = "/health"
 
 [[vm]]
   memory = '2gb'

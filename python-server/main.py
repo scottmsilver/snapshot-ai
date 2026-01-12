@@ -35,8 +35,10 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from graphs.agentic_edit import GraphState, agentic_edit_graph
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from graphs.agentic_edit import GraphState, agentic_edit_graph
 from schemas import (
     AgenticEditRequest,
     AgenticEditResponse,
@@ -51,7 +53,6 @@ from schemas import (
 )
 from schemas.agentic import IterationInfo
 from schemas.config import AI_MODELS, THINKING_BUDGETS
-from starlette.middleware.base import BaseHTTPMiddleware
 from utils.ai_logging import extract_base64_data, extract_mime_type, log_contents_images, log_image_inputs
 from utils.sse import format_complete_event, format_error_event, format_progress_event, format_sse_event
 
@@ -83,9 +84,11 @@ def create_sse_response(
         event_generator,
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
+            "X-Accel-Buffering": "no",  # Disable nginx/proxy buffering
+            "X-Content-Type-Options": "nosniff",
+            "Content-Encoding": "identity",  # Prevent compression that breaks SSE
         },
     )
 
@@ -1036,12 +1039,14 @@ async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> St
                     final_state = data
 
             # Send completion
+            logger.info("Agentic edit: Graph loop completed, preparing completion")
             if final_state:
                 image = final_state.get("current_result") or final_state.get("source_image")
                 prompt = final_state.get("refined_prompt") or final_state.get("user_prompt", "")
                 iterations = final_state.get("current_iteration", 1)
 
                 if image:
+                    logger.info("Agentic edit: Sending completion with image (%d chars)", len(image))
                     yield format_progress_event(
                         AIProgressEvent(
                             step="complete",
@@ -1059,12 +1064,15 @@ async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> St
                             finalPrompt=prompt,
                         )
                     )
+                    logger.info("Agentic edit: Completion events sent")
                 else:
+                    logger.warning("Agentic edit: No image in final state")
                     yield format_error_event(
                         "No image generated",
                         "The workflow completed but did not produce an image",
                     )
             else:
+                logger.warning("Agentic edit: No final_state from graph")
                 yield format_error_event(
                     "No result from workflow",
                     "The graph did not return a final state",

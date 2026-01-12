@@ -24,20 +24,37 @@ from scipy.interpolate import griddata
 
 logger = logging.getLogger(__name__)
 
-# Lazy import torch/lpips to avoid slow startup
+# Lazy-loaded LPIPS model and torch module
+# These are loaded on first use to avoid blocking startup
 _lpips_model = None
+_torch = None
 
 
 def _get_lpips_model():
-    """Lazy-load the LPIPS model."""
-    global _lpips_model
-    if _lpips_model is None:
-        import lpips
+    """
+    Get the LPIPS model, loading it lazily on first use.
 
-        # Use AlexNet for speed (VGG is more accurate but slower)
+    The model is loaded in thread pool via asyncio.to_thread() in agentic_edit.py,
+    so this blocking load won't affect the event loop or health checks.
+    """
+    global _lpips_model, _torch
+    if _lpips_model is None:
+        logger.info("Loading LPIPS model (AlexNet backend)...")
+        import lpips
+        import torch
+
+        _torch = torch
         _lpips_model = lpips.LPIPS(net="alex", verbose=False)
-        logger.info("LPIPS model loaded (AlexNet backend)")
+        logger.info("LPIPS model loaded successfully")
     return _lpips_model
+
+
+def _get_torch():
+    """Get the torch module, ensuring it's loaded."""
+    global _torch
+    if _torch is None:
+        _get_lpips_model()  # This loads both
+    return _torch
 
 
 @dataclass
@@ -100,8 +117,6 @@ def compute_lpips_heatmap(
     Returns:
         Heatmap of shape (H, W) with LPIPS scores (0 = identical, higher = more different)
     """
-    import torch
-
     H, W = original.shape[:2]
 
     # LPIPS (AlexNet) requires minimum patch size of 64x64 due to pooling layers
@@ -122,6 +137,7 @@ def compute_lpips_heatmap(
         return np.zeros((H, W), dtype=np.float32)
 
     loss_fn = _get_lpips_model()
+    torch = _get_torch()
 
     # Convert to torch tensors in [-1, 1] range
     # LPIPS expects (N, C, H, W) format

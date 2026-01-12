@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download LPIPS AlexNet model weights during build
+# This prevents a ~90 second download delay on first API request
+RUN python -c "import lpips; lpips.LPIPS(net='alex')"
+
 # Copy application code
 COPY . .
 
