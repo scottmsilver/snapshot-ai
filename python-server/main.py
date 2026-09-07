@@ -15,6 +15,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -54,6 +55,7 @@ from schemas import (
 from schemas.agentic import IterationInfo
 from schemas.config import AI_MODELS, THINKING_BUDGETS
 from utils.ai_logging import extract_base64_data, extract_mime_type, log_contents_images, log_image_inputs
+from utils.session_images import SessionImageLog
 from utils.sse import format_complete_event, format_error_event, format_progress_event, format_sse_event
 
 # Load environment variables
@@ -979,7 +981,9 @@ async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> St
 
     async def generate_events():
         """Async generator yielding SSE events."""
+        session = await asyncio.to_thread(SessionImageLog)
         try:
+            await asyncio.to_thread(session.record, "request", request.model_dump())
             # Convert reference points from request to schema format
             from schemas.agentic import ReferencePoint
 
@@ -1034,8 +1038,10 @@ async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> St
                 stream_mode=["custom", "values"],
             ):
                 if mode == "custom":
+                    await asyncio.to_thread(session.record, "progress", data)
                     yield format_sse_event("progress", data)
                 elif mode == "values":
+                    await asyncio.to_thread(session.record, "state", data)
                     final_state = data
 
             # Send completion
@@ -1046,6 +1052,7 @@ async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> St
                 iterations = final_state.get("current_iteration", 1)
 
                 if image:
+                    await asyncio.to_thread(session.record, "complete", {"imageData": image, "finalPrompt": prompt, "iterations": iterations})
                     logger.info("Agentic edit: Sending completion with image (%d chars)", len(image))
                     yield format_progress_event(
                         AIProgressEvent(
@@ -1079,8 +1086,11 @@ async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> St
                 )
 
         except Exception as e:
+            await asyncio.to_thread(session.record, "error", {"message": str(e)})
             logger.exception("Agentic edit error: %s", e)
             yield format_error_event(str(e), traceback.format_exc())
+        finally:
+            await asyncio.to_thread(session.record, "closed", {})
 
     return create_sse_response(generate_events())
 
