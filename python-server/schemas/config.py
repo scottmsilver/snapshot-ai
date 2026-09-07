@@ -19,13 +19,13 @@ from typing import Final
 
 AI_MODELS: Final[dict[str, str]] = {
     # Text reasoning and planning (optimized for speed)
-    "PLANNING": "gemini-3-flash-preview",
+    "PLANNING": "gemini-3.8-flash",
     # Image generation and editing
-    "IMAGE_GENERATION": "gemini-3-pro-image-preview",
+    "IMAGE_GENERATION": "gemini-3.1-flash-image",
     # Complex reasoning without image output
     "PRO": "gemini-3-pro-preview",
     # Quick tasks (element identification, simple checks)
-    "FAST": "gemini-3-flash-preview",
+    "FAST": "gemini-3.8-flash",
 }
 
 # =============================================================================
