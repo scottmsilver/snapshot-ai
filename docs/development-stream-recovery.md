@@ -21,7 +21,7 @@ Newer UI commits absent from the old recorded pin:
 - `f3f5845a`: polygon capture and selection overlay
 - `502eef18`: accept results while additional options generate
 
-## Selective restoration
+## Restoration
 
 Callout restoration is isolated in `/home/ssilver/development/snapshot-ai-callout`,
 branch `integration/callout-20260907`, based on `af96289d` (the deployed marker fix).
@@ -31,6 +31,16 @@ silently dropped saved callouts during reload/import.
 The restoration also adds missing SVG rendering and expands export bounds to
 include curved tails and arrowheads. Regression tests cover these failures.
 
+The user subsequently requested restoration of the entire newer fork stream.
+Branch `integration/restore-fork-stream-20260907` in that same isolated worktree
+merges fork master `502eef18` into the callout-fix commit `40734565`, retaining
+the marker export and callout fixes. This restores all eleven commits listed
+above, including their capture tests and dependency/build changes.
+Review also identified two pre-existing bugs in that stream: mutable element
+references corrupted AI undo history, and late callbacks from a directly started
+edit could repopulate results after early acceptance. Restoration uses cloned
+snapshots and request-generation guards, with regression coverage for both.
+
 The independent upstream integration candidate remains in
 `/home/ssilver/development/snapshot-ai-upstream-review`; it is not part of this
-selective restoration. The remaining newer fork features have not been promoted.
+fork restoration. It still requires its own integration and verification.
