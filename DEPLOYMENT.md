@@ -42,7 +42,7 @@ Your API is now at: `https://screenmark-api.fly.dev`
 ## Step 2: Deploy Frontend
 
 ```bash
-cd excalidraw-ui/excalidraw-app
+cd excalidraw-ui
 
 # Edit fly.toml to set your API URL
 # Change: VITE_API_BASE_URL = ""
@@ -52,7 +52,7 @@ cd excalidraw-ui/excalidraw-app
 fly launch --name screenmark-app --region ord
 
 # Deploy
-fly deploy
+fly deploy --build-arg VITE_APP_GIT_SHA="$(git rev-parse --short HEAD)"
 ```
 
 Your app is now at: `https://screenmark-app.fly.dev`
@@ -108,13 +108,13 @@ This prevents direct access to `*.fly.dev` URLs.
 Redeploy frontend with your custom domain:
 
 ```bash
-cd excalidraw-ui/excalidraw-app
+cd excalidraw-ui
 
 # Edit fly.toml
 # Change: VITE_API_BASE_URL = "https://screenmark-api.fly.dev"
 # To:     VITE_API_BASE_URL = "https://api.yourdomain.com"
 
-fly deploy
+fly deploy --build-arg VITE_APP_GIT_SHA="$(git rev-parse --short HEAD)"
 ```
 
 ## Environment Variables

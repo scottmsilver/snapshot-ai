@@ -73,7 +73,7 @@ The setup wizard will:
 - ✅ Check system requirements
 - ✅ Find or create Google OAuth credentials
 - ✅ Set up environment files automatically
-- ✅ Optionally deploy to Vercel
+- ✅ See [Fly.io deployment instructions](DEPLOYMENT.md) for production
 
 ### Manual Setup
 
@@ -155,7 +155,7 @@ If not using the setup wizard:
    - `http://localhost:5173`
    - `http://localhost:5174`
    - `http://localhost:4173`
-   - Your production URL (e.g., `https://your-app.vercel.app`)
+   - Your production URL (for this deployment, `https://app.oursilverfamily.com`)
 6. Add the same URLs as authorized redirect URIs
 7. Create an API key for Google services
 
