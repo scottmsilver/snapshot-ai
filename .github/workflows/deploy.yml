@@ -12,28 +12,34 @@ env:
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
-    
+    defaults:
+      run:
+        working-directory: excalidraw-ui
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: 'yarn'
+          cache-dependency-path: excalidraw-ui/yarn.lock
 
       - name: Install dependencies
-        run: npm ci
+        run: yarn install --frozen-lockfile
 
       - name: Run linter
-        run: npm run lint
+        run: yarn test:code
 
       - name: Run tests
-        run: npm test
+        run: yarn test:app --run
 
       - name: Build application
-        run: npm run build
+        run: yarn build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
           VITE_GOOGLE_API_KEY: ${{ secrets.VITE_GOOGLE_API_KEY }}
@@ -42,7 +48,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-files
-          path: dist/
+          path: excalidraw-ui/excalidraw-app/build/
           retention-days: 1
 
   deploy-vercel:
@@ -53,12 +59,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: build-files
-          path: dist/
+          path: excalidraw-ui/excalidraw-app/build/
 
       - name: Deploy to Vercel
         uses: amondnet/vercel-action@v25
@@ -67,4 +75,4 @@ jobs:
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           vercel-args: '--prod'
-          working-directory: ./
+          working-directory: ./excalidraw-ui
