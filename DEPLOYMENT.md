@@ -124,6 +124,7 @@ fly deploy --build-arg VITE_APP_GIT_SHA="$(git rev-parse --short HEAD)"
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GEMINI_API_KEY` | Yes | Google Gemini API key |
+| `OPENAI_API_KEY` | For OpenAI image edits | Server-side OpenAI API key; install with `fly secrets set OPENAI_API_KEY=... -a screenmark-api` |
 | `CF_ACCESS_SECRET` | No | Secret for Cloudflare header validation |
 | `ALLOWED_ORIGINS` | No | CORS origins (default: localhost) |
 

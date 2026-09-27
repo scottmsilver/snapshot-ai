@@ -28,6 +28,8 @@ AI_MODELS: Final[dict[str, str]] = {
     "FAST": "gemini-3.8-flash",
 }
 
+OPENAI_IMAGE_MODEL: Final[str] = "gpt-image-2.5-sunburst"
+
 # =============================================================================
 # Thinking Budget Configuration
 # =============================================================================

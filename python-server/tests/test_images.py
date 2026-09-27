@@ -27,6 +27,52 @@ def client():
 class TestGenerateImageEndpoint:
     """Tests for POST /api/images/generate."""
 
+    def test_openai_selected_provider(self, client, monkeypatch):
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        with patch("main.edit_openai_image", new_callable=AsyncMock, create=True) as edit:
+            edit.return_value = b"generated png"
+            response = client.post("/api/images/generate", json={
+                "model": "ignored-gemini-model", "imageProvider": "openai",
+                "sourceImage": VALID_BASE64_IMAGE, "prompt": "Make the sky blue",
+            })
+        assert response.status_code == 200
+        assert response.json()["imageData"].startswith("data:image/png;base64,")
+        edit.assert_awaited_once()
+        assert edit.await_args.kwargs["source_image"][0].startswith(b"\x89PNG")
+
+    def test_openai_api_error_is_shaped(self, client, monkeypatch):
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        with patch("main.edit_openai_image", new_callable=AsyncMock) as edit:
+            edit.side_effect = RuntimeError("OpenAI rate limit")
+            response = client.post("/api/ai/generate-image", json={
+                "model": "ignored", "imageProvider": "openai",
+                "sourceImage": VALID_BASE64_IMAGE, "prompt": "Edit this",
+            })
+        assert response.status_code == 502
+        assert "OpenAI rate limit" in response.json()["detail"]
+
+    def test_invalid_provider_rejected(self, client):
+        response = client.post("/api/images/generate", json={
+            "model": "gemini", "imageProvider": "unknown",
+            "sourceImage": VALID_BASE64_IMAGE, "prompt": "Make the sky blue",
+        })
+        assert response.status_code == 422
+
+    def test_openai_missing_key_reports_configuration(self, client, monkeypatch):
+        from services.openai_image_client import MissingOpenAIKeyError
+
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        with patch("main.edit_openai_image", new_callable=AsyncMock) as edit:
+            edit.side_effect = MissingOpenAIKeyError("OPENAI_API_KEY is not configured")
+            response = client.post("/api/images/generate", json={
+                "model": "ignored", "imageProvider": "openai",
+                "sourceImage": VALID_BASE64_IMAGE, "prompt": "Edit this",
+            })
+        assert response.status_code == 503
+        assert "OPENAI_API_KEY" in response.json()["detail"]
+
     def test_missing_api_key(self, client, monkeypatch):
         """Should return 500 if API key is not configured."""
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -489,6 +535,28 @@ def parse_sse_events(response_text: str) -> list[dict]:
 
 class TestInpaintEndpoint:
     """Tests for POST /api/images/inpaint (now uses SSE streaming)."""
+
+    @pytest.mark.parametrize("path", [
+        "/api/images/inpaint", "/api/ai/inpaint-stream", "/api/agentic/edit",
+    ])
+    def test_openai_provider_reaches_graph(self, client, monkeypatch, path):
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        received = []
+
+        async def mock_astream(state, **kwargs):
+            received.append(state)
+            yield ("values", {"current_result": VALID_BASE64_IMAGE,
+                              "refined_prompt": "Edit", "current_iteration": 1})
+
+        body = {"sourceImage": VALID_BASE64_IMAGE, "prompt": "Edit",
+                "imageProvider": "openai"}
+        if path != "/api/agentic/edit":
+            body["maskImage"] = VALID_BASE64_IMAGE
+        with patch("main.agentic_edit_graph") as graph:
+            graph.astream = mock_astream
+            response = client.post(path, json=body)
+        assert response.status_code == 200
+        assert received[0]["image_provider"] == "openai"
 
     def test_validation_missing_source_image(self, client):
         """Should return 422 if sourceImage is missing."""

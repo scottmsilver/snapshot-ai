@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from schemas import AI_MODELS, MAX_ITERATIONS, THINKING_BUDGETS
 from schemas.agentic import AIProgressEvent, ErrorInfo, IterationInfo, ReferencePoint, ShapeMetadata
 from services.gemini_client import get_gemini_client
+from services.openai_image_client import MissingOpenAIKeyError, edit_openai_image
 from services.image_compare_lpips import (
     LPIPSDetectionOptions,
     detect_edit_regions_lpips,
@@ -66,6 +67,7 @@ class GraphState(BaseModel):
 
     # Inputs
     source_image: str  # Clean original image (no annotations)
+    image_provider: Literal["gemini", "openai"] = "gemini"
     annotated_image: str | None = None  # Image with user annotations visible
     mask_image: str | None = None
     user_prompt: str
@@ -503,21 +505,30 @@ EDIT INSTRUCTION:
         generation_prompt = state.refined_prompt
 
     try:
-        client = get_gemini_client()
+        if state.image_provider == "openai":
+            emit_progress(AIProgressEvent(
+                step="calling_api", message="Editing image with OpenAI",
+                prompt=generation_prompt, iteration=iteration_info,
+            ))
+            image_bytes = await edit_openai_image(
+                prompt=generation_prompt,
+                source_image=(source.data, source.mime_type),
+                annotated_image=(annotated.data, annotated.mime_type) if annotated else None,
+                mask_image=(mask.data, mask.mime_type) if mask else None,
+            )
+        else:
+            client = get_gemini_client()
+            result = await client.generate_image(
+                prompt=generation_prompt,
+                source_image=(source.data, source.mime_type),
+                annotated_image=(annotated.data, annotated.mime_type) if annotated else None,
+                mask_image=(mask.data, mask.mime_type) if mask else None,
+                step="calling_api", iteration=iteration_info,
+            )
+            image_bytes = result.image_bytes
 
-        # This call automatically emits progress
-        # Send both clean and annotated images so the model can see user's visual guidance
-        result = await client.generate_image(
-            prompt=generation_prompt,
-            source_image=(source.data, source.mime_type),
-            annotated_image=(annotated.data, annotated.mime_type) if annotated else None,
-            mask_image=(mask.data, mask.mime_type) if mask else None,
-            step="calling_api",
-            iteration=iteration_info,
-        )
-
-        if result.image_bytes:
-            result_url = encode_data_url(result.image_bytes, "image/png")
+        if image_bytes:
+            result_url = encode_data_url(image_bytes, "image/png")
             logger.info("Generate: Success")
 
             emit_progress(
@@ -538,6 +549,8 @@ EDIT INSTRUCTION:
             raise ValueError("No image in response")
 
     except Exception as e:
+        if state.image_provider == "openai":
+            raise
         logger.error("Generate: Error - %s", e)
         emit_progress(
             AIProgressEvent(

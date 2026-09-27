@@ -4,6 +4,7 @@ uvicorn[standard]==0.34.0
 
 # Google AI SDK
 google-genai==1.56.0
+openai==3.19.2
 
 # LangGraph and LangChain
 langgraph==1.0.5

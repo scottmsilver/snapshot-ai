@@ -16,6 +16,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import sys
@@ -54,6 +55,9 @@ from schemas import (
 )
 from schemas.agentic import IterationInfo
 from schemas.config import AI_MODELS, THINKING_BUDGETS
+from schemas.config import OPENAI_IMAGE_MODEL
+from services.image_utils import encode_data_url
+from services.openai_image_client import MissingOpenAIKeyError, edit_openai_image
 from utils.ai_logging import extract_base64_data, extract_mime_type, log_contents_images, log_image_inputs
 from utils.session_images import SessionImageLog
 from utils.sse import format_complete_event, format_error_event, format_progress_event, format_sse_event
@@ -577,7 +581,6 @@ def extract_image_from_response(response) -> str | None:
 )
 async def generate_image(
     request: GenerateImageRequest,
-    api_key: GeminiApiKey,
 ) -> GenerateImageResponse:
     """
     Image generation/editing endpoint using Gemini.
@@ -585,10 +588,35 @@ async def generate_image(
     Matches the Express endpoint at POST /api/images/generate.
     Uses Gemini's imagen model for image generation/editing.
     """
+    if request.imageProvider == "openai":
+        try:
+            source_data = base64.b64decode(extract_base64_data(request.sourceImage))
+            source_mime = extract_mime_type(request.sourceImage)
+            mask = (
+                (base64.b64decode(extract_base64_data(request.maskImage)), extract_mime_type(request.maskImage))
+                if request.maskImage else None
+            )
+            image_bytes = await edit_openai_image(
+                prompt=request.prompt,
+                source_image=(source_data, source_mime),
+                mask_image=mask,
+            )
+            return GenerateImageResponse(
+                raw={"provider": "openai", "model": OPENAI_IMAGE_MODEL},
+                imageData=encode_data_url(image_bytes, "image/png"),
+            )
+        except MissingOpenAIKeyError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("OpenAI image generation failed: %s", exc)
+            raise HTTPException(status_code=502, detail=f"OpenAI image generation failed: {exc}") from exc
+
     from google import genai
     from google.genai import types
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=get_gemini_api_key())
 
     # Extract base64 data from data URL
     source_base64 = extract_base64_data(request.sourceImage)
@@ -710,6 +738,7 @@ async def inpaint(request: InpaintRequest, api_key: GeminiApiKey) -> StreamingRe
             # Initialize state with mask_image (required for inpaint)
             state = GraphState(
                 source_image=request.sourceImage,
+                image_provider=request.imageProvider,
                 mask_image=request.maskImage,  # This is required for inpaint
                 user_prompt=request.prompt,
                 max_iterations=max_iterations,
@@ -796,7 +825,6 @@ async def inpaint(request: InpaintRequest, api_key: GeminiApiKey) -> StreamingRe
 @app.post("/api/ai/generate-image")
 async def ai_generate_image(
     request: GenerateImageRequest,
-    api_key: GeminiApiKey,
 ) -> GenerateImageResponse:
     """
     Redirect to /api/images/generate for Express path compatibility.
@@ -804,7 +832,7 @@ async def ai_generate_image(
     Express uses /api/ai/generate-image, Python uses /api/images/generate.
     This redirect ensures both paths work.
     """
-    return await generate_image(request, api_key)
+    return await generate_image(request)
 
 
 @app.post("/api/ai/inpaint")
@@ -882,6 +910,7 @@ async def inpaint_stream(
             # Initialize state with mask_image (required for inpaint)
             state = GraphState(
                 source_image=request.sourceImage,
+                image_provider=request.imageProvider,
                 mask_image=request.maskImage,
                 user_prompt=request.prompt,
                 max_iterations=max_iterations,
@@ -997,6 +1026,7 @@ async def agentic_edit(request: AgenticEditRequest, api_key: GeminiApiKey) -> St
             # Initialize state
             state = GraphState(
                 source_image=request.sourceImage,
+                image_provider=request.imageProvider,
                 annotated_image=request.annotatedImage,  # Image with user annotations visible
                 mask_image=request.maskImage,
                 user_prompt=request.prompt,

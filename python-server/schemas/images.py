@@ -5,7 +5,7 @@ These schemas match the TypeScript interfaces in server/src/types/api.ts
 to ensure API compatibility between Express and Python backends.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,6 +25,7 @@ class GenerateImageRequest(BaseModel):
     """
 
     model: str = Field(..., min_length=1, description="The model to use")
+    imageProvider: Literal["gemini", "openai"] = "gemini"
     sourceImage: Base64ImageUrl = Field(
         ..., description="Source image as base64 data URL"
     )
@@ -64,6 +65,7 @@ class InpaintRequest(BaseModel):
     sourceImage: Base64ImageUrl = Field(
         ..., description="Source image as base64 data URL"
     )
+    imageProvider: Literal["gemini", "openai"] = "gemini"
     maskImage: Base64ImageUrl = Field(..., description="Mask image as base64 data URL")
     prompt: str = Field(..., min_length=1, description="Edit prompt")
     thinkingBudget: Optional[int] = Field(
