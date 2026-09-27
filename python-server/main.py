@@ -218,12 +218,6 @@ class CloudflareAccessMiddleware(BaseHTTPMiddleware):
         # Verify the secret header
         provided_secret = request.headers.get("X-Proxy-Secret", "")
 
-        # Debug: log all headers that start with x-
-        x_headers = {k: v for k, v in request.headers.items() if k.lower().startswith("x-")}
-        logger.info("X-* headers received: %s", x_headers)
-        logger.info("Looking for secret starting with: %s...", _cf_access_secret[:8] if _cf_access_secret else "None")
-        logger.info("Got secret starting with: %s...", provided_secret[:8] if provided_secret else "None")
-
         if provided_secret != _cf_access_secret:
             logger.warning(
                 "Blocked request without valid CF_ACCESS_SECRET: %s %s",
