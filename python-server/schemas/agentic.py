@@ -184,6 +184,7 @@ class AgenticEditRequest(BaseModel):
     """
 
     # Source image (base64 data URL) - the CLEAN original image to edit
+    imageProvider: Literal["gemini", "openai"] = "gemini"
     sourceImage: Base64ImageUrl = Field(..., description="Clean source image as base64 data URL (no annotations)")
 
     # Annotated image (optional) - image with user's annotations visible for AI reference

@@ -299,6 +299,35 @@ class TestGenerateNode:
     """Tests for the image generation node."""
 
     @pytest.mark.asyncio
+    async def test_openai_generation_uses_selected_provider(self, basic_state: GraphState):
+        basic_state.image_provider = "openai"
+        basic_state.refined_prompt = "Create a red button"
+        with patch("graphs.agentic_edit.edit_openai_image", new_callable=AsyncMock, create=True) as edit:
+            edit.return_value = b"generated png"
+            result = await generate_node(basic_state)
+        assert result["current_result"] == encode_data_url(b"generated png", "image/png")
+        assert edit.await_args.kwargs["source_image"][1] == "image/png"
+        assert result["current_iteration"] == 1
+
+    @pytest.mark.asyncio
+    async def test_openai_missing_key_propagates(self, basic_state: GraphState):
+        from services.openai_image_client import MissingOpenAIKeyError
+
+        basic_state.image_provider = "openai"
+        with patch("graphs.agentic_edit.edit_openai_image", new_callable=AsyncMock) as edit:
+            edit.side_effect = MissingOpenAIKeyError("OPENAI_API_KEY is not configured")
+            with pytest.raises(MissingOpenAIKeyError, match="OPENAI_API_KEY"):
+                await generate_node(basic_state)
+
+    @pytest.mark.asyncio
+    async def test_openai_api_failure_propagates(self, basic_state: GraphState):
+        basic_state.image_provider = "openai"
+        with patch("graphs.agentic_edit.edit_openai_image", new_callable=AsyncMock) as edit:
+            edit.side_effect = RuntimeError("OpenAI rate limit")
+            with pytest.raises(RuntimeError, match="OpenAI rate limit"):
+                await generate_node(basic_state)
+
+    @pytest.mark.asyncio
     async def test_generate_returns_image(self, basic_state: GraphState):
         """Test that generate node returns an image."""
         from services.gemini_client import GeminiImageResult
