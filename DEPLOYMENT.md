@@ -1,20 +1,69 @@
 # Deployment Guide
 
-Deploy ScreenMark to Fly.io with Cloudflare Access protection.
+ScreenMark runs its frontend on Fly.io and its production Python API on
+`sukkot` through Cloudflare Tunnel, with Cloudflare Access protection. The Fly.io
+API deployment remains available for manual rollback and stops when idle.
 
 ## Architecture
 
 ```
-User → Cloudflare (Google login) → Fly.io Frontend → Fly.io Backend (Python API)
+User → Cloudflare (Google login) → Fly.io Frontend
+                                  ↓
+                  api.oursilverfamily.com → Cloudflare Tunnel → sukkot:8001
 ```
 
 - **Frontend**: Static React app served by nginx
 - **Backend**: FastAPI with LangGraph for AI processing
 - **Auth**: Cloudflare Access (Google login, no code changes needed)
 
+## Production API on sukkot
+
+The API binds only to `127.0.0.1:8001`. The `screenmark-api` Cloudflare Tunnel
+routes `api.oursilverfamily.com` to that port. Both services are enabled as user
+systemd services; user lingering is enabled so they start at boot without login.
+
+Local service files and configuration:
+
+- `~/.config/systemd/user/screenmark-api.service`
+- `~/.config/systemd/user/cloudflared-screenmark-api.service`
+- `~/.config/screenmark/production.env` (private production credentials; do not commit)
+- `~/.cloudflared/config-screenmark-api.yml`
+- `~/.local/state/screenmark/sessions/` (private image session logs)
+
+The production environment carries the deployed API's provider keys,
+`CF_ACCESS_SECRET`, and `ALLOWED_ORIGINS`. The application validates the
+`X-Proxy-Secret` header supplied by the existing Cloudflare rule.
+
+```bash
+systemctl --user status screenmark-api cloudflared-screenmark-api
+curl --fail http://127.0.0.1:8001/health
+journalctl --user -u screenmark-api -u cloudflared-screenmark-api -n 100
+```
+
+After updating backend code or the private production environment, restart it:
+
+```bash
+systemctl --user restart screenmark-api
+```
+
+The service uses the checkout's `python-server/.venv` and reads code from the
+checkout, so backend edits affect the next restart. The production service
+occupies port 8001; use another loopback port for development.
+
+### Roll back the API to Fly.io
+
+In Cloudflare DNS, change the existing `api.oursilverfamily.com` CNAME target
+back to `screenmark-api.fly.dev`, keeping proxying enabled. The original DNS
+record is saved privately in `~/.config/screenmark/dns-before-tunnel.json`.
+The existing Access and header rules remain attached to the same hostname.
+Request `https://api.oursilverfamily.com/health` and verify the production app.
+Fly starts its stopped API machine on demand; rollback is manual.
+
+The rest of this guide describes deploying or refreshing the Fly fallback.
+
 ## Prerequisites
 
-1. [Fly.io account](https://fly.io) (free tier available)
+1. [Fly.io account](https://fly.io) (usage billing)
 2. [Cloudflare account](https://cloudflare.com) (free)
 3. Custom domain (optional but recommended for Cloudflare Access)
 4. Gemini API key from [Google AI Studio](https://aistudio.google.com/)
@@ -100,7 +149,7 @@ This prevents direct access to `*.fly.dev` URLs.
    - **Name**: Add CF Access Secret
    - **When**: Hostname equals `api.yourdomain.com`
    - **Then**: Set static header
-     - **Header name**: `X-Cf-Access-Secret`
+     - **Header name**: `X-Proxy-Secret`
      - **Value**: (the secret you generated in Step 1)
 
 ### 3e. Update Frontend API URL
@@ -138,7 +187,7 @@ fly deploy --build-arg VITE_APP_GIT_SHA="$(git rev-parse --short HEAD)"
 
 | Service | Free Tier | Typical Cost |
 |---------|-----------|--------------|
-| Fly.io | 3 small VMs | ~$3-5/month |
+| Fly.io | Usage billing | Frontend runtime, stopped-machine storage, traffic; API fallback stops when idle |
 | Cloudflare | 50 users | Free |
 | Gemini API | Varies | Pay per use |
 
